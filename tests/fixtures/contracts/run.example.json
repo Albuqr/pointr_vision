@@ -1,0 +1,24 @@
+{
+  "contract_version": "0.2.0",
+  "run_id": "c2b9e6f4-1d3a-4c8e-9f7b-5a0d2e4c6b81",
+  "session_id": "3f1c2a8e-5b7d-4e9a-8c21-6d4f0b9e7a13",
+  "mode": "live",
+  "input": {"kind": "camera", "ref": "1", "sha256": null},
+  "detector": {
+    "name": "rfdetr",
+    "variant": "nano",
+    "weights": "coco-pretrained",
+    "package_version": "0.0.0",
+    "threshold": 0.5
+  },
+  "tracker": {
+    "name": "bytetrack",
+    "package": "supervision",
+    "package_version": "0.0.0",
+    "params": {}
+  },
+  "runtime": {"python": "3.11.9", "platform": "Windows-11", "device": "cpu"},
+  "started_at": "2026-10-07T18:00:00Z",
+  "ended_at": "2026-10-07T18:01:00Z",
+  "counts": {"captured": 10, "processed": 8, "dropped": 2, "rec_dropped": 0}
+}
