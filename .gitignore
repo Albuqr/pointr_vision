@@ -1,0 +1,19 @@
+# Environments and tooling
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.jupyter_runtime/
+.idea/
+
+# Session data, recordings and the local DB: never committed (CLAUDE.md rule 9)
+sessions/
+*.mp4
+*.mov
+*.avi
+*.mkv
+pointr.db*
+
+# Local copy of the docs bundle
+pointr-docs.zip
