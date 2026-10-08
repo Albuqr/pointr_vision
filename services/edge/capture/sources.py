@@ -5,12 +5,11 @@ ended raises SourceEnded instead, so the end of a file is not reported as source
 """
 
 import time
-from datetime import UTC, datetime
 from pathlib import Path
 
 import cv2
 
-from services.edge.capture.types import Frame, FrameSource, SourceInfo
+from services.edge.capture.types import Frame, FrameSource, SourceEnded, SourceInfo, utc_now
 
 FILE_SUFFIXES = (".mp4", ".mov")
 STREAM_SCHEMES = ("http://", "https://", "rtsp://")
@@ -18,14 +17,6 @@ STREAM_SCHEMES = ("http://", "https://", "rtsp://")
 
 class SourceOpenError(Exception):
     """The source could not be opened. The message is the reason shown to the user."""
-
-
-class SourceEnded(Exception):
-    """A finite source (file) has no more frames. Not a failure."""
-
-
-def utc_now() -> str:
-    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _positive(value: float) -> float | None:
@@ -47,6 +38,7 @@ class _CvSource:
         raise NotImplementedError
 
     def open(self) -> SourceInfo:
+        self.close()  # reopening must not leak the previous capture
         cap = self._new_capture()
         if not cap.isOpened():
             cap.release()
@@ -63,6 +55,8 @@ class _CvSource:
         )
 
     def _grab(self) -> Frame | None:
+        if self._cap is None:
+            raise RuntimeError(f"{self.kind} {self.ref!r} read before open()")
         ok, image = self._cap.read()
         t_recv = time.monotonic()
         seq = self._seq

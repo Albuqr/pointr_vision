@@ -10,8 +10,14 @@ import time
 from collections import deque
 from collections.abc import Callable
 
-from services.edge.capture.sources import SourceEnded, utc_now
-from services.edge.capture.types import Frame, FrameSource, HealthEvent, SourceHealth
+from services.edge.capture.types import (
+    Frame,
+    FrameSource,
+    HealthEvent,
+    SourceEnded,
+    SourceHealth,
+    utc_now,
+)
 
 
 class Capture:
@@ -31,7 +37,7 @@ class Capture:
         self.captured = 0
         self.dropped = 0
         self.failed_reads = 0
-        self.fps: float | None = None  # capture rate over the last 30 frames
+        self.fps: float | None = None  # capture rate over the last 30 frames; None while failing
         self.t0: float | None = None  # run's t0 (D-011), set when the thread starts
         self.t0_wall: str | None = None
         self.error: Exception | None = None
@@ -43,7 +49,8 @@ class Capture:
     def start(self) -> None:
         self._thread.start()
 
-    def stop(self, timeout: float = 2.0) -> bool:
+    # longer than the slowest blocking read: a stream reopen (5 s) after a read timeout (2 s)
+    def stop(self, timeout: float = 8.0) -> bool:
         """Ask the thread to stop and join it. False if it is still running (e.g. stuck in
         a blocking read); the caller must then not close the source under it."""
         self._stop.set()
@@ -75,6 +82,8 @@ class Capture:
                     self.on_event(ev)
                 if frame is None:
                     self.failed_reads += 1
+                    self.fps = None
+                    self._times.clear()
                     self._stop.wait(self.fail_backoff)
                     continue
                 self.captured += 1

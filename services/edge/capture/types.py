@@ -1,6 +1,7 @@
-"""Capture layer types and Protocols (ARCHITECTURE.md section 4). No implementations."""
+"""Capture layer types and Protocols (ARCHITECTURE.md section 4). No source implementations."""
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Protocol, runtime_checkable
 
 import numpy as np
@@ -29,8 +30,17 @@ class SourceInfo:
 class HealthEvent:
     kind: str  # an event kind from DATA_CONTRACTS.md section 2, e.g. source_lost
     t_wall: str  # UTC ISO-8601
-    t_mono: float  # time.monotonic(); the session layer converts it to s since t0
+    t_mono: float | None  # time.monotonic(); None if the event precedes the run's t0 (D-014)
     detail: str | None = None
+
+
+class SourceEnded(Exception):
+    """Raised by FrameSource.read() when a finite source (a file) has no more frames (D-013)."""
+
+
+def utc_now() -> str:
+    """UTC ISO-8601 with milliseconds and a Z suffix, as DATA_CONTRACTS wall times."""
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 @runtime_checkable
@@ -40,7 +50,10 @@ class FrameSource(Protocol):
         ...
 
     def read(self) -> Frame | None:
-        """Next frame, or None when no frame was obtained this attempt."""
+        """Next frame, or None when no frame was obtained this attempt.
+
+        Raises SourceEnded when a finite source has ended, so the end of a file is not
+        mistaken for a lost source (D-013)."""
         ...
 
     def close(self) -> None: ...

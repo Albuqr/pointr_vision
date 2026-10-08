@@ -18,13 +18,14 @@ import numpy as np
 
 from services.edge.capture.capture import Capture
 from services.edge.capture.health import HealthConfig, HealthMonitor
-from services.edge.capture.sources import SourceOpenError, open_source, utc_now
-from services.edge.capture.types import HealthEvent
+from services.edge.capture.sources import SourceOpenError, open_source
+from services.edge.capture.types import HealthEvent, utc_now
 from services.edge.ui.preview import run_preview
 
 CAMERA_APIS = {"any": cv2.CAP_ANY, "dshow": cv2.CAP_DSHOW, "msmf": cv2.CAP_MSMF}
 EXIT_OPEN_FAILED = 2
 EXIT_CAPTURE_ERROR = 1
+EXIT_INTERRUPTED = 130
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -44,6 +45,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="OpenCV backend for webcam indices; try dshow if DroidCam is not found",
     )
     p.add_argument("--lost-reads", type=int, default=d.lost_reads)
+    p.add_argument("--lost-secs", type=float, default=d.lost_secs)
     p.add_argument("--frozen-diff", type=float, default=d.frozen_diff)
     p.add_argument("--frozen-secs", type=float, default=d.frozen_secs)
     p.add_argument("--dark-level", type=float, default=d.dark_level)
@@ -67,8 +69,17 @@ def run_headless(capture: Capture) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    try:
+        return run(args)
+    except KeyboardInterrupt:  # Ctrl+C before capture started (e.g. a slow stream open)
+        print_event(HealthEvent("interrupted", utc_now(), None, "Ctrl+C"), None)
+        return EXIT_INTERRUPTED
+
+
+def run(args: argparse.Namespace) -> int:
     config = HealthConfig(
         lost_reads=args.lost_reads,
+        lost_secs=args.lost_secs,
         frozen_diff=args.frozen_diff,
         frozen_secs=args.frozen_secs,
         dark_level=args.dark_level,
@@ -79,7 +90,8 @@ def main(argv: list[str] | None = None) -> int:
         info = source.open()
     except (SourceOpenError, cv2.error) as e:
         reason = str(e).strip()
-        print_event(HealthEvent("source_open_failed", utc_now(), time.monotonic(), reason), None)
+        # no run, so no t0: t_mono is null (D-014)
+        print_event(HealthEvent("source_open_failed", utc_now(), None, reason), None)
         print(f"error: cannot open source {args.source!r}: {reason}", file=sys.stderr)
         return EXIT_OPEN_FAILED
 
@@ -97,6 +109,7 @@ def main(argv: list[str] | None = None) -> int:
         print_event(ev, capture.t0)
 
     capture = Capture(source, monitor, on_event)
+    status = 0
     capture.start()
     try:
         if args.preview:
@@ -104,20 +117,23 @@ def main(argv: list[str] | None = None) -> int:
         else:
             run_headless(capture)
     except KeyboardInterrupt:
-        print("interrupted")
+        on_event(HealthEvent("interrupted", utc_now(), time.monotonic(), "Ctrl+C"))
+        status = EXIT_INTERRUPTED
+    except Exception as e:  # one shutdown path; the failure is an event, not a traceback
+        on_event(HealthEvent("error", utc_now(), time.monotonic(), f"main loop: {e!r}"))
+        status = EXIT_CAPTURE_ERROR
     finally:
-        stopped = capture.stop()
-        if stopped:
+        if capture.stop():
             source.close()
         else:
             print("warning: capture thread did not stop in time; source left open", file=sys.stderr)
-        if args.preview:
-            cv2.destroyAllWindows()
         print(
             f"t0_wall={capture.t0_wall} captured={capture.captured} dropped={capture.dropped} "
             f"failed_reads={capture.failed_reads} events={dict(events)}"
         )
-    return EXIT_CAPTURE_ERROR if capture.error else 0
+    if capture.error and not status:
+        status = EXIT_CAPTURE_ERROR
+    return status
 
 
 if __name__ == "__main__":

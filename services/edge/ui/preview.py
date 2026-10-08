@@ -38,13 +38,16 @@ def run_preview(capture: Capture, state: Callable[[], str]) -> None:
     The last image stays on screen while no frames arrive, so LOST is still visible."""
     image = np.zeros((360, 640, 3), np.uint8)
     cv2.namedWindow(WINDOW)
-    while not (capture.done.is_set() and capture.proc_queue.empty()):
-        try:
-            image = capture.proc_queue.get(timeout=0.03).image
-        except queue.Empty:
-            pass
-        cv2.imshow(WINDOW, draw_hud(image, state(), capture.fps, capture.dropped))
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            break
-        if cv2.getWindowProperty(WINDOW, cv2.WND_PROP_VISIBLE) < 1:
-            break
+    try:
+        while not (capture.done.is_set() and capture.proc_queue.empty()):
+            try:
+                image = capture.proc_queue.get(timeout=0.03).image
+            except queue.Empty:
+                pass
+            cv2.imshow(WINDOW, draw_hud(image, state(), capture.fps, capture.dropped))
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
+            if cv2.getWindowProperty(WINDOW, cv2.WND_PROP_VISIBLE) < 1:
+                break
+    finally:
+        cv2.destroyAllWindows()

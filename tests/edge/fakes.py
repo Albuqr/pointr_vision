@@ -4,8 +4,7 @@ import time
 
 import numpy as np
 
-from services.edge.capture.sources import SourceEnded
-from services.edge.capture.types import Frame, SourceInfo
+from services.edge.capture.types import Frame, SourceEnded, SourceInfo
 
 
 def image(i: int) -> np.ndarray:

@@ -42,7 +42,7 @@ def write_clip(path: Path, frames: list[np.ndarray]) -> Path:
 
 
 def make_clips(out_dir: Path) -> dict[str, Path]:
-    """Write moving.mp4, black.mp4 and frozen.mp4 into out_dir; return their paths."""
+    """Write moving.mp4, black.mp4, frozen.mp4 and moving.mov into out_dir."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     black = np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)
@@ -51,6 +51,7 @@ def make_clips(out_dir: Path) -> dict[str, Path]:
         "moving": write_clip(out_dir / "moving.mp4", [scene(i) for i in range(N_FRAMES)]),
         "black": write_clip(out_dir / "black.mp4", [black] * N_FRAMES),
         "frozen": write_clip(out_dir / "frozen.mp4", [still] * N_FRAMES),
+        "moving_mov": write_clip(out_dir / "moving.mov", [scene(i) for i in range(N_FRAMES)]),
     }
 
 

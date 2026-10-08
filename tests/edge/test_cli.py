@@ -4,9 +4,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pytest
 
+from services.edge import main as cli
 from services.edge.main import EXIT_OPEN_FAILED
 from services.edge.ui.preview import BANNERS, draw_hud
 
@@ -62,3 +64,22 @@ def test_draw_hud_every_state(state):
     assert out.shape == image.shape
     assert (image == 90).all(), "input image modified"
     assert (out[:34] != 90).any(), "no banner drawn"
+    assert BANNERS[state][0].startswith(state)
+
+
+def test_banner_colours_differ():
+    image = np.full((360, 640, 3), 90, np.uint8)
+    colours = {tuple(draw_hud(image, s, None, 0)[5, 5]) for s in BANNERS}
+    assert len(colours) == len(BANNERS)
+
+
+def test_cv2_error_on_open_exits_cleanly(monkeypatch, capsys):
+    class Broken:
+        def open(self):
+            raise cv2.error("backend exploded")
+
+    monkeypatch.setattr(cli, "open_source", lambda ref, api: Broken())
+    assert cli.main(["--source", "0"]) == EXIT_OPEN_FAILED
+    out, err = capsys.readouterr()
+    assert "] - source_open_failed: " in out  # no t0 before capture: t_mono is null
+    assert "backend exploded" in out and "backend exploded" in err

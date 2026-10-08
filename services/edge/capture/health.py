@@ -11,8 +11,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from services.edge.capture.sources import utc_now
-from services.edge.capture.types import Frame, HealthEvent
+from services.edge.capture.types import Frame, HealthEvent, utc_now
 
 OK, LOST, FROZEN, DARK = "OK", "LOST", "FROZEN", "DARK"
 
@@ -21,7 +20,8 @@ OK, LOST, FROZEN, DARK = "OK", "LOST", "FROZEN", "DARK"
 class HealthConfig:
     """Initial values, not yet tuned on real footage (D-013)."""
 
-    lost_reads: int = 30  # consecutive failed reads before source_lost
+    lost_reads: int = 30  # consecutive failed reads before source_lost, or
+    lost_secs: float = 2.0  # failing for this long, whichever comes first (D-014)
     frozen_diff: float = 0.5  # mean abs diff of consecutive frames (0-255) below this = frozen
     frozen_secs: float = 2.0  # frozen for this long before frozen_frames
     dark_level: float = 20.0  # mean brightness (0-255) below this = dark
@@ -33,7 +33,8 @@ def _mean(image: np.ndarray) -> float:
 
 
 class HealthMonitor:
-    """Implements SourceHealth. Timing uses frame.t_recv; clock() only stamps failed reads."""
+    """Implements SourceHealth. Frame timing uses frame.t_recv; failed reads have no frame,
+    so they are timed with clock() (time.monotonic, the same clock)."""
 
     def __init__(
         self, config: HealthConfig | None = None, clock: Callable[[], float] = time.monotonic
@@ -41,6 +42,7 @@ class HealthMonitor:
         self.config = config or HealthConfig()
         self._clock = clock
         self._fails = 0
+        self._fail_since: float | None = None
         self._lost = False
         self._prev: Frame | None = None
         self._dark_since: float | None = None
@@ -60,11 +62,16 @@ class HealthMonitor:
     def assess(self, frame: Frame | None) -> list[HealthEvent]:
         cfg = self.config
         if frame is None:
+            now = self._clock()
             self._fails += 1
-            if self._fails == cfg.lost_reads:
+            if self._fail_since is None:
+                self._fail_since = now
+            failing = now - self._fail_since
+            # time bound too: a blocking stream read can take seconds per attempt (D-014)
+            if not self._lost and (self._fails >= cfg.lost_reads or failing >= cfg.lost_secs):
                 self._lost = True
-                detail = f"{self._fails} consecutive failed reads"
-                return [HealthEvent("source_lost", utc_now(), self._clock(), detail)]
+                detail = f"{self._fails} consecutive failed reads over {failing:.1f} s"
+                return [HealthEvent("source_lost", utc_now(), now, detail)]
             return []
 
         events = []
@@ -74,6 +81,7 @@ class HealthMonitor:
             detail = f"after {self._fails} failed reads"
             events.append(HealthEvent("source_recovered", frame.t_wall, frame.t_recv, detail))
         self._fails = 0
+        self._fail_since = None
 
         t = frame.t_recv
         brightness = _mean(frame.image)

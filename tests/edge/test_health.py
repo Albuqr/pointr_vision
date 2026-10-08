@@ -7,8 +7,8 @@ from fakes import image
 
 from fixtures.make_clips import FPS
 from services.edge.capture.health import DARK, FROZEN, LOST, OK, HealthConfig, HealthMonitor
-from services.edge.capture.sources import FileSource, SourceEnded
-from services.edge.capture.types import Frame
+from services.edge.capture.sources import FileSource
+from services.edge.capture.types import Frame, SourceEnded
 
 # The fixture clips last 2 s (30 frames at 15 fps), so the episodes must be shorter.
 SHORT = HealthConfig(frozen_secs=1.0, dark_secs=1.0)
@@ -92,3 +92,63 @@ def test_dark_then_light_returns_to_ok(clips):
     light = [frame(i, t + (i + 1) / FPS) for i in range(3)]
     assert assess_all(monitor, light) == []
     assert monitor.state == OK
+
+
+class Clock:
+    """Settable clock for failed reads."""
+
+    def __init__(self, t: float = 0.0):
+        self.t = t
+
+    def __call__(self) -> float:
+        return self.t
+
+
+def test_lost_after_lost_secs_with_few_slow_reads():
+    """A blocking stream read can take seconds: lost must not wait for 30 reads (D-014)."""
+    clock = Clock(10.0)
+    monitor = HealthMonitor(HealthConfig(lost_reads=30, lost_secs=2.0), clock=clock)
+    assert monitor.assess(None) == []  # failing since 10.0
+    clock.t = 11.9
+    assert monitor.assess(None) == []
+    clock.t = 12.0
+    [lost] = monitor.assess(None)
+    assert (lost.kind, lost.t_mono) == ("source_lost", 12.0)
+    clock.t = 20.0
+    assert monitor.assess(None) == []  # still one event per episode
+
+
+def test_frozen_clears_and_fires_again(clips):
+    monitor = HealthMonitor(SHORT)
+    frozen = fixture_frames(clips["frozen"])
+    assert [e.kind for e in assess_all(monitor, frozen)] == ["frozen_frames"]
+    t = frozen[-1].t_recv
+    moving = [frame(i, t + (i + 1) / FPS) for i in range(3)]
+    assert assess_all(monitor, moving) == []
+    assert monitor.state == OK
+    t = moving[-1].t_recv
+    again = [dataclasses.replace(f, t_recv=t + f.t_recv + 1 / FPS) for f in frozen]
+    assert [e.kind for e in assess_all(monitor, again)] == ["frozen_frames"]  # a new episode
+
+
+def test_no_frozen_comparison_across_a_gap():
+    """The first frame after a gap is not compared with the last one before it."""
+    clock = Clock(1.0)
+    monitor = HealthMonitor(HealthConfig(lost_reads=30, frozen_secs=1.0), clock=clock)
+    img = image(0)
+    assert monitor.assess(frame(0, 1.0, img)) == []
+    for _ in range(30):
+        monitor.assess(None)
+    assert monitor.state == LOST
+    events = monitor.assess(frame(31, 5.0, img.copy()))  # same image, 4 s later
+    assert [e.kind for e in events] == ["source_recovered"]
+    assert monitor.state == OK
+
+
+def test_lost_has_priority_over_dark(clips):
+    monitor = HealthMonitor(SHORT, clock=Clock(100.0))
+    assess_all(monitor, fixture_frames(clips["black"]))
+    assert monitor.state == DARK
+    for _ in range(SHORT.lost_reads):
+        monitor.assess(None)
+    assert monitor.state == LOST

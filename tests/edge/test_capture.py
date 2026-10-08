@@ -36,7 +36,9 @@ def test_slow_consumer_accounting():
     n = 150
     capture, _ = run_capture(FakeSource((image(i) for i in range(n)), delay=0.001))
     consumed, sizes = [], []
+    deadline = time.monotonic() + 30
     while not (capture.done.is_set() and capture.proc_queue.empty()):
+        assert time.monotonic() < deadline, "capture never finished"
         sizes.append(capture.proc_queue.qsize())
         try:
             consumed.append(capture.proc_queue.get(timeout=0.1).seq)
@@ -76,7 +78,36 @@ def test_source_exception_becomes_error_event():
 
 def test_stop_ends_an_endless_source():
     capture, _ = run_capture(FakeSource(image(i) for i in itertools.count()))  # never ends
-    time.sleep(0.05)
+    deadline = time.monotonic() + 5
+    while capture.captured == 0:
+        assert time.monotonic() < deadline, "capture thread never read"
+        time.sleep(0.01)
     assert capture.stop(timeout=2)
     assert capture.done.is_set()
     assert capture.captured > 0
+
+
+class RacingQueue(queue.Queue):
+    """Full on the first put; the consumer takes the frame before capture's get_nowait."""
+
+    def __init__(self):
+        super().__init__(maxsize=1)
+        self.first = True
+
+    def put_nowait(self, item):
+        if self.first:
+            self.first = False
+            raise queue.Full
+        super().put_nowait(item)
+
+    def get_nowait(self):
+        raise queue.Empty
+
+
+def test_put_race_is_not_counted_as_a_drop():
+    capture = Capture(FakeSource([]), HealthMonitor(), lambda ev: None)
+    capture.proc_queue = RacingQueue()
+    frame = FakeSource([image(0)]).read()
+    capture._put(frame)
+    assert capture.dropped == 0
+    assert capture.proc_queue.get(timeout=1) is frame
