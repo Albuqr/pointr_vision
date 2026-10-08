@@ -1,0 +1,64 @@
+"""A5: invalid source ref -> clear message, non-zero exit, no traceback. CLI happy path."""
+
+import subprocess
+import sys
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+from services.edge.main import EXIT_OPEN_FAILED
+from services.edge.ui.preview import BANNERS, draw_hud
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def run_cli(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, "-m", "services.edge.main", *args],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
+@pytest.mark.parametrize(
+    "name,reason",
+    [
+        ("missing.mp4", "file not found"),
+        ("notes.txt", "unsupported file type"),
+        ("corrupt.mp4", "did not open"),
+        ("not-a-source", "not a camera index"),
+    ],
+)
+def test_bad_ref_exits_cleanly(tmp_path, name, reason):
+    (tmp_path / "notes.txt").write_text("x")
+    (tmp_path / "corrupt.mp4").write_bytes(b"this is not a video")
+    ref = name if name == "not-a-source" else str(tmp_path / name)
+    result = run_cli("--source", ref)
+    assert result.returncode == EXIT_OPEN_FAILED != 0
+    assert "Traceback" not in result.stdout + result.stderr
+    assert "source_open_failed" in result.stdout
+    assert reason in result.stdout
+    assert f"error: cannot open source {ref!r}: " in result.stderr
+    assert reason in result.stderr
+
+
+def test_file_runs_to_end(clips):
+    result = run_cli("--source", str(clips["moving"]), "--link", "file")
+    assert result.returncode == 0, result.stderr
+    assert "Traceback" not in result.stderr
+    assert "link='file'" in result.stdout
+    assert "captured=30 " in result.stdout
+    assert "failed_reads=0 " in result.stdout
+    assert "events={}" in result.stdout
+
+
+@pytest.mark.parametrize("state", list(BANNERS))
+def test_draw_hud_every_state(state):
+    image = np.full((360, 640, 3), 90, np.uint8)
+    out = draw_hud(image, state, 29.97, 3)
+    assert out.shape == image.shape
+    assert (image == 90).all(), "input image modified"
+    assert (out[:34] != 90).any(), "no banner drawn"
