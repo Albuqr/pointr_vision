@@ -382,3 +382,36 @@ failure (event, null `t_mono`, exit 1, source never opened), the delivered-size 
 benchmark stopping after its seconds, and the label pixels. A3 now has one person leaving
 while the other must keep their ID, and that test fails under the position mutation.
 **Status.** Accepted.
+
+## D-019 · 2026-10-08 · Phase 02 CPU baseline
+**Context.** PHASE_02 A7 asks for a processing baseline, and Q-02 (the numeric RNF02 target)
+waits for it. The developer ran the benchmark matrix on the dev notebook: Dell Latitude 3410,
+i7-10510U, 16 GB, Intel UHD (no CUDA), Windows 11 Pro, AC power, "Best performance". The phone
+was a Samsung S22 through the DroidCam client, one active source. Software: torch 2.14.1+cpu
+with 4 threads, rfdetr 1.11.2 Nano, trackers 2.6.1. Each run was `--benchmark 120`, headless,
+with frames delivered at 1280x720 on both links. In every run `captured = processed +
+dropped`, with 0 unprocessed and 0 failed reads.
+**Measurements.**
+
+| Run | Link | det-size | Proc FPS | App delay p50 / p95 / max (ms) | Dropped (% of captured) |
+|---|---|---|---|---|---|
+| M1 (A7) | USB | 384 | 1.89 | 547 / 641 / 766 | 93.7% |
+| M2 | USB | 320 | 2.42 | 437 / 484 / 625 | 91.9% |
+| M3 | Wi-Fi | 384 | 1.78 | 578 / 677 / 938 | 94.0% |
+| M4 | Wi-Fi | 320 | 2.44 | 422 / 500 / 547 | 91.8% |
+
+**Decision.** Record this as the phase 02 CPU baseline; it is the input to Q-02, which is not
+decided here. Conclusion from the runs:
+- The link (USB vs Wi-Fi) makes no measurable difference.
+- The detector on the CPU is the whole bottleneck. det-size 320 gives +28% processing FPS
+  over 384.
+- The pipeline is healthy: app delay stays bounded (p95 < 0.7 s) while about 94% of frames
+  are dropped, as the drop-oldest design intends (D-013, D-017).
+- About 4x is needed for ~10 fps. That needs a different runtime or model, not tuning of this
+  pipeline.
+**Consequences.** Next is phase 02b, a detector performance spike: RF-DETR Nano via
+OpenVINO/ONNX against YOLOX-Nano/Tiny on a recorded clip, plus ID survival through short
+(<1 s) exits at each speed. Those results also feed Q-02. Adding an accelerator or another
+model needs its own approval (phase 02 rule). At ~2 fps, ByteTrack's 1.0 s lost-track buffer
+is about two processed frames, so IDs do not survive exits or occlusions (A6; BACKLOG).
+**Status.** Accepted (measurement). Q-02 stays open.
