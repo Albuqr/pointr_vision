@@ -1,6 +1,11 @@
 # Phase 01 report
-Date: 2026-10-08 (automated checks and reviews). Manual sign-off: _pending_
-Hardware: _to fill: notebook model, CPU/GPU, phone model, connection (USB/Wi-Fi), camera app + version (DroidCam phone app and PC client; IP Webcam if used)_
+Date: 2026-10-08 (automated checks, reviews and manual tests). Manual sign-off: 2026-10-08, João
+Hardware: Dell Latitude 3410, Intel Core i7-10510U, 16 GB RAM, Intel UHD Graphics (no CUDA),
+Windows 11 Pro. Phone: Samsung S22 (SM-S901E). Links: built-in webcam, DroidCam over Wi-Fi,
+DroidCam over USB. Camera app: DroidCam phone app + DroidCam Client (OBS-style version, free
+tier: a "using droidcam.app" watermark is burned into the image). The client's virtual camera
+has no menu button; it is enabled with a user-configured hotkey and does not survive a
+restart. IP Webcam not used.
 Package versions (working repo `.venv`): Python 3.11.9, numpy 2.4.6, opencv-python 5.0.0.93
 (`cv2.__version__` 5.0.0), jsonschema 4.26.0, pytest 9.1.1, ruff 0.16.10, setuptools 65.5.0
 (build only). The CLI prints the Python/OpenCV/numpy versions at startup.
@@ -15,7 +20,7 @@ Package versions (working repo `.venv`): Python 3.11.9, numpy 2.4.6, opencv-pyth
 | A5 | Invalid ref → clear message, non-zero exit, no traceback | `tests/edge/test_cli.py::test_bad_ref_exits_cleanly`, `::test_cv2_error_on_open_exits_cleanly` | Pass |
 | A6 | Laptop webcam opens and previews | manual | Pass |
 | A7 | Phone over Wi-Fi (DroidCam) opens and previews | manual | Pass (attempt 2) |
-| A8 | Wi-Fi off / cable unplugged → LOST or FROZEN + event; back → recovers or exits cleanly (Wi-Fi and USB) | manual | _pending_ |
+| A8 | Wi-Fi off / cable unplugged → LOST or FROZEN + event; back → recovers or exits cleanly (Wi-Fi and USB) | manual | Pass (Wi-Fi and USB) |
 | A9 | Covering the lens shows DARK | manual | Pass |
 | A9b | Still, empty scene for 60 s over the phone does not show FROZEN | manual | Pass |
 
@@ -50,7 +55,8 @@ preview window (or Ctrl+C in the terminal) to stop. Copy the console output into
 **Which webcam index?** The laptop webcam is usually `0` and DroidCam usually `1`. If DroidCam
 does not open on `1`, try `2`. If it still does not open, add `--camera-api dshow` (DroidCam's
 virtual webcam may be visible only to DirectShow); use the same flag in every DroidCam
-command below.
+command below. (The manual runs showed `dshow` fails by index on opencv-python 5.0; MSMF
+worked. See Findings.)
 
 **DroidCam links.** On Wi-Fi, the phone and the notebook are on the same network, and the
 DroidCam PC client is connected over Wi-Fi with the phone's IP. On USB, the cable is plugged
@@ -74,11 +80,12 @@ it here; it then goes into DECISIONS.md as the tuned value (D-013 holds the init
 | Test | Link | Result | State seen (A8) | Notes |
 |---|---|---|---|---|
 | A6 | builtin | PASS | n/a | index 0, 640x480 (OpenCV default, not requested), banner OK, ~30 fps, 1886 captured / 19 dropped (~1%) in ~63 s, 0 failed reads, no events, clean exit on q. HUD text overlap noted (BACKLOG) |
-| A7 (attempt 1) | Wi-Fi | not a pass | n/a | index 1, MSMF, 640x480, no live DroidCam feed: identical frames (diff 0.00), frozen_frames at +2.16 s with banner, 0 failed reads, clean exit. Confirms FROZEN on a dead virtual device |
+| A7 (attempt 1) | Wi-Fi | not a pass | n/a | index 1, MSMF, 640x480, virtual camera not yet enabled: solid green, identical frames (diff 0.00), frozen_frames at +2.16 s with banner, 0 failed reads, clean exit. Confirms FROZEN on a dead virtual device |
 | A7 | Wi-Fi | PASS | n/a | phone image over Wi-Fi through the DroidCam virtual webcam, banner OK, capture 29.5 fps, orientation correct. Letterboxed: the 16:9 phone video is fitted into OpenCV's default 640x480 (4:3), so the real image is about 640x360 with black bars, roughly a quarter of the frame wasted (BACKLOG: --width/--height) |
-| A8 | Wi-Fi | PASS | FROZEN, then DARK (no LOST) | Phone Wi-Fi off at ~+8 s: frozen_frames at +10.1 s (diff 0.00), then dark_frames at +16.1 s (brightness 0.0) as the DroidCam client switched to black. No LOST: the virtual webcam keeps delivering frames (0 failed reads). Recovery: _to fill (yes / exited before reconnect)_. Clean exit |
-| A8 | USB | | | |
-| A8 | IP Webcam (optional) | | | |
+| A8 | Wi-Fi | PASS | FROZEN, then DARK (no LOST) | Phone Wi-Fi off at ~+8 s: frozen_frames at +10.1 s (diff 0.00), then dark_frames at +16.1 s (brightness 0.0) as the DroidCam client switched to black. No LOST: the virtual webcam keeps delivering frames (0 failed reads). Recovery: yes, banner back to OK after Wi-Fi came back. 1057 captured / 8 dropped. Clean exit |
+| A8 | USB | PASS | FROZEN, then DARK (no LOST) | USB chosen in the client's source properties (Dispositivo, Atualizar Lista de Dispositivos), Wi-Fi source hidden. Cable pulled: frozen_frames at +19.75 s (diff 0.00), dark_frames at +20.83 s (brightness 0.0), about 1 s from frozen to dark vs about 6 s on Wi-Fi. No LOST, 0 failed reads. Recovery: yes, banner back to OK after replug. 2480 captured / 17 dropped. The client shows 60 fps from the phone over USB; Pointr receives 30 at the 640x480 default |
+| A8 | IP Webcam (optional) | not run | n/a | `StreamSource` not exercised on real hardware; no stream loss time measured |
+| A5 (live check) | Wi-Fi | PASS | n/a | `--camera-api dshow` gives `source_open_failed` with a clean message and no traceback. DSHOW cannot open DroidCam by index on opencv-python 5.0 (BACKLOG); MSMF (`any`) is the working backend |
 | A9 | | PASS | n/a | Lens covered by finger: dark_frames at +16.48 s (brightness 7.4 < 20), banner DARK, returned to OK on uncover. Run 33 s, 986 captured, 14 dropped, 0 failed reads. No end event logged (see BACKLOG item from A9b) |
 | A9b | Wi-Fi | PASS | n/a | Still desk scene, phone on Wi-Fi, 09:40:30-09:41:30 local (+208 to +268 s): no frozen_frames, banner OK. frozen_diff 0.5 holds on real footage. Run: 405 s, 12166 captured, 116 dropped (~1%), 0 failed reads. Unplanned events earlier in the same run: dark (brightness 11) at +45.6 s; frozen (diff 0.00) at +110.5 s; dark (brightness 0.0) at +116.5 s. The diff 0.00 + brightness 0.0 pair matches the DroidCam feed going black (cause: not observed). Banner returned to OK, but no end event exists for DARK/FROZEN (BACKLOG) |
 
@@ -91,10 +98,39 @@ console summary line during the manual runs:
 | builtin | 640x480 (OpenCV default, not requested; BACKLOG: --width/--height) | ~30 | 19 of 1886 captured (~1%), ~63 s, preview on | A6 run; 0 failed reads |
 | DroidCam Wi-Fi | 640x480 opened (OpenCV default); about 640x360 of real image, letterboxed | 29.5 | | A7 run |
 | DroidCam Wi-Fi | 640x480 opened, letterboxed | | 116 of 12166 captured (~1%), 405 s, preview on | A9b run; 0 failed reads |
-| DroidCam USB | | | | |
+| DroidCam Wi-Fi | 640x480 opened, letterboxed | | 8 of 1057 captured | A8 Wi-Fi run; 0 failed reads |
+| DroidCam USB | 640x480 opened (OpenCV default) | ~30 (client shows 60 from the phone) | 17 of 2480 captured | A8 USB run; 0 failed reads |
 
 There is no perception yet (phase 02), so the only consumer is the headless loop or the
 preview. In the A6 preview run, the preview loop dropped 19 of 1886 frames (~1%).
+
+**Thresholds.** No threshold was changed in any manual run. The D-013 starting values held
+on real footage: `dark_level=20` caught a covered lens (A9, brightness 7.4), and
+`frozen_diff=0.5` did not fire on a still desk scene for 60 s (A9b). No tuning, so no new
+DECISIONS entry.
+
+## Findings from manual testing
+- **DroidCam never produces LOST.** When the phone drops (Wi-Fi off or cable pulled), the
+  client's virtual webcam keeps delivering frames: first a frozen copy (diff 0.00, so
+  `frozen_frames`), then black (brightness 0.0, so `dark_frames`). The gap is about 1 s on
+  USB and about 6 s on Wi-Fi. 0 failed reads in every run. The same signature appeared
+  unprompted in the A9b run (cause not observed). A8 passes on FROZEN, as D-010 allows.
+- **Resolution.** Every source opened at OpenCV's default 640x480; none was requested. On
+  DroidCam the 16:9 phone image is letterboxed to about 640x360 inside 4:3. Over USB the
+  client shows 60 fps from the phone but Pointr receives 30 at this default.
+- **Backend.** MSMF (`--camera-api any`) opens DroidCam by index. `--camera-api dshow` fails
+  on opencv-python 5.0 ("backend ... can't be used to capture by index"); the CLI reports it
+  cleanly as `source_open_failed`.
+- **DroidCam client setup.** The virtual camera is off until its hotkey is pressed and is off
+  again after a restart; with it off, OpenCV opens index 1 and reads solid green frames
+  (FROZEN). The client can stack Wi-Fi and USB sources; for the USB test the Wi-Fi source
+  was hidden so a drop on one could not be masked by the other.
+- **HUD.** The text is drawn twice, overlapping (visible around "dropped N").
+- **No end event for DARK/FROZEN.** The banner returns to OK silently; only LOST has
+  `source_recovered`.
+- Drops stayed around 1% of captured frames with the preview on in every run.
+
+All findings outside phase 01 scope are in `docs/BACKLOG.md`.
 
 ## Reviewer outcomes
 | Reviewer | Result | Findings fixed |
@@ -113,8 +149,11 @@ Both MAJOR fixes were re-reviewed by the same reviewer: PASS.
 - D-014: gate fixes. `source_lost` is time-bounded (`lost_secs`), `t_mono` is null before t0, the shutdown path, `SourceEnded` in `types.py`.
 
 ## Known limitations carried forward
-- Thresholds are initial values, not tuned on real footage (D-013). A9b and A8 give the first real data.
-- No stream loss time is measured; D-014 states the mechanism only.
+- Thresholds are the D-013 starting values. They held on real footage (A9, A9b), but were
+  measured with letterboxed 640x480 frames whose black bars count in the means; re-check
+  once a resolution is requested.
+- No stream loss time is measured (IP Webcam not run); D-014 states the mechanism only.
 - The notebook cannot detect USB vs Wi-Fi; `--link` is declared by the user and not checked against `kind` (BACKLOG).
 - Nothing is persisted. Events, resolution and versions print to the console. `session.json` (with `source.link`, t0's wall anchor and thresholds) is phase 03 (BACKLOG).
-- The DroidCam backend (`--camera-api any` vs `dshow`) is not verified on this hardware yet.
+- `--camera-api dshow` does not work on opencv-python 5.0 (BACKLOG); MSMF is the verified backend.
+- DroidCam drops show as FROZEN then DARK, never LOST, and DARK/FROZEN have no end event (BACKLOG).
