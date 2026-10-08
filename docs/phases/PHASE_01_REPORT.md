@@ -14,7 +14,7 @@ Package versions (working repo `.venv`): Python 3.11.9, numpy 2.4.6, opencv-pyth
 | A4 | Source stops → `source_lost`; resumes → `source_recovered` | `tests/edge/test_health.py::test_lost_then_recovered`, `::test_lost_after_lost_secs_with_few_slow_reads`, `::test_lost_secs_counts_from_the_last_good_frame`, `tests/edge/test_capture.py::test_fake_source_lost_and_recovered` | Pass |
 | A5 | Invalid ref → clear message, non-zero exit, no traceback | `tests/edge/test_cli.py::test_bad_ref_exits_cleanly`, `::test_cv2_error_on_open_exits_cleanly` | Pass |
 | A6 | Laptop webcam opens and previews | manual | Pass |
-| A7 | Phone over Wi-Fi (DroidCam) opens and previews | manual | _pending_ |
+| A7 | Phone over Wi-Fi (DroidCam) opens and previews | manual | Pass (attempt 2) |
 | A8 | Wi-Fi off / cable unplugged → LOST or FROZEN + event; back → recovers or exits cleanly (Wi-Fi and USB) | manual | _pending_ |
 | A9 | Covering the lens shows DARK | manual | _pending_ |
 | A9b | Still, empty scene for 60 s over the phone does not show FROZEN | manual | _pending_ |
@@ -75,7 +75,7 @@ it here; it then goes into DECISIONS.md as the tuned value (D-013 holds the init
 |---|---|---|---|---|
 | A6 | builtin | PASS | n/a | index 0, 640x480 (OpenCV default, not requested), banner OK, ~30 fps, 1886 captured / 19 dropped (~1%) in ~63 s, 0 failed reads, no events, clean exit on q. HUD text overlap noted (BACKLOG) |
 | A7 (attempt 1) | Wi-Fi | not a pass | n/a | index 1, MSMF, 640x480, no live DroidCam feed: identical frames (diff 0.00), frozen_frames at +2.16 s with banner, 0 failed reads, clean exit. Confirms FROZEN on a dead virtual device |
-| A7 | Wi-Fi | | | |
+| A7 | Wi-Fi | PASS | n/a | phone image over Wi-Fi through the DroidCam virtual webcam, banner OK, capture 29.5 fps, orientation correct. Letterboxed: the 16:9 phone video is fitted into OpenCV's default 640x480 (4:3), so the real image is about 640x360 with black bars, roughly a quarter of the frame wasted (BACKLOG: --width/--height) |
 | A8 | Wi-Fi | | | |
 | A8 | USB | | | |
 | A8 | IP Webcam (optional) | | | |
@@ -89,7 +89,7 @@ console summary line during the manual runs:
 | Link | Resolution / reported fps (from `source:` line) | Capture fps (HUD) | dropped (summary) | Notes |
 |---|---|---|---|---|
 | builtin | 640x480 (OpenCV default, not requested; BACKLOG: --width/--height) | ~30 | 19 of 1886 captured (~1%), ~63 s, preview on | A6 run; 0 failed reads |
-| DroidCam Wi-Fi | | | | |
+| DroidCam Wi-Fi | 640x480 opened (OpenCV default); about 640x360 of real image, letterboxed | 29.5 | | A7 run |
 | DroidCam USB | | | | |
 
 There is no perception yet (phase 02), so the only consumer is the headless loop or the
