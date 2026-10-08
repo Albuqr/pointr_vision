@@ -1,6 +1,6 @@
 # Phases
 
-**Current phase: 00**
+**Current phase: 01**
 
 Each phase adds one layer behind an interface and ends with a gate (`GATES.md`). Phases
 00-05 are the first delivery from scope v2: the live pipeline working before the first
