@@ -1,6 +1,10 @@
 # Phase 00 report
-Date: 2026-10-07 (automated checks and reviews). Manual sign-off: _to be filled by the developer_
-Hardware: _to be filled by the developer_ (phase 00 has no hardware-dependent test)
+Date: 2026-10-07 (automated checks and reviews). Manual sign-off: João Albuquerque
+Hardware: _Latitude 3410
+Intel(R) Core(TM) i7-10510U CPU @ 1.80GHz
+16
+Intel(R) UHD Graphics
+Microsoft Windows 11 Pro_ (phase 00 has no hardware-dependent test)
 Package versions (from the clean-clone venv): Python 3.11.9, numpy 2.4.6, opencv-python
 5.0.0.93, jsonschema 4.26.0, pytest 9.1.1, ruff 0.16.10, setuptools 65.5.0 (build only)
 
@@ -31,9 +35,9 @@ python -m venv .venv
 ```
 
 ## Manual tests
-| Test | Result | Notes |
-|---|---|---|
-| _to be filled by the developer_ | | Phase 00 lists no manual hardware test; A1 above was scripted |
+| Test                 | Result | Notes |
+|----------------------|---|---|
+| _none in this phase_ | | Phase 00 lists no manual hardware test; A1 above was scripted |
 
 ## Measurements
 None. Phase 00 has no capture or processing, so there are no FPS, delay or drop figures.
@@ -60,4 +64,3 @@ None. Phase 00 has no capture or processing, so there are no FPS, delay or drop 
 - No MOV fixture yet. Phase 04 needs one (BACKLOG).
 - Setup command `pip install -e ".[dev]"` should be added to CLAUDE.md "Environment" by the
   developer.
-- PyCharm is still configured with a 3.14 interpreter. Point it at `.venv`.

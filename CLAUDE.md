@@ -51,6 +51,7 @@ synced to a server when one is reachable. Basketball first. This is a TCC projec
 - If Git Bash loses PATH: `export PATH="/usr/bin:/bin:/mingw64/bin:/cmd:$PATH"`.
 - Docker Desktop must be running before any `docker build` (server phases).
 - Tooling: `ruff` (lint + format), `pytest`. Run both before declaring anything done.
+- Setup: `source .venv/Scripts/activate && pip install -e ".[dev]"`
 
 ## Git
 
