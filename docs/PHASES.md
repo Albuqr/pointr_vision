@@ -1,6 +1,6 @@
 # Phases
 
-**Current phase: 02**
+**Current phase: 02b (detector performance spike)**
 
 Each phase adds one layer behind an interface and ends with a gate (`GATES.md`). Phases
 00-05 are the first delivery from scope v2: the live pipeline working before the first
@@ -11,6 +11,7 @@ structured test with one person. Later phases follow the scope's progression.
 | 00 | Foundations | repo, tooling, contracts, test harness, fixtures | - | - |
 | 01 | Capture | frame sources, source health, preview | RF01 (partial), RF02, RNF01 (recorded) | 00 |
 | 02 | Perception | detector + tracker, HUD metrics | RF03, RF04, RNF02 (measured) | 01 |
+| 02b | Detector spike | compare RF-DETR Nano via OpenVINO/ONNX vs YOLOX-Nano/Tiny on a recorded clip; input to Q-02. Also measure ID survival through short (<1 s) exits at each speed | RNF02 (input to Q-02) | 02 |
 | 03 | Session and logging | session lifecycle, files, partial data, soak test | RF06, RF07, RF08 (data), RNF03 | 02 |
 | 04 | Recording and replay | raw video, replay as new run, MP4/MOV | RF08 (video), RF09, RNF04, RNF05 | 03 |
 | 05 | Reports | coverage and failure reports | RF10, RF11 | 03, 04 |
