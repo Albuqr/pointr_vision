@@ -166,8 +166,10 @@ then `null`, and `HealthEvent.t_mono` could not be `None`.
 **Decision.**
 - `source_lost` fires after `lost_reads` consecutive failed reads **or** after failing for
   `lost_secs` (default 2.0 s, CLI `--lost-secs`), whichever comes first. This supersedes
-  PHASE_01's "N consecutive failed reads" definition. Worst case for a stalled stream: about
-  one read timeout plus one reopen (about 7 s); a webcam's fast failures still hit the count.
+  PHASE_01's "N consecutive failed reads" definition. The time counts from the last good
+  frame, so a blocking read's own wait is included; a webcam's fast failures still hit the
+  count. (A first draft counted from the first failed read; code-reviewer's simulation with
+  blocking fakes showed that adds a read timeout, so the "about 7 s" stated then was wrong.)
 - `t_mono` is `null` for events that precede the run's `t0`, e.g. `source_open_failed`.
   `HealthEvent.t_mono` is `float | None`. This clarifies contract 0.3.0, which no released
   build or file uses yet, so it stays 0.3.0.
@@ -177,5 +179,5 @@ then `null`, and `HealthEvent.t_mono` could not be `None`.
 - `SourceEnded` and `utc_now` move to `capture/types.py`. Generic code no longer imports
   from the concrete sources module, and ARCHITECTURE §4 documents the `SourceEnded` signal.
 **Consequences.** The stream values (2 s read timeout, 5 s open timeout) are configuration
-only; no stream loss time has been measured. A8 over IP Webcam will show the real figure.
+only; no stream loss time has been measured on hardware. A8 over IP Webcam will show it.
 **Status.** Accepted.
