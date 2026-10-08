@@ -1,12 +1,13 @@
 # Data contracts
 
-Contract version: **0.2.0**. Any change bumps the version (minor for additive fields, major
+Contract version: **0.3.0**. Any change bumps the version (minor for additive fields, major
 for removals or meaning changes) and needs a `DECISIONS.md` entry. JSON Schemas in
 `contracts/` are written from this file and tests check them against it (D-009).
 
 Conventions: UUIDv4 for every ID generated on the device. Wall times are UTC ISO-8601.
 Durations and offsets in seconds as floats. Monotonic times are seconds relative to the
-session's `t0` and only comparable within one run. Missing values are empty in CSV and
+run's `t0`, the `time.monotonic()` value taken when the run's capture thread starts (D-011),
+and only comparable within one run. Missing values are empty in CSV and
 `null` in JSON, never `0`.
 
 ## 1. Session folder
@@ -28,14 +29,14 @@ A live session produces one run. Each replay adds a run. Nothing is overwritten.
 
 ```json
 {
-  "contract_version": "0.2.0",
+  "contract_version": "0.3.0",
   "session_id": "uuid",
   "device_id": "uuid",
   "started_at": "2026-10-07T18:00:00Z",
   "ended_at": "2026-10-07T18:45:00Z",
   "status": "running | ended | interrupted | error",
   "source": {"kind": "camera | stream | file", "ref": "1", "width": 1280, "height": 720,
-             "reported_fps": 30.0},
+             "reported_fps": 30.0, "link": "usb | wifi | builtin | file"},
   "registration": {"date": "2026-10-07", "team_ids": ["uuid"]},
   "recording": {"enabled": true, "path": "video.mp4", "sha256": null, "locked": true},
   "runs": ["uuid"],
@@ -44,14 +45,16 @@ A live session produces one run. Each replay adds a run. Nothing is overwritten.
 ```
 
 `registration` is filled from phase 6 and is `null` before that. `ended_at` is `null` while
-the session is running. Event kinds: `source_lost`, `source_recovered`,
+the session is running. `source.link` is how the source reaches the notebook, declared by
+the user with `--link` (the notebook cannot detect it, D-010); `null` when not given.
+Event kinds: `source_open_failed`, `source_lost`, `source_recovered`,
 `frozen_frames`, `dark_frames`, `writer_backlog`, `recorder_backlog`, `interrupted`, `error`.
 
 ## 3. `run.json`
 
 ```json
 {
-  "contract_version": "0.2.0",
+  "contract_version": "0.3.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "mode": "live | replay",

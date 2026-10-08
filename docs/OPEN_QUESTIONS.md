@@ -12,7 +12,7 @@ needs the answer.
 | Q-05 | Locked-video mechanism (RNF11) | 09 | Proposed: per-file key wrapped by the server. Alternative: no local lock, only UI hiding (weaker, does not meet RNF11) |
 | Q-06 | Object storage | 09 | MinIO on the VPS vs hosted S3-compatible bucket; VPS disk size limits MinIO |
 | Q-07 | Keep weight, height, birth date? | 06 | Personal data under LGPD; minors likely. Keep only what an analysis uses |
-| Q-08 | Camera app for phases 01-12 | 01 | DroidCam over USB (webcam index) vs IP Webcam over Wi-Fi (URL). Check free-tier resolution limits |
+| Q-08 | ~~Camera app for phases 01-12~~ | 01 | **Closed: D-010.** Wi-Fi or USB; DroidCam primary (webcam index), IP Webcam via URL, laptop webcam as dev fallback |
 | Q-09 | Session start: automatic on launch, or explicit start button? | 03 | Phase 06 UI will need explicit start/stop |
 | Q-10 | Resolve conflicts C-01 and C-02 in REQUIREMENTS.md | 08 / 04 | Team decision on the text |
-| Q-11 | What is `t0`, the zero of every monotonic time in a run? | 03 | DATA_CONTRACTS says monotonic times are s since t0 but never defines t0 or stores its wall-clock anchor, so frames.csv cannot be aligned to wall time or video. Raised by contract-guardian at the phase 00 gate |
+| Q-11 | ~~What is `t0`, the zero of every monotonic time in a run?~~ | 03 | **Closed: D-011.** `time.monotonic()` when the capture thread starts for a run; one t0 per run. Storing its wall-clock anchor is in BACKLOG |

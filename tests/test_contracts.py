@@ -85,6 +85,17 @@ def test_run_valid_while_running():
     validator("run").validate(mutate(example("run"), ("ended_at",), None))
 
 
+@pytest.mark.parametrize("link", ["usb", "wifi", "builtin", "file", None])
+def test_session_source_links(link):
+    """source.link is declared with --link; null when not given (D-012)."""
+    validator("session").validate(mutate(example("session"), ("source", "link"), link))
+
+
+def test_session_source_open_failed_event():
+    doc = mutate(example("session"), ("events", 0, "kind"), "source_open_failed")
+    validator("session").validate(mutate(doc, ("events", 0, "t_mono"), None))
+
+
 def test_shared_defs_identical():
     """uuid4/utc/sha256 are duplicated per schema; the copies must not drift."""
     assert schema("run")["$defs"] == schema("session")["$defs"]
@@ -113,6 +124,9 @@ BROKEN = {
         (("source", "reported_fps"), 0),
         (("source", "width"), 0),
         (("source", "extra"), 1),
+        (("source", "link"), DELETE),
+        (("source", "link"), "bluetooth"),
+        (("source", "link"), ""),
         (("registration", "team_ids"), []),
         (("registration", "team_ids"), [str(uuid.uuid4()) for _ in range(3)]),
         (("registration", "date"), "07/10/2026"),
@@ -171,7 +185,8 @@ def _assert_matches(doc_node, schema_node, path=()):
     elif isinstance(doc_node, list) and doc_node and isinstance(doc_node[0], dict):
         _assert_matches(doc_node[0], schema_node["items"], path)
     elif isinstance(doc_node, str) and " | " in doc_node and "enum" in schema_node:
-        assert set(doc_node.split(" | ")) == set(schema_node["enum"]), path
+        # a null in the schema enum is documented in prose, not in the example string
+        assert set(doc_node.split(" | ")) == set(schema_node["enum"]) - {None}, path
 
 
 @pytest.mark.parametrize("name", ["session", "run"])

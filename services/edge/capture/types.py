@@ -22,6 +22,7 @@ class SourceInfo:
     width: int | None  # None when unknown (OpenCV reports 0), never 0
     height: int | None
     reported_fps: float | None  # None when the source does not report one
+    link: str | None = None  # usb | wifi | builtin | file, declared by --link (D-012)
 
 
 @dataclass(frozen=True)

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:pointr:contracts:0.2.0:session",
+  "$id": "urn:pointr:contracts:0.3.0:session",
   "title": "session.json",
   "description": "DATA_CONTRACTS.md section 2. Missing values are null, never 0.",
   "type": "object",
@@ -10,7 +10,7 @@
     "source", "registration", "recording", "runs", "events"
   ],
   "properties": {
-    "contract_version": {"const": "0.2.0"},
+    "contract_version": {"const": "0.3.0"},
     "session_id": {"$ref": "#/$defs/uuid4"},
     "device_id": {"$ref": "#/$defs/uuid4"},
     "started_at": {"$ref": "#/$defs/utc"},
@@ -19,13 +19,14 @@
     "source": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "ref", "width", "height", "reported_fps"],
+      "required": ["kind", "ref", "width", "height", "reported_fps", "link"],
       "properties": {
         "kind": {"enum": ["camera", "stream", "file"]},
         "ref": {"type": "string", "minLength": 1},
         "width": {"type": ["integer", "null"], "minimum": 1},
         "height": {"type": ["integer", "null"], "minimum": 1},
-        "reported_fps": {"type": ["number", "null"], "exclusiveMinimum": 0}
+        "reported_fps": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "link": {"enum": ["usb", "wifi", "builtin", "file", null]}
       }
     },
     "registration": {
@@ -71,8 +72,8 @@
           "t_mono": {"type": ["number", "null"]},
           "kind": {
             "enum": [
-              "source_lost", "source_recovered", "frozen_frames", "dark_frames",
-              "writer_backlog", "recorder_backlog", "interrupted", "error"
+              "source_open_failed", "source_lost", "source_recovered", "frozen_frames",
+              "dark_frames", "writer_backlog", "recorder_backlog", "interrupted", "error"
             ]
           },
           "detail": {"type": ["string", "null"]}

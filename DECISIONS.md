@@ -96,3 +96,62 @@ DATA_CONTRACTS.md" is enforced.
   event kinds in DATA_CONTRACTS.md, so a change on one side without the other fails.
 **Consequences.** Writers in phases 03-04 must emit every key, using `null` for unknowns.
 **Status.** Accepted.
+
+## D-010 · 2026-10-08 · Phone link: Wi-Fi or USB, DroidCam primary (closes Q-08)
+**Context.** Phase 01 needs a camera app on the phone. Q-08 weighed DroidCam over USB (seen
+as a webcam index) against IP Webcam over Wi-Fi (seen as a URL).
+**Decision.** The phone connects over Wi-Fi or USB, and both must work. DroidCam is primary;
+over either link the notebook sees it as a webcam index (`CameraSource`). IP Webcam (URL) is
+supported through `StreamSource`. The laptop webcam is the development fallback.
+**Consequences.** The notebook cannot tell whether DroidCam is on USB or Wi-Fi, so the link
+is declared by the user (`--link`, D-012). Manual tests A7/A8 run over Wi-Fi and A8 is
+repeated over USB. When the phone drops, the DroidCam client keeps its virtual webcam open
+and may send a still placeholder, so a drop can show as `frozen_frames` instead of
+`source_lost`; A8 accepts either and the report records which one each link produced.
+**Status.** Accepted.
+
+## D-011 · 2026-10-08 · t0 is per run: time.monotonic() when the capture thread starts (closes Q-11)
+**Context.** DATA_CONTRACTS says monotonic times are seconds since `t0` but did not define
+`t0` (raised by contract-guardian at the phase 00 gate).
+**Decision.** `t0 = time.monotonic()` taken when the capture thread starts for a run. Each
+run has its own `t0`; times from different runs are not comparable.
+**Consequences.** `Frame.t_recv` and `HealthEvent.t_mono` stay raw `time.monotonic()`; the
+layer that writes files subtracts the run's `t0`. The wall-clock anchor of `t0` is kept in
+memory (`Capture.t0_wall`) but not yet stored in any file; where it goes is a phase 03
+decision (BACKLOG).
+**Status.** Accepted.
+
+## D-012 · 2026-10-08 · Contract 0.3.0: source_open_failed, source.link, t0 per run
+**Context.** Phase 01 reports open failures as `source_open_failed`, which was not an event
+kind (BACKLOG). The session needs to record how the phone was connected (D-010), which the
+notebook cannot detect. D-011 makes `t0` per run, while the contract said "the session's t0".
+**Decision.** Additive changes, so 0.2.0 → 0.3.0 (minor):
+- `source_open_failed` added to the `session.json` event kinds.
+- `session.json` `source.link`: `"usb" | "wifi" | "builtin" | "file" | null`, from the
+  `--link` CLI option; `null` when the option is not given.
+- The conventions sentence now says monotonic times are relative to the **run's** `t0` (D-011).
+**Consequences.** `SourceInfo` gains `link`. `run.json` changes only its version. No file
+was ever written under 0.2.0.
+**Status.** Accepted.
+
+## D-013 · 2026-10-08 · Phase 01 capture design
+**Context.** Phase 01 implements `FrameSource`, `SourceHealth` and the capture thread.
+**Decision.**
+- **End of a finite source.** `FrameSource.read()` returns `None` for "no frame this
+  attempt"; a source that has ended (end of file) raises `SourceEnded` instead, so the end
+  of a file is not reported as `source_lost`. The Protocol signature does not change.
+- **seq** counts read attempts, including failed ones, so gaps in seq mark failed reads.
+- **Reconnect lives in the source.** After a failed read, camera and stream sources release
+  and reopen the device, at most once per second. The capture thread has no reconnect logic.
+- **Queue.** `proc_queue(maxsize=1)`; when full, the capture thread discards the oldest
+  frame and counts it as dropped. Only the capture thread puts, so no lock is needed.
+- **Health.** Runs on the capture thread so it sees failed reads. One event per episode,
+  at its start; `source_recovered` on the first good frame after `source_lost`. Dark
+  frames reset the frozen streak (a covered lens is DARK, not DARK and FROZEN).
+- **Initial thresholds (untuned):** `lost_reads=30`, `frozen_diff=0.5` (mean abs diff of
+  consecutive BGR frames), `frozen_secs=2.0`, `dark_level=20` (mean BGR, 0-255),
+  `dark_secs=1.0`. On the synthetic fixtures the moving clip's mean abs diff is about 1.2
+  and the frozen and black clips' is 0. All are CLI flags and printed at startup; values
+  tuned on real footage are recorded in a later entry.
+**Consequences.** Phase 03 swaps the console `on_event` for the session writer.
+**Status.** Accepted; thresholds to be tuned in the phase 01 manual tests.
