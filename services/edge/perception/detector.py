@@ -55,7 +55,7 @@ class RFDETRDetector:
         )
         conf = np.asarray(out.confidence, dtype=np.float32).reshape(-1)
         class_id = np.asarray(out.class_id, dtype=np.int64).reshape(-1)
-        keep = (class_id == COCO_PERSON_ID) & (conf >= self.threshold)
+        keep = (class_id == COCO_PERSON_ID) & (conf > self.threshold)  # "above", as rfdetr
         return Detections(
             xyxy=np.asarray(out.xyxy, dtype=np.float32).reshape(-1, 4)[keep],
             confidence=conf[keep],

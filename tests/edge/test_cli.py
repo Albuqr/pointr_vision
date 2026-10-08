@@ -10,8 +10,8 @@ import numpy as np
 import pytest
 
 from services.edge import main as cli
-from services.edge.main import EXIT_OPEN_FAILED
-from services.edge.ui.preview import BANNERS, HUD_STRIP, HudInfo, draw_hud
+from services.edge.main import EXIT_CAPTURE_ERROR, EXIT_OPEN_FAILED
+from services.edge.ui.preview import BANNERS, HUD_STRIP, TRACK_COLOUR, HudInfo, draw_hud
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -70,6 +70,16 @@ def test_benchmark_prints_the_baseline_block(clips):
     assert "det-size off" in lines[0]
     assert "captured 30, processed " in lines[1]
     assert "app delay ms p50 " in lines[2] and "p95 " in lines[2] and "max " in lines[2]
+    assert "unprocessed 0" in lines[1]
+
+
+def test_benchmark_stops_after_its_seconds(clips):
+    """The clip plays for 2 s in real time; --benchmark 0.3 must end the run first."""
+    result = run_cli("--source", str(clips["moving"]), "--link", "file", "--benchmark", "0.3")
+    assert result.returncode == 0, result.stderr
+    captured = int(result.stdout.split("captured=")[1].split()[0])
+    assert 0 < captured < 30
+    assert "(0.3 s requested)" in result.stdout
 
 
 HUD = HudInfo(capture_fps=29.97, dropped=3, proc_fps=4.2, app_delay_ms=180.0, people=2, tracks=1)
@@ -110,6 +120,55 @@ def test_draw_tracks_labels_each_track():
     out = draw_tracks(image, [TrackObs(7, (100.0, 100.0, 200.0, 300.0), 0.9, None)])
     assert (image == 90).all(), "input image modified"
     assert (out[100:300, 100] != 90).any(), "no box edge drawn"
+    label = out[80:97, 100:140]  # the "#7" label sits just above the box
+    assert (label == TRACK_COLOUR).all(axis=-1).any(), "no #id label drawn"
+
+
+def test_model_load_failure_is_an_error_event(monkeypatch):
+    class NeverOpened:
+        def open(self):
+            raise AssertionError("the source must not open before the model loads")
+
+    def no_network(args):
+        raise RuntimeError("weights download failed")
+
+    printed = []
+    monkeypatch.setattr(cli, "open_source", lambda ref, size: NeverOpened())
+    monkeypatch.setattr(cli, "load_perception", no_network)
+    monkeypatch.setattr(cli, "print_event", lambda ev, t0: printed.append(ev))
+    assert cli.main(["--source", "0"]) == EXIT_CAPTURE_ERROR
+    [ev] = printed
+    assert ev.kind == "error"
+    assert ev.t_mono is None  # before any run's t0 (D-014)
+    assert "model load failed" in ev.detail and "weights download failed" in ev.detail
+
+
+def test_cli_prints_the_size_the_camera_delivers(monkeypatch, capsys):
+    class Webcam:
+        """Accepts a 1280x720 request but delivers 640x480; no frames."""
+
+        def __init__(self, index, api):
+            pass
+
+        def isOpened(self):  # noqa: N802 - cv2 name
+            return True
+
+        def set(self, prop, value):
+            return True
+
+        def get(self, prop):
+            sizes = {cv2.CAP_PROP_FRAME_WIDTH: 640.0, cv2.CAP_PROP_FRAME_HEIGHT: 480.0}
+            return sizes.get(prop, 0.0)
+
+        def read(self):
+            return False, None
+
+        def release(self):
+            pass
+
+    monkeypatch.setattr(cv2, "VideoCapture", Webcam)
+    cli.main(["--source", "1", "--no-detect", "--benchmark", "0.2"])
+    assert "requested 1280x720, camera delivers 640x480" in capsys.readouterr().out
 
 
 def test_cv2_error_on_open_exits_cleanly(monkeypatch, capsys):
@@ -120,7 +179,7 @@ def test_cv2_error_on_open_exits_cleanly(monkeypatch, capsys):
     printed = []
     monkeypatch.setattr(cli, "open_source", lambda ref, size: Broken())
     monkeypatch.setattr(cli, "print_event", lambda ev, t0: printed.append(ev))
-    assert cli.main(["--source", "0"]) == EXIT_OPEN_FAILED
+    assert cli.main(["--source", "0", "--no-detect"]) == EXIT_OPEN_FAILED
     [ev] = printed
     assert ev.kind == "source_open_failed"
     assert ev.t_mono is None  # no run, so no t0 (D-014)
@@ -146,6 +205,9 @@ def test_thresholds_must_be_positive(flag, value, capsys):
         (["--threshold", "1.5"], "must be in (0, 1]"),
         (["--width", "0"], "must be > 0"),
         (["--benchmark", "-5"], "must be > 0"),
+        (["--benchmark", "nan"], "must be > 0"),
+        (["--benchmark", "inf"], "must be > 0"),
+        (["--threshold", "nan"], "must be in (0, 1]"),
         (["--camera-api", "dshow"], "unrecognized arguments: --camera-api"),
     ],
 )
@@ -161,3 +223,10 @@ def test_defaults():
     assert (args.width, args.height) == (1280, 720)
     assert (args.threshold, args.device, args.det_size) == (0.5, "auto", None)
     assert (args.benchmark, args.no_detect) == (None, False)
+
+
+def test_valid_phase02_flags_are_accepted():
+    args = cli.parse_args(
+        ["--source", "0", "--det-size", "320", "--threshold", "1", "--benchmark", "0.5"]
+    )
+    assert (args.det_size, args.threshold, args.benchmark) == (320, 1.0, 0.5)

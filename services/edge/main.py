@@ -11,6 +11,7 @@ Each frame taken from capture is detected (RF-DETR Nano, person only) and tracke
 
 import argparse
 import dataclasses
+import math
 import platform
 import sys
 import threading
@@ -23,9 +24,9 @@ import numpy as np
 from services.edge.capture.capture import Capture
 from services.edge.capture.health import HealthConfig, HealthMonitor
 from services.edge.capture.sources import CameraSource, SourceOpenError, open_source
-from services.edge.capture.types import Frame, HealthEvent, SourceInfo, utc_now
+from services.edge.capture.types import Frame, HealthEvent, utc_now
 from services.edge.perception.detector import DET_SIZE_MULTIPLE
-from services.edge.perception.loop import Processor, delay_stats
+from services.edge.perception.loop import Processor, delay_stats, rates
 from services.edge.ui.preview import HudInfo, run_preview
 
 EXIT_OPEN_FAILED = 2
@@ -34,11 +35,12 @@ EXIT_INTERRUPTED = 130
 
 
 def positive(cast):
-    """argparse type: a number > 0, so a threshold cannot silently fire on every read."""
+    """argparse type: a finite number > 0, so a threshold cannot silently fire on every read
+    and a --benchmark of nan or inf cannot run forever."""
 
     def parse(text: str):
         value = cast(text)
-        if value <= 0:
+        if not math.isfinite(value) or value <= 0:
             raise argparse.ArgumentTypeError(f"must be > 0, got {text}")
         return value
 
@@ -49,7 +51,7 @@ def positive(cast):
 def confidence(text: str) -> float:
     """argparse type: a detector threshold in (0, 1]."""
     value = float(text)
-    if not 0 < value <= 1:
+    if not 0 < value <= 1:  # also rejects nan
         raise argparse.ArgumentTypeError(f"must be in (0, 1], got {text}")
     return value
 
@@ -104,9 +106,10 @@ def print_event(ev: HealthEvent, t0: float | None) -> None:
     print(f"[{ev.t_wall}] {rel} {ev.kind}: {ev.detail}", flush=True)
 
 
-def load_perception(args: argparse.Namespace, info: SourceInfo):
+def load_perception(args: argparse.Namespace):
     """Detector and tracker, warmed up with one inference so the first slow call is not
-    counted in the run. Imported here: torch loads only when detection is on."""
+    counted in the run. Imported here: torch loads only when detection is on. Called before
+    the source opens, so a stream does not buffer stale frames during the load (D-018)."""
     from importlib.metadata import version
 
     import torch
@@ -117,7 +120,7 @@ def load_perception(args: argparse.Namespace, info: SourceInfo):
     t = time.monotonic()
     detector = RFDETRDetector.load(args.threshold, args.det_size, args.device)
     loaded = time.monotonic() - t
-    blank = np.zeros((info.height or 720, info.width or 1280, 3), np.uint8)
+    blank = np.zeros((args.height, args.width, 3), np.uint8)
     t = time.monotonic()
     detector.detect(Frame(-1, t, utc_now(), blank, "warmup"))
     warmup = time.monotonic() - t
@@ -132,11 +135,19 @@ def load_perception(args: argparse.Namespace, info: SourceInfo):
     return detector, tracker
 
 
+def open_failed(ref: str, e: Exception) -> int:
+    reason = str(e).strip()
+    # no run, so no t0: t_mono is null (D-014)
+    print_event(HealthEvent("source_open_failed", utc_now(), None, reason), None)
+    print(f"error: cannot open source {ref!r}: {reason}", file=sys.stderr)
+    return EXIT_OPEN_FAILED
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         return run(args)
-    except KeyboardInterrupt:  # Ctrl+C before capture started (e.g. a slow stream open)
+    except KeyboardInterrupt:  # Ctrl+C before capture started (model load, slow stream open)
         print_event(HealthEvent("interrupted", utc_now(), None, "Ctrl+C"), None)
         return EXIT_INTERRUPTED
 
@@ -150,24 +161,6 @@ def run(args: argparse.Namespace) -> int:
         dark_level=args.dark_level,
         dark_secs=args.dark_secs,
     )
-    try:
-        source = open_source(args.source, (args.width, args.height))
-        info = source.open()
-    except (SourceOpenError, cv2.error) as e:
-        reason = str(e).strip()
-        # no run, so no t0: t_mono is null (D-014)
-        print_event(HealthEvent("source_open_failed", utc_now(), None, reason), None)
-        print(f"error: cannot open source {args.source!r}: {reason}", file=sys.stderr)
-        return EXIT_OPEN_FAILED
-
-    info = dataclasses.replace(info, link=args.link)
-    print(f"source: {info}")
-    if isinstance(source, CameraSource):  # streams and files deliver their own size
-        print(f"requested {args.width}x{args.height}, camera delivers {info.width}x{info.height}")
-    print(f"health: {config}")
-    py = sys.version.split()[0]
-    print(f"versions: python {py}, opencv {cv2.__version__}, numpy {np.__version__}")
-
     events: Counter[str] = Counter()
     events_lock = threading.Lock()  # called from the capture, processing and main threads
     capture: Capture | None = None
@@ -177,17 +170,32 @@ def run(args: argparse.Namespace) -> int:
             events[ev.kind] += 1
             print_event(ev, capture.t0 if capture else None)
 
+    try:
+        source = open_source(args.source, (args.width, args.height))  # checks the ref only
+    except SourceOpenError as e:
+        return open_failed(args.source, e)
+
     detector = tracker = None
     if not args.no_detect:
         try:
-            detector, tracker = load_perception(args, info)
-        except KeyboardInterrupt:
-            source.close()
-            raise
+            detector, tracker = load_perception(args)
         except Exception as e:  # e.g. no network for the first weights download
+            # before any run, so no t0: t_mono is null (D-014)
             on_event(HealthEvent("error", utc_now(), None, f"model load failed: {e!r}"))
-            source.close()
             return EXIT_CAPTURE_ERROR
+
+    try:
+        info = source.open()
+    except (SourceOpenError, cv2.error) as e:
+        return open_failed(args.source, e)
+
+    info = dataclasses.replace(info, link=args.link)
+    print(f"source: {info}")
+    if isinstance(source, CameraSource):  # streams and files deliver their own size
+        print(f"requested {args.width}x{args.height}, camera delivers {info.width}x{info.height}")
+    print(f"health: {config}")
+    py = sys.version.split()[0]
+    print(f"versions: python {py}, opencv {cv2.__version__}, numpy {np.__version__}")
 
     monitor = HealthMonitor(config)
     capture = Capture(source, monitor, on_event)
@@ -210,7 +218,7 @@ def run(args: argparse.Namespace) -> int:
     until = time.monotonic() + args.benchmark if args.benchmark else None
     try:
         if args.preview:
-            run_preview(processor, hud, lambda: monitor.state, until)
+            run_preview(lambda: processor.latest, processor.done, hud, lambda: monitor.state, until)
         else:
             while not processor.done.wait(0.1):
                 if until is not None and time.monotonic() >= until:
@@ -222,50 +230,72 @@ def run(args: argparse.Namespace) -> int:
         on_event(HealthEvent("error", utc_now(), time.monotonic(), f"main loop: {e!r}"))
         status = EXIT_CAPTURE_ERROR
     finally:
+        # capture first, then processing drains the last frame (ARCHITECTURE section 5).
+        # A second Ctrl+C must not skip a step or the summary.
+        cap_ok = proc_ok = False
         try:
-            stopped = capture.stop()
-            processor.stop()
-        except KeyboardInterrupt:  # a second Ctrl+C must not skip the summary
-            stopped = False
-        if stopped:
+            cap_ok = capture.stop()
+        except KeyboardInterrupt:
+            pass
+        try:
+            proc_ok = processor.stop()
+        except KeyboardInterrupt:
+            pass
+        if cap_ok:
             source.close()
         else:
             print("warning: capture thread did not stop in time; source left open", file=sys.stderr)
-        print(
-            f"t0_wall={capture.t0_wall} captured={capture.captured} dropped={capture.dropped} "
-            f"failed_reads={capture.failed_reads} processed={processor.processed} "
-            f"events={dict(events.copy())}"
-        )
-        if args.benchmark:
-            print_benchmark(args, info, capture, processor)
+        if not proc_ok:
+            print("warning: processing did not stop in time; counts may be short", file=sys.stderr)
+        try:
+            print(
+                f"t0_wall={capture.t0_wall} captured={capture.captured} dropped={capture.dropped} "
+                f"failed_reads={capture.failed_reads} processed={processor.processed} "
+                f"unprocessed={processor.unprocessed} events={dict(events.copy())}"
+            )
+            if args.benchmark:
+                det = "off" if detector is None else detector.det_size
+                device = "-" if detector is None else detector.device
+                print_benchmark(args.benchmark, info.link, det, device, capture, processor)
+        except KeyboardInterrupt:
+            status = EXIT_INTERRUPTED
     if (capture.error or processor.error) and not status:
         status = EXIT_CAPTURE_ERROR
     return status
 
 
 def print_benchmark(
-    args: argparse.Namespace, info: SourceInfo, capture: Capture, processor: Processor
+    seconds: float,
+    link: str | None,
+    det: int | str,
+    device: str,
+    capture: Capture,
+    processor: Processor,
 ) -> None:
-    """The A7 baseline block. Every figure comes from this run."""
+    """The A7 baseline block. Every figure comes from this run. The run time is t0 to now,
+    so it includes the shutdown (about one inference)."""
     elapsed = time.monotonic() - capture.t0 if capture.t0 else 0.0
     latest = processor.latest
     frame = f"{latest.frame.image.shape[1]}x{latest.frame.image.shape[0]}" if latest else "-"
-    span = (processor.last_end or 0) - (processor.first_start or 0)
-    fps = f"{processor.processed / span:.2f}" if span > 0 else "-"
-    rate = f"{100 * capture.dropped / capture.captured:.1f}%" if capture.captured else "-"
+    proc_fps, drop_rate = rates(
+        capture.captured,
+        capture.dropped,
+        processor.processed,
+        processor.first_start,
+        processor.last_end,
+    )
+    fps = "-" if proc_fps is None else f"{proc_fps:.2f}"
+    rate = "-" if drop_rate is None else f"{100 * drop_rate:.1f}%"
     stats = delay_stats(processor.delays_ms)
     delay = (
         f"p50 {stats['p50']:.1f}, p95 {stats['p95']:.1f}, max {stats['max']:.1f}" if stats else "-"
     )
-    det = "off" if processor.detector is None else processor.detector.det_size
-    device = "-" if processor.detector is None else processor.detector.device
     print(
-        f"benchmark: {elapsed:.1f} s run ({args.benchmark:g} s requested), link {info.link}, "
-        f"frames {frame}, "
-        f"det-size {det}, device {device}, cpu {platform.processor() or '-'}\n"
+        f"benchmark: {elapsed:.1f} s run ({seconds:g} s requested), link {link}, "
+        f"frames {frame}, det-size {det}, device {device}, cpu {platform.processor() or '-'}\n"
         f"benchmark: captured {capture.captured}, processed {processor.processed} "
         f"({fps} fps), dropped {capture.dropped} ({rate} of captured), "
-        f"failed reads {capture.failed_reads}\n"
+        f"failed reads {capture.failed_reads}, unprocessed {processor.unprocessed}\n"
         f"benchmark: app delay ms {delay} over {len(processor.delays_ms)} frames"
     )
 

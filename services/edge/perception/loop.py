@@ -55,6 +55,7 @@ class Processor:
         # written by the processing thread only; other threads read them for display
         self.latest: Processed | None = None
         self.processed = 0
+        self.unprocessed = 0  # left in proc_queue at stop: only after an error or a timeout
         self.delays_ms: list[float] = []  # one per processed frame, for p50/p95/max
         self.first_start: float | None = None
         self.last_end: float | None = None
@@ -69,10 +70,23 @@ class Processor:
         self._thread.start()
 
     def stop(self, timeout: float = 10.0) -> bool:
-        """Ask the thread to stop after the current frame and join it. False if still running."""
-        self._stop.set()
+        """Finish and join; call it after capture has stopped. The thread then processes the
+        frame still in proc_queue and exits on its own (shutdown drains the queues,
+        ARCHITECTURE section 5), so every captured frame ends up processed or dropped. Past
+        `timeout` it is told to stop; frames left in the queue then (also after a processing
+        error) are counted in `unprocessed`. False if the thread is still running."""
         self._thread.join(timeout)
-        return not self._thread.is_alive()
+        if self._thread.is_alive():
+            self._stop.set()
+            self._thread.join(1.0)
+        if self._thread.is_alive():
+            return False
+        while True:
+            try:
+                self.proc_queue.get_nowait()
+            except queue.Empty:
+                return True
+            self.unprocessed += 1
 
     def _process(self, frame: Frame) -> Processed:
         t_start = time.monotonic()
@@ -92,7 +106,11 @@ class Processor:
                     if self.source_done.is_set() and self.proc_queue.empty():
                         break
                     continue
-                result = self._process(frame)
+                try:
+                    result = self._process(frame)
+                except Exception:
+                    self.unprocessed += 1  # the frame in hand is counted, not lost
+                    raise
                 self.processed += 1
                 self.delays_ms.append(result.app_delay_ms)
                 if self.first_start is None:
@@ -109,6 +127,16 @@ class Processor:
             )
         finally:
             self.done.set()
+
+
+def rates(
+    captured: int, dropped: int, processed: int, first_start: float | None, last_end: float | None
+) -> tuple[float | None, float | None]:
+    """(processing FPS, drop rate). FPS is processed frames over the time from the first
+    processing start to the last end; drop rate is dropped / captured. None when undefined."""
+    span = (last_end - first_start) if first_start is not None and last_end is not None else 0
+    fps = processed / span if span > 0 else None
+    return fps, (dropped / captured if captured else None)
 
 
 def delay_stats(delays_ms: list[float]) -> dict[str, float] | None:

@@ -1,6 +1,7 @@
 """OpenCV preview window: the latest processed frame with its tracks, the source state banner
 and a HUD (processing FPS, app delay, people, tracks, drops). q closes."""
 
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -8,7 +9,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from services.edge.perception.loop import Processor
+from services.edge.perception.loop import Processed
 from services.edge.perception.types import TrackObs
 
 WINDOW = "Pointr (q to quit)"
@@ -75,10 +76,14 @@ def draw_hud(image: np.ndarray, state: str, hud: HudInfo) -> np.ndarray:
 
 
 def run_preview(
-    processor: Processor, hud: Callable[[], HudInfo], state: Callable[[], str], until: float | None
+    latest: Callable[[], Processed | None],
+    done: threading.Event,
+    hud: Callable[[], HudInfo],
+    state: Callable[[], str],
+    until: float | None,
 ) -> None:
-    """Show processed frames until q, the window is closed, processing stops, or the
-    time.monotonic() deadline `until`. Main thread only.
+    """Show the latest processed frame until q, the window is closed, `done` is set
+    (processing stopped), or the time.monotonic() deadline `until`. Main thread only.
 
     The image changes at the processing rate; the window, banner and HUD refresh every
     REFRESH_MS, so LOST is visible while no frames arrive."""
@@ -86,12 +91,12 @@ def run_preview(
     shown = None
     cv2.namedWindow(WINDOW)
     try:
-        while not processor.done.is_set():
+        while not done.is_set():
             if until is not None and time.monotonic() >= until:
                 break
-            latest = processor.latest
-            if latest is not None and latest is not shown:
-                image, shown = draw_tracks(latest.frame.image, latest.tracks), latest
+            current = latest()
+            if current is not None and current is not shown:
+                image, shown = draw_tracks(current.frame.image, current.tracks), current
             cv2.imshow(WINDOW, draw_hud(image, state(), hud()))
             if cv2.waitKey(REFRESH_MS) & 0xFF == ord("q"):
                 break

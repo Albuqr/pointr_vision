@@ -11,7 +11,7 @@ from services.edge.capture.capture import Capture
 from services.edge.capture.health import HealthConfig, HealthMonitor
 from services.edge.capture.types import Frame
 from services.edge.perception.detector import COCO_PERSON_ID, RFDETRDetector
-from services.edge.perception.loop import NO_DETECTIONS, Processor, delay_stats
+from services.edge.perception.loop import NO_DETECTIONS, Processor, delay_stats, rates
 from services.edge.perception.tracker import DEFAULT_PARAMS, ByteTrackTracker
 from services.edge.perception.types import Detections, Detector, Tracker, TrackObs
 
@@ -51,17 +51,17 @@ def box(i: int) -> list[float]:
 # A1 -------------------------------------------------------------------------------------
 
 
-def test_detector_keeps_only_persons_at_or_above_threshold():
+def test_detector_keeps_only_persons_above_threshold():
     model = StubModel(
-        [box(1), box(2), box(3), box(4), box(5)],
-        [0.9, 0.95, 0.5, 0.49, 0.7],
-        [COCO_PERSON_ID, CAR, COCO_PERSON_ID, COCO_PERSON_ID, 0],
+        [box(1), box(2), box(3), box(4), box(5), box(6)],
+        [0.9, 0.95, 0.5, 0.49, 0.7, 0.51],
+        [COCO_PERSON_ID, CAR, COCO_PERSON_ID, COCO_PERSON_ID, 0, COCO_PERSON_ID],
     )
     dets = RFDETRDetector(model, threshold=0.5, det_size=384).detect(bgr_frame())
     assert dets.class_id.tolist() == [COCO_PERSON_ID, COCO_PERSON_ID]
-    assert dets.confidence.tolist() == pytest.approx([0.9, 0.5])
-    assert (dets.confidence >= 0.5).all()
-    assert dets.xyxy.tolist() == [box(1), box(3)]
+    assert dets.confidence.tolist() == pytest.approx([0.9, 0.51])  # 0.5 is not above 0.5
+    assert (dets.confidence > 0.5).all()
+    assert dets.xyxy.tolist() == [box(1), box(6)]
 
 
 def test_detector_feeds_the_model_rgb_at_det_size():
@@ -126,14 +126,27 @@ def test_tracker_keeps_one_id_for_a_smoothly_moving_box():
     assert last.state is None  # not exposed by the library (D-016)
 
 
-def test_tracker_gives_separate_people_separate_ids():
-    frames = [
-        [[50 + 3 * i, 50, 110 + 3 * i, 200], [400 - 3 * i, 60, 460 - 3 * i, 210]] for i in range(20)
-    ]
+def test_each_person_keeps_their_own_id():
+    """Two people walking toward each other; the detector lists them in a different order on
+    odd frames, so an ID taken from the list position (not the tracker) would swap."""
+
+    def a(i):
+        return [50 + 3 * i, 50, 110 + 3 * i, 200]  # walks right
+
+    def b(i):
+        return [400 - 3 * i, 60, 460 - 3 * i, 210]  # walks left
+
+    frames = [[a(i), b(i)] if i % 2 == 0 else [b(i), a(i)] for i in range(20)]
+    frames += [[b(i)] for i in range(20, 30)]  # A leaves; B must not take A's ID or slot
     out = run_tracker(ByteTrackTracker(), frames)
-    assert len(out[-1]) == 2
-    assert len({t.track_id for t in out[-1]}) == 2
-    assert {t.track_id for obs in out for t in obs} == {t.track_id for t in out[-1]}
+    ids_a, ids_b = set(), set()
+    for i, obs in enumerate(out[DEFAULT_PARAMS["minimum_consecutive_frames"] :], start=2):
+        assert len(obs) == (2 if i < 20 else 1)
+        for t in obs:  # which person is this box? the nearest left edge
+            near_a = abs(t.xyxy[0] - a(i)[0]) < abs(t.xyxy[0] - b(i)[0])
+            (ids_b if i >= 20 or not near_a else ids_a).add(t.track_id)
+    assert len(ids_a) == 1 and len(ids_b) == 1
+    assert ids_a != ids_b
 
 
 def test_empty_frames_give_no_tracks():
@@ -219,10 +232,40 @@ def test_detector_failure_is_an_error_event():
         def detect(self, frame):
             raise RuntimeError("inference exploded")
 
-    _, processor, events = run_pipeline(5, 0.005, Broken(), RecordingTracker())
+    capture, processor, events = run_pipeline(5, 0.005, Broken(), RecordingTracker())
     assert [e.kind for e in events] == ["error"]
     assert "inference exploded" in events[0].detail
     assert isinstance(processor.error, RuntimeError)
+    # the failed frame and any left in the queue are counted, not lost
+    assert processor.unprocessed >= 1
+    assert capture.captured == processor.processed + capture.dropped + processor.unprocessed
+
+
+def test_stop_mid_stream_accounts_for_every_frame():
+    """q, Ctrl+C or the end of --benchmark stop capture while frames still arrive. Shutdown
+    drains: the frame waiting in proc_queue is processed, so the counts add up (rule 6)."""
+    events = []
+    source = FakeSource((image(i) for i in range(10_000)), delay=1 / 60)
+    capture = Capture(source, HealthMonitor(HealthConfig()), events.append)
+    processor = Processor(
+        capture.proc_queue, capture.done, SleepyDetector(0.05), RecordingTracker(), events.append
+    )
+    capture.start()
+    processor.start()
+    time.sleep(0.5)
+    assert capture.stop()  # mid-stream, while a detection is running
+    assert processor.stop()
+    assert events == []
+    assert capture.captured < 10_000 and capture.dropped > 0
+    assert processor.unprocessed == 0
+    assert capture.proc_queue.empty()
+    assert capture.captured == processor.processed + capture.dropped
+
+
+def test_rates():
+    assert rates(100, 75, 25, 10.0, 15.0) == (5.0, 0.75)
+    assert rates(0, 0, 0, None, None) == (None, None)
+    assert rates(10, 0, 1, 2.0, 2.0) == (None, 0.0)  # one frame: no span, no rate
 
 
 def test_delay_stats():
