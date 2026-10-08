@@ -47,6 +47,8 @@ A live session produces one run. Each replay adds a run. Nothing is overwritten.
 `registration` is filled from phase 6 and is `null` before that. `ended_at` is `null` while
 the session is running. `source.link` is how the source reaches the notebook, declared by
 the user with `--link` (the notebook cannot detect it, D-010); `null` when not given.
+Event `t_mono` is `null` for events that precede the run's `t0`, such as
+`source_open_failed` (D-014).
 Event kinds: `source_open_failed`, `source_lost`, `source_recovered`,
 `frozen_frames`, `dark_frames`, `writer_backlog`, `recorder_backlog`, `interrupted`, `error`.
 

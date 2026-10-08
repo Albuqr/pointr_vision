@@ -86,7 +86,8 @@ class Frame:
 
 class FrameSource(Protocol):
     def open(self) -> SourceInfo: ...  # width, height, reported fps, kind, raises on failure
-    def read(self) -> Frame | None: ...  # None = no frame this attempt
+    def read(self) -> Frame | None: ...  # None = no frame this attempt;
+    # raises SourceEnded when a finite source (file) has ended (D-013)
     def close(self) -> None: ...
 
 

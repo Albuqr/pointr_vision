@@ -155,3 +155,27 @@ was ever written under 0.2.0.
   tuned on real footage are recorded in a later entry.
 **Consequences.** Phase 03 swaps the console `on_event` for the session writer.
 **Status.** Accepted; thresholds to be tuned in the phase 01 manual tests.
+
+## D-014 · 2026-10-08 · Phase 01 gate fixes: time-bounded source_lost, null t_mono before t0
+**Context.** At the phase 01 gate, code-reviewer found that `source_lost` counted only
+consecutive failed reads. A stalled `StreamSource` read blocks for its read timeout (2 s), and
+every following reopen blocks for up to the open timeout (5 s). Reaching 30 reads would take
+about 150 s, and all that time the preview would show OK. contract-guardian found that
+`source_open_failed` happens before any run's `t0`. The contract did not say that `t_mono` is
+then `null`, and `HealthEvent.t_mono` could not be `None`.
+**Decision.**
+- `source_lost` fires after `lost_reads` consecutive failed reads **or** after failing for
+  `lost_secs` (default 2.0 s, CLI `--lost-secs`), whichever comes first. This supersedes
+  PHASE_01's "N consecutive failed reads" definition. Worst case for a stalled stream: about
+  one read timeout plus one reopen (about 7 s); a webcam's fast failures still hit the count.
+- `t_mono` is `null` for events that precede the run's `t0`, e.g. `source_open_failed`.
+  `HealthEvent.t_mono` is `float | None`. This clarifies contract 0.3.0, which no released
+  build or file uses yet, so it stays 0.3.0.
+- `Capture.stop()` waits 8 s by default, longer than the slowest blocking stream read.
+- Ctrl+C and main-loop exceptions become `interrupted` / `error` events with non-zero exit
+  codes (130 / 1), not a bare message or a traceback.
+- `SourceEnded` and `utc_now` move to `capture/types.py`. Generic code no longer imports
+  from the concrete sources module, and ARCHITECTURE §4 documents the `SourceEnded` signal.
+**Consequences.** The stream values (2 s read timeout, 5 s open timeout) are configuration
+only; no stream loss time has been measured. A8 over IP Webcam will show the real figure.
+**Status.** Accepted.

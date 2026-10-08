@@ -185,8 +185,9 @@ def _assert_matches(doc_node, schema_node, path=()):
     elif isinstance(doc_node, list) and doc_node and isinstance(doc_node[0], dict):
         _assert_matches(doc_node[0], schema_node["items"], path)
     elif isinstance(doc_node, str) and " | " in doc_node and "enum" in schema_node:
-        # a null in the schema enum is documented in prose, not in the example string
-        assert set(doc_node.split(" | ")) == set(schema_node["enum"]) - {None}, path
+        # source.link's null is documented in prose, not in the example string (D-012)
+        nullable = {None} if path == ("source", "link") else set()
+        assert set(doc_node.split(" | ")) == set(schema_node["enum"]) - nullable, path
 
 
 @pytest.mark.parametrize("name", ["session", "run"])
@@ -199,3 +200,12 @@ def test_event_kinds_match_doc():
     kinds = set(re.findall(r"`(\w+)`", listed))
     events = schema("session")["properties"]["events"]["items"]
     assert set(events["properties"]["kind"]["enum"]) == kinds
+
+
+def test_emitted_event_kinds_are_in_contract():
+    """Every HealthEvent kind the code creates is a contract event kind."""
+    code = "".join(p.read_text(encoding="utf-8") for p in (ROOT / "services").rglob("*.py"))
+    emitted = set(re.findall(r'HealthEvent\(\s*"(\w+)"', code))
+    events = schema("session")["properties"]["events"]["items"]
+    assert emitted, "no HealthEvent kinds found"
+    assert emitted <= set(events["properties"]["kind"]["enum"])

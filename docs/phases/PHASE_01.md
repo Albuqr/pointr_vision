@@ -12,7 +12,8 @@ RF01 (partial), RF02, RNF01 (resolution recorded, not enforced yet).
   `FileSource` (path, MP4 and MOV). One factory: `open_source(ref) -> FrameSource`.
 - Capture thread with `proc_queue(maxsize=1)`: drop oldest when full, count drops.
 - `SourceHealth` monitor emitting events:
-  - `source_lost`: N consecutive failed reads (N configurable, default 30)
+  - `source_lost`: N consecutive failed reads (N configurable, default 30), or failing
+    for T seconds (default 2.0), whichever comes first (D-014)
   - `source_recovered`
   - `frozen_frames`: consecutive frames nearly identical (mean abs diff below a threshold)
     for longer than T seconds
@@ -59,7 +60,7 @@ Detection, tracking, writing files (events print to console only in this phase).
 | A1 | `tests/edge/test_sources.py::test_file_reads_every_frame_in_order` |
 | A2 | `tests/edge/test_capture.py::test_never_blocks_and_keeps_newest`, `::test_slow_consumer_accounting` |
 | A3 | `tests/edge/test_health.py::test_fixture_events` (black, frozen, moving) |
-| A4 | `tests/edge/test_health.py::test_lost_then_recovered`, `tests/edge/test_capture.py::test_fake_source_lost_and_recovered` |
+| A4 | `tests/edge/test_health.py::test_lost_then_recovered`, `::test_lost_after_lost_secs_with_few_slow_reads`, `tests/edge/test_capture.py::test_fake_source_lost_and_recovered` |
 | A5 | `tests/edge/test_cli.py::test_bad_ref_exits_cleanly` |
 | A6-A9b | manual, commands in `PHASE_01_REPORT.md` |
 
