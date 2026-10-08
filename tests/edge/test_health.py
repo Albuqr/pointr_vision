@@ -60,7 +60,7 @@ def frame(seq: int, t: float, img=None) -> Frame:
 
 def test_lost_then_recovered():
     monitor = HealthMonitor(HealthConfig(lost_reads=30), clock=lambda: 42.0)
-    assert monitor.assess(frame(0, 1.0)) == []
+    assert monitor.assess(frame(0, 41.0)) == []  # failures stay under lost_secs: count wins
     for _ in range(29):
         assert monitor.assess(None) == []
     assert monitor.state == OK
@@ -76,7 +76,7 @@ def test_lost_then_recovered():
 
 
 def test_short_failure_is_not_lost():
-    monitor = HealthMonitor(HealthConfig(lost_reads=30))
+    monitor = HealthMonitor(HealthConfig(lost_reads=30), clock=lambda: 0.5)
     for _ in range(3):  # failure counter resets on every good frame
         assert monitor.assess(frame(0, 0.0)) == []
         for _ in range(29):
@@ -116,6 +116,15 @@ def test_lost_after_lost_secs_with_few_slow_reads():
     assert (lost.kind, lost.t_mono) == ("source_lost", 12.0)
     clock.t = 20.0
     assert monitor.assess(None) == []  # still one event per episode
+
+
+def test_lost_secs_counts_from_the_last_good_frame():
+    """A stalled read that returns 2 s after the last frame is lost at once (D-014)."""
+    clock = Clock(12.0)
+    monitor = HealthMonitor(HealthConfig(lost_reads=30, lost_secs=2.0), clock=clock)
+    assert monitor.assess(frame(0, 10.0)) == []
+    [lost] = monitor.assess(None)  # first failed read, returned after a 2 s timeout
+    assert (lost.kind, lost.t_mono) == ("source_lost", 12.0)
 
 
 def test_frozen_clears_and_fires_again(clips):

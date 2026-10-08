@@ -34,7 +34,7 @@ def _mean(image: np.ndarray) -> float:
 
 class HealthMonitor:
     """Implements SourceHealth. Frame timing uses frame.t_recv; failed reads have no frame,
-    so they are timed with clock() (time.monotonic, the same clock)."""
+    so they are timed with clock(), which must be the same clock (time.monotonic)."""
 
     def __init__(
         self, config: HealthConfig | None = None, clock: Callable[[], float] = time.monotonic
@@ -43,6 +43,7 @@ class HealthMonitor:
         self._clock = clock
         self._fails = 0
         self._fail_since: float | None = None
+        self._last_ok: float | None = None  # t_recv of the last good frame
         self._lost = False
         self._prev: Frame | None = None
         self._dark_since: float | None = None
@@ -65,7 +66,8 @@ class HealthMonitor:
             now = self._clock()
             self._fails += 1
             if self._fail_since is None:
-                self._fail_since = now
+                # failing since the last good frame: a blocking read's own wait counts (D-014)
+                self._fail_since = self._last_ok if self._last_ok is not None else now
             failing = now - self._fail_since
             # time bound too: a blocking stream read can take seconds per attempt (D-014)
             if not self._lost and (self._fails >= cfg.lost_reads or failing >= cfg.lost_secs):
@@ -82,6 +84,7 @@ class HealthMonitor:
             events.append(HealthEvent("source_recovered", frame.t_wall, frame.t_recv, detail))
         self._fails = 0
         self._fail_since = None
+        self._last_ok = frame.t_recv
 
         t = frame.t_recv
         brightness = _mean(frame.image)

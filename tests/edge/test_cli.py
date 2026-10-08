@@ -78,8 +78,21 @@ def test_cv2_error_on_open_exits_cleanly(monkeypatch, capsys):
         def open(self):
             raise cv2.error("backend exploded")
 
+    printed = []
     monkeypatch.setattr(cli, "open_source", lambda ref, api: Broken())
+    monkeypatch.setattr(cli, "print_event", lambda ev, t0: printed.append(ev))
     assert cli.main(["--source", "0"]) == EXIT_OPEN_FAILED
-    out, err = capsys.readouterr()
-    assert "] - source_open_failed: " in out  # no t0 before capture: t_mono is null
-    assert "backend exploded" in out and "backend exploded" in err
+    [ev] = printed
+    assert ev.kind == "source_open_failed"
+    assert ev.t_mono is None  # no run, so no t0 (D-014)
+    assert "backend exploded" in ev.detail
+    assert "backend exploded" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("flag", ["--lost-reads", "--lost-secs", "--frozen-secs", "--dark-level"])
+@pytest.mark.parametrize("value", ["0", "-1"])
+def test_thresholds_must_be_positive(flag, value, capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.parse_args(["--source", "0", flag, value])
+    assert exc.value.code == 2
+    assert "must be > 0" in capsys.readouterr().err

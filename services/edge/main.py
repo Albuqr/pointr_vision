@@ -10,6 +10,7 @@ import argparse
 import dataclasses
 import queue
 import sys
+import threading
 import time
 from collections import Counter
 
@@ -28,6 +29,19 @@ EXIT_CAPTURE_ERROR = 1
 EXIT_INTERRUPTED = 130
 
 
+def positive(cast):
+    """argparse type: a number > 0, so a threshold cannot silently fire on every read."""
+
+    def parse(text: str):
+        value = cast(text)
+        if value <= 0:
+            raise argparse.ArgumentTypeError(f"must be > 0, got {text}")
+        return value
+
+    parse.__name__ = cast.__name__  # argparse uses it in error messages
+    return parse
+
+
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     d = HealthConfig()
     p = argparse.ArgumentParser(prog="python -m services.edge.main", description=__doc__)
@@ -44,12 +58,12 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         default="any",
         help="OpenCV backend for webcam indices; try dshow if DroidCam is not found",
     )
-    p.add_argument("--lost-reads", type=int, default=d.lost_reads)
-    p.add_argument("--lost-secs", type=float, default=d.lost_secs)
-    p.add_argument("--frozen-diff", type=float, default=d.frozen_diff)
-    p.add_argument("--frozen-secs", type=float, default=d.frozen_secs)
-    p.add_argument("--dark-level", type=float, default=d.dark_level)
-    p.add_argument("--dark-secs", type=float, default=d.dark_secs)
+    p.add_argument("--lost-reads", type=positive(int), default=d.lost_reads)
+    p.add_argument("--lost-secs", type=positive(float), default=d.lost_secs)
+    p.add_argument("--frozen-diff", type=positive(float), default=d.frozen_diff)
+    p.add_argument("--frozen-secs", type=positive(float), default=d.frozen_secs)
+    p.add_argument("--dark-level", type=positive(float), default=d.dark_level)
+    p.add_argument("--dark-secs", type=positive(float), default=d.dark_secs)
     return p.parse_args(argv)
 
 
@@ -102,11 +116,13 @@ def run(args: argparse.Namespace) -> int:
     print(f"versions: python {py}, opencv {cv2.__version__}, numpy {np.__version__}")
 
     events: Counter[str] = Counter()
+    events_lock = threading.Lock()  # called from the capture thread and the main thread
     monitor = HealthMonitor(config)
 
     def on_event(ev: HealthEvent) -> None:
-        events[ev.kind] += 1
-        print_event(ev, capture.t0)
+        with events_lock:
+            events[ev.kind] += 1
+            print_event(ev, capture.t0)
 
     capture = Capture(source, monitor, on_event)
     status = 0
@@ -123,13 +139,17 @@ def run(args: argparse.Namespace) -> int:
         on_event(HealthEvent("error", utc_now(), time.monotonic(), f"main loop: {e!r}"))
         status = EXIT_CAPTURE_ERROR
     finally:
-        if capture.stop():
+        try:
+            stopped = capture.stop()
+        except KeyboardInterrupt:  # a second Ctrl+C must not skip the summary
+            stopped = False
+        if stopped:
             source.close()
         else:
             print("warning: capture thread did not stop in time; source left open", file=sys.stderr)
         print(
             f"t0_wall={capture.t0_wall} captured={capture.captured} dropped={capture.dropped} "
-            f"failed_reads={capture.failed_reads} events={dict(events)}"
+            f"failed_reads={capture.failed_reads} events={dict(events.copy())}"
         )
     if capture.error and not status:
         status = EXIT_CAPTURE_ERROR
