@@ -17,7 +17,7 @@ Package versions (working repo `.venv`): Python 3.11.9, numpy 2.4.6, opencv-pyth
 | A7 | Phone over Wi-Fi (DroidCam) opens and previews | manual | Pass (attempt 2) |
 | A8 | Wi-Fi off / cable unplugged → LOST or FROZEN + event; back → recovers or exits cleanly (Wi-Fi and USB) | manual | _pending_ |
 | A9 | Covering the lens shows DARK | manual | _pending_ |
-| A9b | Still, empty scene for 60 s over the phone does not show FROZEN | manual | _pending_ |
+| A9b | Still, empty scene for 60 s over the phone does not show FROZEN | manual | Pass |
 
 Supporting tests (no criterion of their own):
 - The reopen path of camera and stream sources: `test_live_source_reopens_after_failures`.
@@ -80,7 +80,7 @@ it here; it then goes into DECISIONS.md as the tuned value (D-013 holds the init
 | A8 | USB | | | |
 | A8 | IP Webcam (optional) | | | |
 | A9 | | | | |
-| A9b | | | | |
+| A9b | Wi-Fi | PASS | n/a | Still desk scene, phone on Wi-Fi, 09:40:30-09:41:30 local (+208 to +268 s): no frozen_frames, banner OK. frozen_diff 0.5 holds on real footage. Run: 405 s, 12166 captured, 116 dropped (~1%), 0 failed reads. Unplanned events earlier in the same run: dark (brightness 11) at +45.6 s; frozen (diff 0.00) at +110.5 s; dark (brightness 0.0) at +116.5 s. The diff 0.00 + brightness 0.0 pair matches the DroidCam feed going black (cause: not observed). Banner returned to OK, but no end event exists for DARK/FROZEN (BACKLOG) |
 
 ## Measurements
 Phase 01 writes no files, so there is no `run_id`. Fill these from the preview HUD and the
@@ -90,6 +90,7 @@ console summary line during the manual runs:
 |---|---|---|---|---|
 | builtin | 640x480 (OpenCV default, not requested; BACKLOG: --width/--height) | ~30 | 19 of 1886 captured (~1%), ~63 s, preview on | A6 run; 0 failed reads |
 | DroidCam Wi-Fi | 640x480 opened (OpenCV default); about 640x360 of real image, letterboxed | 29.5 | | A7 run |
+| DroidCam Wi-Fi | 640x480 opened, letterboxed | | 116 of 12166 captured (~1%), 405 s, preview on | A9b run; 0 failed reads |
 | DroidCam USB | | | | |
 
 There is no perception yet (phase 02), so the only consumer is the headless loop or the
