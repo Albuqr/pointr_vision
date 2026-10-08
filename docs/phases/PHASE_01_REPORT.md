@@ -13,7 +13,7 @@ Package versions (working repo `.venv`): Python 3.11.9, numpy 2.4.6, opencv-pyth
 | A3 | Black → `dark_frames`; frozen → `frozen_frames`; normal → none | `tests/edge/test_health.py::test_fixture_events` | Pass |
 | A4 | Source stops → `source_lost`; resumes → `source_recovered` | `tests/edge/test_health.py::test_lost_then_recovered`, `::test_lost_after_lost_secs_with_few_slow_reads`, `::test_lost_secs_counts_from_the_last_good_frame`, `tests/edge/test_capture.py::test_fake_source_lost_and_recovered` | Pass |
 | A5 | Invalid ref → clear message, non-zero exit, no traceback | `tests/edge/test_cli.py::test_bad_ref_exits_cleanly`, `::test_cv2_error_on_open_exits_cleanly` | Pass |
-| A6 | Laptop webcam opens and previews | manual | _pending_ |
+| A6 | Laptop webcam opens and previews | manual | Pass |
 | A7 | Phone over Wi-Fi (DroidCam) opens and previews | manual | _pending_ |
 | A8 | Wi-Fi off / cable unplugged → LOST or FROZEN + event; back → recovers or exits cleanly (Wi-Fi and USB) | manual | _pending_ |
 | A9 | Covering the lens shows DARK | manual | _pending_ |
@@ -73,7 +73,7 @@ it here; it then goes into DECISIONS.md as the tuned value (D-013 holds the init
 
 | Test | Link | Result | State seen (A8) | Notes |
 |---|---|---|---|---|
-| A6 | builtin | | | |
+| A6 | builtin | PASS | n/a | index 0, 640x480 (OpenCV default, not requested), banner OK, ~30 fps, 1886 captured / 19 dropped (~1%) in ~63 s, 0 failed reads, no events, clean exit on q. HUD text overlap noted (BACKLOG) |
 | A7 | Wi-Fi | | | |
 | A8 | Wi-Fi | | | |
 | A8 | USB | | | |
@@ -87,12 +87,12 @@ console summary line during the manual runs:
 
 | Link | Resolution / reported fps (from `source:` line) | Capture fps (HUD) | dropped (summary) | Notes |
 |---|---|---|---|---|
-| builtin | | | | |
+| builtin | 640x480 (OpenCV default, not requested; BACKLOG: --width/--height) | ~30 | 19 of 1886 captured (~1%), ~63 s, preview on | A6 run; 0 failed reads |
 | DroidCam Wi-Fi | | | | |
 | DroidCam USB | | | | |
 
-The headless runs have no consumer slower than capture yet (phase 02 adds perception), so
-`dropped` is expected to stay near 0 here. That is a note, not a measured claim.
+There is no perception yet (phase 02), so the only consumer is the headless loop or the
+preview. In the A6 preview run, the preview loop dropped 19 of 1886 frames (~1%).
 
 ## Reviewer outcomes
 | Reviewer | Result | Findings fixed |
