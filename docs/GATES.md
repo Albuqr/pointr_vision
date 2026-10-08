@@ -64,7 +64,29 @@ Package versions:
 
 - `DECISIONS.md` updated with every decision taken during the phase.
 - `docs/PHASES.md` current-phase pointer moved forward.
-- `git tag phase-XX`.
+- An annotated tag, `git tag -a phase-XX`, created by the developer after reading the
+  report. Its message summarises the phase, in this order:
+
+  ```
+  Phase XX: <name>
+
+  <one or two sentences: what the phase adds>
+
+  Delivered
+  - <deliverables>
+
+  Gate
+  - <N> automated tests passing (and what they need: camera, network, weights)
+  - <reviewers>: <result> (<BLOCKER/MAJOR fixed>)
+  - Manual <tests> <result> on <hardware>
+
+  Findings carried to BACKLOG
+  - <one line each>
+
+  Decisions: D-NNN to D-NNN
+  ```
+
+  Check it with `git tag -n30 phase-XX`.
 
 ## Scope creep rule
 

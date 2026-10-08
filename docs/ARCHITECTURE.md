@@ -143,6 +143,9 @@ capture thread ──▶ proc_queue (maxsize=1, drop oldest, count drops) ──
   bounded; if it fills, that is logged as an event, never silently ignored.
 - **Order.** The processing loop handles frames in increasing `seq`. Tracker state is
   advanced only with in-order frames.
+- **Processing thread and preview (D-017).** The processing loop runs on its own thread. The
+  preview, on the main thread, shows the latest processed frame with its own boxes; it never
+  takes from `proc_queue`.
 - **Shutdown.** q, Ctrl+C, source end or exception all go through one shutdown path: stop
   capture, drain queues with a timeout, close writer, write final `session.json` in a
   `finally` block.

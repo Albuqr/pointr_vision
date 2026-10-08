@@ -17,8 +17,9 @@ pip install -e ".[dev]"
 python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 ```
 
-The RF-DETR Nano weights (`rf-detr-nano.pth`) download on the first run that loads the
-model, to `~/.roboflow/models` (set `RF_HOME` to change it).
+The RF-DETR Nano weights (`rf-detr-nano.pth`, 366 MB) download on the first run that loads
+the model, to `~/.roboflow/models` (set `RF_HOME` to change it), and are checked against an
+md5. Loading the model takes several seconds before capture starts.
 
 ## Run
 

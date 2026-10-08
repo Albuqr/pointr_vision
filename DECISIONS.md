@@ -291,3 +291,54 @@ licences recorded, the CPU torch build, and the existing tests passing after the
 - `supervision` stays a direct dependency, because the tracker adapter builds
   `sv.Detections`.
 **Status.** Accepted.
+
+## D-017 · 2026-10-08 · Phase 02 perception design
+**Context.** Phase 02 adds detection and tracking. On this notebook all inference runs on
+the CPU (D-015), so processing is expected to be slower than capture. The developer added six
+BACKLOG items to the scope.
+**Decision.**
+- **Threading.** A `perception` thread (`Processor`) takes frames from `proc_queue`, then
+  runs detect and track and measures `t_proc_start`, `t_proc_end` and app delay
+  (`t_proc_end − t_recv`). The capture thread is unchanged (drop-oldest, D-013), so when
+  processing is slower, frames are skipped and counted, and app delay stays bounded instead
+  of a backlog building up. The preview stays on the main thread (OpenCV windows need it).
+  It shows the **latest processed frame with its own boxes**, so boxes always match the
+  image, and it refreshes the banner and HUD every 30 ms. The image therefore changes at
+  processing FPS. The alternative, live frames with the last boxes, is in BACKLOG.
+- **Detector input size.** `--det-size` is passed to rfdetr's `predict(shape=(s, s))`, which
+  resizes (stretches) the frame to a square for inference. Boxes come back in frame pixels.
+  The model keeps its 384 configuration and pretrained weights. The positional encoding is
+  interpolated at run time (D-015). Default: the model's resolution (384). The CLI rejects
+  values that are not multiples of 32 before the slow model load; `load()` checks that 32
+  matches the real config.
+- **Person filter.** `class_id == 1` (raw COCO ID, D-015) and `confidence >= threshold`. rfdetr
+  already keeps only `score > threshold`. The second check makes "all above threshold" true
+  by construction.
+- **Warm-up.** The model is loaded and run once on a black frame after the source opens and
+  before capture starts, so the first, slower call is not in the measurements. Load and
+  warm-up times are printed. A model load failure (e.g. no network for the first weights
+  download) is an `error` event with `t_mono` null (before t0, as D-014), exit code 1.
+- **Capture size.** Cameras get `CAP_PROP_FRAME_WIDTH/HEIGHT` set after opening, on every
+  (re)open. `SourceInfo` reports what `get()` returns, i.e. what the camera accepted. The
+  benchmark prints the size of the frames actually processed. Streams and files deliver their
+  own size; nothing is requested from them.
+- **`--camera-api` removed.** `CAP_ANY` picks MSMF on this notebook and opened DroidCam in
+  phase 01. DSHOW could not open by index on opencv 5.0. Opening by device name would be new
+  code for a backend nothing needs.
+- **HUD.** Phase 01 drew the status text twice (a thick black outline under thin white
+  text), which read as doubled text. Now: one white text pass on a filled black strip, on
+  two lines, so it fits a 640-wide frame.
+- **`--no-detect`.** Runs the same loop without a detector (capture only). Used to re-run
+  phase 01 A9/A9b at the new resolution without the CPU load, and to keep CLI tests free of
+  model weights. A `conftest.py` guard fails any default test that imports rfdetr.
+- **`--benchmark SECONDS`.** Stops after SECONDS (or at end of file, `q`, Ctrl+C) and prints
+  run time, frame size, det-size, device, CPU, captured, processed, processing FPS
+  (processed / time from first processing start to last end), dropped and drop rate
+  (dropped / captured), failed reads, and app delay p50/p95/max over every processed frame.
+- **Clean install check.** A fresh clone with the README commands, in a new venv, gives
+  `torch 2.14.1+cpu`, `cuda.is_available() False`, and 171 tests passing (at commit
+  `3804031`).
+**Consequences.** No contract change: phase 02 writes no files. `run.json` needs fields for
+det-size and the requested capture size before phase 03 writes it (BACKLOG). Q-02 (numeric
+RNF02 target) stays open until the A7 baseline exists.
+**Status.** Accepted.
