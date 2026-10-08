@@ -358,7 +358,10 @@ leaving the frame exposes it.
   `proc_queue` and finishes. Only past the timeout is it told to stop. Frames still left
   after that, or the frame in hand when the detector raises, are counted in `unprocessed`,
   which is printed in the summary and the benchmark. So `captured = processed + dropped +
-  unprocessed` always holds, with `unprocessed = 0` on a normal stop.
+  unprocessed` holds whenever both threads stop in time, with `unprocessed = 0` on a normal
+  stop. If either thread does not stop in time, the summary warns that counts may be short
+  (corrected wording after the code-reviewer re-review; the first version said "always").
+  Without a stopped capture the processor is not waited for: there is no last frame to drain.
 - **Model loads before the source opens.** `open_source()` still checks the ref first (bad
   files fail fast), then the model loads and warms up (at `--width x --height`), and only
   then does the device open. A stream no longer sits unread for the load time and buffers
