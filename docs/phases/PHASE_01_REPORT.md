@@ -76,7 +76,7 @@ it here; it then goes into DECISIONS.md as the tuned value (D-013 holds the init
 | A6 | builtin | PASS | n/a | index 0, 640x480 (OpenCV default, not requested), banner OK, ~30 fps, 1886 captured / 19 dropped (~1%) in ~63 s, 0 failed reads, no events, clean exit on q. HUD text overlap noted (BACKLOG) |
 | A7 (attempt 1) | Wi-Fi | not a pass | n/a | index 1, MSMF, 640x480, no live DroidCam feed: identical frames (diff 0.00), frozen_frames at +2.16 s with banner, 0 failed reads, clean exit. Confirms FROZEN on a dead virtual device |
 | A7 | Wi-Fi | PASS | n/a | phone image over Wi-Fi through the DroidCam virtual webcam, banner OK, capture 29.5 fps, orientation correct. Letterboxed: the 16:9 phone video is fitted into OpenCV's default 640x480 (4:3), so the real image is about 640x360 with black bars, roughly a quarter of the frame wasted (BACKLOG: --width/--height) |
-| A8 | Wi-Fi | | | |
+| A8 | Wi-Fi | PASS | FROZEN, then DARK (no LOST) | Phone Wi-Fi off at ~+8 s: frozen_frames at +10.1 s (diff 0.00), then dark_frames at +16.1 s (brightness 0.0) as the DroidCam client switched to black. No LOST: the virtual webcam keeps delivering frames (0 failed reads). Recovery: _to fill (yes / exited before reconnect)_. Clean exit |
 | A8 | USB | | | |
 | A8 | IP Webcam (optional) | | | |
 | A9 | | PASS | n/a | Lens covered by finger: dark_frames at +16.48 s (brightness 7.4 < 20), banner DARK, returned to OK on uncover. Run 33 s, 986 captured, 14 dropped, 0 failed reads. No end event logged (see BACKLOG item from A9b) |
