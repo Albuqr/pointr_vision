@@ -2,6 +2,7 @@
 
 import time
 
+import cv2
 import numpy as np
 import pytest
 
@@ -141,3 +142,46 @@ def test_live_source_waits_before_reopening():
     camera.open()
     assert [camera.read() for _ in range(5)] == [None] * 5
     assert camera.opened == 1
+
+
+class SizedCap(FakeCap):
+    """A camera that accepts a size request but delivers its own, like many webcams."""
+
+    def __init__(self, index, api):
+        super().__init__(n_good=0)
+        self.index, self.api, self.sets = index, api, {}
+        SizedCap.made.append(self)
+
+    def set(self, prop, value):
+        self.sets[prop] = value
+        return True
+
+    def get(self, prop):
+        return {cv2.CAP_PROP_FRAME_WIDTH: 640.0, cv2.CAP_PROP_FRAME_HEIGHT: 480.0}.get(prop, 0.0)
+
+
+def test_camera_requests_size_and_reports_what_it_delivers(monkeypatch):
+    SizedCap.made = []
+    monkeypatch.setattr(cv2, "VideoCapture", SizedCap)
+    camera = CameraSource(1, size=(1280, 720))
+    camera.reopen_after = 0.0
+    info = camera.open()
+    assert (info.width, info.height) == (640, 480)  # delivered, not requested
+    camera.read(), camera.read()  # failed reads: the second one reopens
+    assert len(SizedCap.made) == 2
+    for cap in SizedCap.made:  # requested on the first open and on the reopen
+        assert (cap.index, cap.api) == (1, cv2.CAP_ANY)
+        assert cap.sets == {cv2.CAP_PROP_FRAME_WIDTH: 1280, cv2.CAP_PROP_FRAME_HEIGHT: 720}
+
+
+def test_camera_without_size_requests_nothing(monkeypatch):
+    SizedCap.made = []
+    monkeypatch.setattr(cv2, "VideoCapture", SizedCap)
+    CameraSource(0).open()
+    assert SizedCap.made[0].sets == {}
+
+
+def test_open_source_passes_size_to_cameras_only(clips):
+    camera = open_source("1", (1280, 720))
+    assert camera.size == (1280, 720)
+    assert not hasattr(open_source(str(clips["moving"]), (1280, 720)), "size")

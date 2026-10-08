@@ -1,4 +1,5 @@
-"""A5: invalid source ref -> clear message, non-zero exit, no traceback. CLI happy path."""
+"""Phase 01 A5: invalid source ref -> clear message, non-zero exit, no traceback. CLI happy
+path, HUD, and the phase 02 flags. Subprocess runs use --no-detect: no model, no weights."""
 
 import subprocess
 import sys
@@ -10,14 +11,14 @@ import pytest
 
 from services.edge import main as cli
 from services.edge.main import EXIT_OPEN_FAILED
-from services.edge.ui.preview import BANNERS, draw_hud
+from services.edge.ui.preview import BANNERS, HUD_STRIP, HudInfo, draw_hud
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
 def run_cli(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, "-m", "services.edge.main", *args],
+        [sys.executable, "-m", "services.edge.main", "--no-detect", *args],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -54,13 +55,30 @@ def test_file_runs_to_end(clips):
     assert "link='file'" in result.stdout
     assert "captured=30 " in result.stdout
     assert "failed_reads=0 " in result.stdout
+    assert "processed=" in result.stdout
     assert "events={}" in result.stdout
+    assert "perception:" not in result.stdout  # --no-detect: the model was never loaded
+    assert "requested 1280x720" not in result.stdout  # a file delivers its own size
+
+
+def test_benchmark_prints_the_baseline_block(clips):
+    result = run_cli("--source", str(clips["moving"]), "--link", "file", "--benchmark", "60")
+    assert result.returncode == 0, result.stderr
+    lines = [line for line in result.stdout.splitlines() if line.startswith("benchmark:")]
+    assert len(lines) == 3, result.stdout
+    assert "frames 640x360" in lines[0]
+    assert "det-size off" in lines[0]
+    assert "captured 30, processed " in lines[1]
+    assert "app delay ms p50 " in lines[2] and "p95 " in lines[2] and "max " in lines[2]
+
+
+HUD = HudInfo(capture_fps=29.97, dropped=3, proc_fps=4.2, app_delay_ms=180.0, people=2, tracks=1)
 
 
 @pytest.mark.parametrize("state", list(BANNERS))
 def test_draw_hud_every_state(state):
     image = np.full((360, 640, 3), 90, np.uint8)
-    out = draw_hud(image, state, 29.97, 3)
+    out = draw_hud(image, state, HUD)
     assert out.shape == image.shape
     assert (image == 90).all(), "input image modified"
     assert (out[:34] != 90).any(), "no banner drawn"
@@ -69,8 +87,29 @@ def test_draw_hud_every_state(state):
 
 def test_banner_colours_differ():
     image = np.full((360, 640, 3), 90, np.uint8)
-    colours = {tuple(draw_hud(image, s, None, 0)[5, 5]) for s in BANNERS}
+    off = HudInfo(None, 0, None, None, None, None)  # detection off, nothing measured yet
+    colours = {tuple(draw_hud(image, s, off)[5, 5]) for s in BANNERS}
     assert len(colours) == len(BANNERS)
+
+
+def test_hud_status_is_one_text_pass_on_a_dark_strip():
+    """Phase 01 A6: the status text was drawn twice (outline + text). Now: white on black."""
+    out = draw_hud(np.full((360, 640, 3), 90, np.uint8), "OK", HUD)
+    strip = out[-HUD_STRIP:].astype(int)
+    assert (strip[..., 0] == strip[..., 1]).all() and (strip[..., 1] == strip[..., 2]).all()
+    assert strip.max() > 200, "no white text"
+    assert (strip[:, -10:] == 0).all(), "text runs off a 640-wide frame"
+    assert (out[: -HUD_STRIP - 1, 300] == 90).any(), "strip taller than expected"
+
+
+def test_draw_tracks_labels_each_track():
+    from services.edge.perception.types import TrackObs
+    from services.edge.ui.preview import draw_tracks
+
+    image = np.full((360, 640, 3), 90, np.uint8)
+    out = draw_tracks(image, [TrackObs(7, (100.0, 100.0, 200.0, 300.0), 0.9, None)])
+    assert (image == 90).all(), "input image modified"
+    assert (out[100:300, 100] != 90).any(), "no box edge drawn"
 
 
 def test_cv2_error_on_open_exits_cleanly(monkeypatch, capsys):
@@ -79,7 +118,7 @@ def test_cv2_error_on_open_exits_cleanly(monkeypatch, capsys):
             raise cv2.error("backend exploded")
 
     printed = []
-    monkeypatch.setattr(cli, "open_source", lambda ref, api: Broken())
+    monkeypatch.setattr(cli, "open_source", lambda ref, size: Broken())
     monkeypatch.setattr(cli, "print_event", lambda ev, t0: printed.append(ev))
     assert cli.main(["--source", "0"]) == EXIT_OPEN_FAILED
     [ev] = printed
@@ -96,3 +135,29 @@ def test_thresholds_must_be_positive(flag, value, capsys):
         cli.parse_args(["--source", "0", flag, value])
     assert exc.value.code == 2
     assert "must be > 0" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "args,message",
+    [
+        (["--det-size", "100"], "multiple of 32"),
+        (["--det-size", "0"], "multiple of 32"),
+        (["--threshold", "0"], "must be in (0, 1]"),
+        (["--threshold", "1.5"], "must be in (0, 1]"),
+        (["--width", "0"], "must be > 0"),
+        (["--benchmark", "-5"], "must be > 0"),
+        (["--camera-api", "dshow"], "unrecognized arguments: --camera-api"),
+    ],
+)
+def test_bad_phase02_flags_are_rejected(args, message, capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.parse_args(["--source", "0", *args])
+    assert exc.value.code == 2
+    assert message in capsys.readouterr().err
+
+
+def test_defaults():
+    args = cli.parse_args(["--source", "0"])
+    assert (args.width, args.height) == (1280, 720)
+    assert (args.threshold, args.device, args.det_size) == (0.5, "auto", None)
+    assert (args.benchmark, args.no_detect) == (None, False)

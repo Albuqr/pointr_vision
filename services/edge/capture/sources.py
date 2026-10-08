@@ -104,13 +104,18 @@ class CameraSource(_LiveSource):
 
     kind = "camera"
 
-    def __init__(self, index: int, api: int = cv2.CAP_ANY):
+    def __init__(self, index: int, size: tuple[int, int] | None = None):
         super().__init__(str(index))
         self.index = index
-        self.api = api
+        self.size = size  # requested (width, height); open() reports what the camera gives
 
     def _new_capture(self) -> cv2.VideoCapture:
-        return cv2.VideoCapture(self.index, self.api)
+        # CAP_ANY picks MSMF on Windows (phase 01 A7); DSHOW cannot open by index on opencv 5.0
+        cap = cv2.VideoCapture(self.index, cv2.CAP_ANY)
+        if self.size and cap.isOpened():  # on every reopen too, so a recovery keeps the size
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.size[0])
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.size[1])
+        return cap
 
 
 class StreamSource(_LiveSource):
@@ -162,11 +167,13 @@ class FileSource(_CvSource):
         return frame
 
 
-def open_source(ref: str, camera_api: int = cv2.CAP_ANY) -> FrameSource:
-    """Pick the source for a ref; the caller calls open(). Raises SourceOpenError."""
+def open_source(ref: str, size: tuple[int, int] | None = None) -> FrameSource:
+    """Pick the source for a ref; the caller calls open(). Raises SourceOpenError.
+
+    size (width, height) is requested from cameras only; streams and files deliver their own."""
     ref = ref.strip()
     if ref.isdigit():
-        return CameraSource(int(ref), camera_api)
+        return CameraSource(int(ref), size)
     if ref.lower().startswith(STREAM_SCHEMES):
         return StreamSource(ref)
     path = Path(ref)
