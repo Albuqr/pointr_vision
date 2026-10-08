@@ -235,16 +235,24 @@ def run(args: argparse.Namespace) -> int:
         cap_ok = proc_ok = False
         try:
             cap_ok = capture.stop()
+        except KeyboardInterrupt:  # _stop is already set: the thread ends within one read
+            cap_ok = capture.done.wait(1.0)
+        try:
+            # without a stopped capture there is no last frame to drain: do not wait for it
+            proc_ok = processor.stop(10.0 if cap_ok else 0.0)
         except KeyboardInterrupt:
             pass
         try:
-            proc_ok = processor.stop()
+            if cap_ok:
+                source.close()
         except KeyboardInterrupt:
             pass
-        if cap_ok:
-            source.close()
-        else:
-            print("warning: capture thread did not stop in time; source left open", file=sys.stderr)
+        if not cap_ok:
+            print(
+                "warning: capture thread did not stop in time; source left open; "
+                "counts may be short",
+                file=sys.stderr,
+            )
         if not proc_ok:
             print("warning: processing did not stop in time; counts may be short", file=sys.stderr)
         try:

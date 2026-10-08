@@ -122,6 +122,9 @@ def test_draw_tracks_labels_each_track():
     assert (out[100:300, 100] != 90).any(), "no box edge drawn"
     label = out[80:97, 100:140]  # the "#7" label sits just above the box
     assert (label == TRACK_COLOUR).all(axis=-1).any(), "no #id label drawn"
+    other = draw_tracks(image, [TrackObs(1, (100.0, 100.0, 200.0, 300.0), 0.9, None)])
+    assert (other[80:97, 100:140] != label).any(), "label does not show the track ID"
+    assert (other[100:300] == out[100:300]).all()  # same box: only the label differs
 
 
 def test_model_load_failure_is_an_error_event(monkeypatch):
