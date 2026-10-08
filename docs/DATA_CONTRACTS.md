@@ -2,7 +2,7 @@
 
 Contract version: **0.2.0**. Any change bumps the version (minor for additive fields, major
 for removals or meaning changes) and needs a `DECISIONS.md` entry. JSON Schemas in
-`contracts/` are written from this file and tests check them against it (D-007).
+`contracts/` are written from this file and tests check them against it (D-009).
 
 Conventions: UUIDv4 for every ID generated on the device. Wall times are UTC ISO-8601.
 Durations and offsets in seconds as floats. Monotonic times are seconds relative to the

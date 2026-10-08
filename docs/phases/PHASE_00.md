@@ -7,9 +7,8 @@ A repository where every later layer can be built, tested and reviewed the same 
 - Repo layout from `ARCHITECTURE.md` section 3 (empty packages with `__init__.py`).
 - `pyproject.toml`: Python 3.11+, ruff config, pytest config, package `services`.
 - `.gitignore`: `.venv/`, `sessions/`, `*.mp4`, `*.mov`, `pointr.db`, caches, `.jupyter_runtime/`.
-- `perception/types.py` and `capture/types.py`: the dataclasses and Protocols from
-  `ARCHITECTURE.md` section 4, no implementations. (Approved: all six §4 Protocols, so
-  `session/types.py` and `recording/types.py` too; see D-007.)
+- `types.py` in each edge layer (`capture`, `perception`, `session`, `recording`): the
+  dataclasses and Protocols from `ARCHITECTURE.md` section 4, no implementations (D-008).
 - `contracts/`: JSON Schemas for `session.json` and `run.json` (v0.1.0, superseded by
   0.2.0 in D-006) and a test that validates example files against them.
 - Synthetic fixtures in `tests/fixtures/`: a short generated clip (moving coloured

@@ -63,25 +63,36 @@ written for 0.2.0; no file was ever written under 0.1.0.
 a run file with an unknown version.
 **Status.** Accepted.
 
-## D-007 · 2026-10-07 · Phase 00 foundations choices
-**Context.** Phase 00 left a few choices open: interpreter, where the session and recording
-Protocols live, how strict the schemas are, and how "generated from DATA_CONTRACTS.md" is
-enforced.
+## D-007 · 2026-10-07 · Python 3.11.9 virtualenv; setuptools as build backend only
+**Context.** Phase 00 left the interpreter and the packaging setup open.
 **Decision.**
 - `.venv` uses Python 3.11.9 (the version run.json shows; safest for the phase 02 stack).
-- All six Protocols from ARCHITECTURE §4 (plus `Frame`) are defined now, each in its layer's `types.py`
-  (`capture`, `perception`, `session`, `recording`), with no implementations.
-  `FrameRecord.app_delay_ms` is derived from `t_proc_end - t_recv`, not stored.
+- `setuptools` is the build backend only, for `pip install -e ".[dev]"`.
+**Consequences.** PyCharm and any other tooling point at `.venv`.
+**Status.** Accepted.
+
+## D-008 · 2026-10-07 · All §4 Protocols in each layer's types.py; session payloads provisional
+**Context.** Phase 00 left open where the session and recording Protocols live.
+**Decision.** All six Protocols from ARCHITECTURE §4 (plus `Frame`) are defined now, each in
+its layer's `types.py` (`capture`, `perception`, `session`, `recording`), with no
+implementations. `FrameRecord.app_delay_ms` is derived from `t_proc_end - t_recv`, not
+stored.
+**Consequences.** The Protocol method names and parameters follow §4 exactly. The payload
+dataclasses of the session and recording layers (`SessionMeta`, `RecordingInfo`) are
+provisional: they cannot yet carry run metadata (`run_id`, mode, input, detector, tracker,
+runtime) or end-of-run counts that `run.json` needs. Phase 03 completes them (e.g. a
+`RunMeta`, counts on close) with its own DECISIONS entry; that is expected, not a
+regression.
+**Status.** Accepted.
+
+## D-009 · 2026-10-07 · Strict JSON Schemas, hand-written and checked against the contract
+**Context.** Phase 00 left open how strict the schemas are, and how "generated from
+DATA_CONTRACTS.md" is enforced.
+**Decision.**
 - Schemas are strict: every documented key is required (missing value = `null`), no
   additional properties. UUIDv4, UTC timestamps and sha256 are checked by regex, because
   jsonschema's `date-time` format needs an extra package that phase 00 does not allow.
 - Schemas are written by hand. Tests check them against the JSON examples, enums and
   event kinds in DATA_CONTRACTS.md, so a change on one side without the other fails.
-- `setuptools` is the build backend only, for `pip install -e ".[dev]"`.
 **Consequences.** Writers in phases 03-04 must emit every key, using `null` for unknowns.
-The Protocol method names and parameters follow §4 exactly. The payload dataclasses of the
-session and recording layers (`SessionMeta`, `RecordingInfo`) are provisional: they cannot
-yet carry run metadata (`run_id`, mode, input, detector, tracker, runtime) or end-of-run
-counts that `run.json` needs. Phase 03 completes them (e.g. a `RunMeta`, counts on close)
-with its own DECISIONS entry; that is expected, not a regression.
 **Status.** Accepted.

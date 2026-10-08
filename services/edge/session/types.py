@@ -1,7 +1,7 @@
 """Session layer types and Protocol (ARCHITECTURE.md section 4). No implementations.
 
 Fields follow DATA_CONTRACTS.md sections 2 and 4. SessionMeta is provisional: it does not
-yet carry run metadata or end-of-run counts for run.json; phase 03 completes it (D-007).
+yet carry run metadata or end-of-run counts for run.json; phase 03 completes it (D-008).
 """
 
 from dataclasses import dataclass

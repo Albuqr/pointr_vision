@@ -18,13 +18,14 @@ In the working repo `.venv`, after the gate fixes:
 - `ruff format --check .`: all files formatted.
 - `pytest -q`: 114 passed.
 
-A1, clean clone at commit `a164132` (git clone into a scratch dir, new venv from Python 3.11.9):
+A1, clean clone at commit `1602e71` (completion audit re-run: git clone into a temp dir, new
+venv from Python 3.11.9, install exit code 0; temp dir deleted afterwards):
 ```bash
 git clone <repo> clone && cd clone
 python -m venv .venv
 .venv/Scripts/python.exe -m pip install -e ".[dev]"
 .venv/Scripts/ruff.exe check .            # All checks passed!
-.venv/Scripts/ruff.exe format --check .   # 31 files already formatted
+.venv/Scripts/ruff.exe format --check .   # 49 files already formatted
 .venv/Scripts/pytest.exe -q               # 114 passed
 .venv/Scripts/python.exe -m pytest -q     # 114 passed
 ```
@@ -40,15 +41,17 @@ None. Phase 00 has no capture or processing, so there are no FPS, delay or drop 
 ## Reviewer outcomes
 | Reviewer | Result | Findings fixed |
 |---|---|---|
-| `code-reviewer` | PASS after one fix round | MAJOR: `SessionWriter`/`SessionMeta` cannot carry run.json data, but D-007 had frozen them. D-007 now marks the payload types provisional, and phase 03 completes them (BACKLOG). MINOR fixed: pytest `pythonpath`; `tests/fixtures/__init__.py`; `eq=False` on ndarray dataclasses; `.gitignore` covers `*.avi`, `*.mkv`, `pointr.db*`; numpy/opencv major-version bounds; PHASE_00 pointers to D-006/D-007. MINOR to BACKLOG: `tests/` subdirs from ARCH §3; install command in CLAUDE.md |
+| `code-reviewer` | PASS after one fix round | MAJOR: `SessionWriter`/`SessionMeta` cannot carry run.json data, but the phase's decision entry had frozen them. D-008 now marks the payload types provisional, and phase 03 completes them (BACKLOG). MINOR fixed: pytest `pythonpath`; `tests/fixtures/__init__.py`; `eq=False` on ndarray dataclasses; `.gitignore` covers `*.avi`, `*.mkv`, `pointr.db*`; numpy/opencv major-version bounds; PHASE_00 pointers to D-006/D-007. MINOR to BACKLOG: `tests/` subdirs from ARCH §3; install command in CLAUDE.md |
 | `test-auditor` | PASS after one fix round | MAJOR: run.json UUID/UTC/sha256/python format rules were never exercised by a failing case. Added those broken cases plus a `$defs` equality test. MINOR fixed: more broken cases (`width=0`, 3 team_ids, extra event key, `rec_dropped=-1`); a run in progress is valid; dataclass fields checked against frames.csv/tracks.csv (in order) and the schema's source and event keys; Protocol return types; moving-clip threshold headroom; A1 cell made accurate; Protocol count corrected to six plus `Frame`. MINOR to BACKLOG: nullability of dataclass fields; `RecordingInfo` field check |
 | `contract-guardian` | PASS | No BLOCKER or MAJOR. MINOR fixed: frames.csv column order checked; `SourceInfo.width/height` and `SessionEvent.t_mono` made nullable to match the schema; doc sentences on when `rec_dropped`, `registration` and `ended_at` are null; `RecordingInfo` comment names `counts.rec_dropped`; "generated from" reworded. MINOR to OPEN_QUESTIONS: Q-11 (what is `t0`). MINOR to BACKLOG: drift tests do not cover types or nullability |
 
 ## Decisions taken in this phase
 - D-006: contract 0.1.0 → 0.2.0. run.json gains `contract_version` and `input.kind` `stream`.
-- D-007: Python 3.11.9; all six §4 Protocols defined now, with provisional session/recording
-  payload types; strict schemas with regex formats; schemas written by hand and checked
-  against the doc by tests; setuptools is the build backend only.
+- D-007: Python 3.11.9 virtualenv; setuptools is the build backend only.
+- D-008: all six §4 Protocols (plus `Frame`) in each layer's `types.py`; session/recording
+  payload types provisional until phase 03.
+- D-009: strict schemas with regex formats, written by hand and checked against the doc by
+  tests.
 
 ## Known limitations carried forward
 - `SessionMeta`/`RecordingInfo` are provisional. Phase 03 adds run metadata and counts (BACKLOG).
