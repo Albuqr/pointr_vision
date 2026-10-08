@@ -41,9 +41,27 @@ Detection, tracking, writing files (events print to console only in this phase).
 | A4 | Source that stops returning frames → `source_lost`; resumes → `source_recovered` | unit with a fake source |
 | A5 | Invalid source ref → clear error message, non-zero exit, no traceback dump | unit |
 | A6 | Laptop webcam opens and previews | manual |
-| A7 | Phone via USB (camera app) opens and previews | manual |
-| A8 | Unplugging the phone shows LOST in preview and prints the event; replugging recovers or exits cleanly | manual |
+| A7 | Phone over **Wi-Fi** (DroidCam, webcam index) opens and previews | manual |
+| A8 | Wi-Fi: turning off Wi-Fi on the phone shows LOST or FROZEN in the preview and prints `source_lost` or `frozen_frames`; turning it back on recovers or exits cleanly. Repeated over **USB**: unplugging the cable, then replugging. The report records which state each link produced | manual |
 | A9 | Covering the lens shows DARK | manual |
+| A9b | A still, empty scene over the phone for 60 s does **not** show FROZEN. If it does, `frozen_diff` is too loose; record it in the report | manual |
+
+### Notes on the manual tests
+- A8 accepts LOST or FROZEN (D-010): when the phone drops, the DroidCam client keeps its
+  virtual webcam open and may send a still placeholder, which reads as frozen, not lost.
+  The FROZEN banner says "image frozen, check camera connection" for that reason.
+- A9b checks the frozen threshold against real sensor noise. Threshold values that need
+  changing go in DECISIONS.md (D-013 holds the initial ones).
+
+## Traceability
+| # | Test |
+|---|---|
+| A1 | `tests/edge/test_sources.py::test_file_reads_every_frame_in_order` |
+| A2 | `tests/edge/test_capture.py::test_never_blocks_and_keeps_newest`, `::test_slow_consumer_accounting` |
+| A3 | `tests/edge/test_health.py::test_fixture_events` (black, frozen, moving) |
+| A4 | `tests/edge/test_health.py::test_lost_then_recovered`, `tests/edge/test_capture.py::test_fake_source_lost_and_recovered` |
+| A5 | `tests/edge/test_cli.py::test_bad_ref_exits_cleanly` |
+| A6-A9b | manual, commands in `PHASE_01_REPORT.md` |
 
 ## Gate reviewers
-`code-reviewer`, `test-auditor`.
+`code-reviewer`, `test-auditor`, `contract-guardian` (contract 0.3.0, D-012).
