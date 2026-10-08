@@ -34,7 +34,7 @@ In the working repo `.venv`, at commit `010e1aa`:
 - `ruff check .`: all checks passed.
 - `ruff format --check .`: 59 files already formatted.
 - `pytest -q`: 171 passed.
-  - Phase 00 files (`test_contracts.py`, `test_fixtures.py`, `test_interfaces.py`): 124 passed. Phase 00 ended with 114; the new ones are the contract 0.3.0 cases and the emitted-kinds check.
+  - Tests in the phase 00 files (`test_contracts.py`, `test_fixtures.py`, `test_interfaces.py`): 124 passed, i.e. the 114 original tests plus 10 new cases in `test_contracts.py` (60 → 70): 5 `source.link` values, 1 `source_open_failed` with null `t_mono`, 3 broken `link` values, 1 emitted-kinds check.
   - `tests/edge`: 47 passed.
 - No test needs a camera, a phone or a network. Sources are the synthetic clips from `tests/fixtures/make_clips.py` (now also `moving.mov`), a scripted fake source, or a fake `VideoCapture`.
 
