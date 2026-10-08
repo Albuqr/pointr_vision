@@ -74,6 +74,7 @@ it here; it then goes into DECISIONS.md as the tuned value (D-013 holds the init
 | Test | Link | Result | State seen (A8) | Notes |
 |---|---|---|---|---|
 | A6 | builtin | PASS | n/a | index 0, 640x480 (OpenCV default, not requested), banner OK, ~30 fps, 1886 captured / 19 dropped (~1%) in ~63 s, 0 failed reads, no events, clean exit on q. HUD text overlap noted (BACKLOG) |
+| A7 (attempt 1) | Wi-Fi | not a pass | n/a | index 1, MSMF, 640x480, no live DroidCam feed: identical frames (diff 0.00), frozen_frames at +2.16 s with banner, 0 failed reads, clean exit. Confirms FROZEN on a dead virtual device |
 | A7 | Wi-Fi | | | |
 | A8 | Wi-Fi | | | |
 | A8 | USB | | | |
