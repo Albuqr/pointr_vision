@@ -181,3 +181,113 @@ then `null`, and `HealthEvent.t_mono` could not be `None`.
 **Consequences.** The stream values (2 s read timeout, 5 s open timeout) are configuration
 only; no stream loss time has been measured on hardware. A8 over IP Webcam will show it.
 **Status.** Accepted.
+
+## D-015 · 2026-10-08 · Phase 02 API verification: rfdetr 1.11.2, supervision 0.30.8, torch CPU
+**Context.** PHASE_02 requires the `rfdetr` and `supervision` APIs to be checked against the
+installed versions before coding. They are not installed yet (installing them is the
+dependency approval of this phase). These facts were read from the source of the exact wheels
+that would be installed: `rfdetr-1.11.2-py3-none-any.whl`, `supervision-0.30.8-py3-none-any.whl`
+and `trackers-2.6.1-py3-none-any.whl`, from PyPI on 2026-10-08. The pip resolve was a dry run.
+Re-check after install with `help()`.
+**Findings.**
+- **GPU.** None. `nvidia-smi` is not present. The notebook has Intel UHD Graphics (no
+  CUDA). Phase 02 baseline numbers are CPU numbers.
+- **Model class.** `rfdetr.RFDETRNano` (`rfdetr/variants.py`), config `RFDETRNanoConfig`:
+  `resolution=384`, `patch_size=16`, `num_windows=2`, `positional_encoding_size=24`,
+  `pretrain_weights="rf-detr-nano.pth"`, `num_classes=90`. The constructor takes config fields
+  as keyword arguments, e.g. `RFDETRNano(device="cpu")`. `device` defaults to an auto-detected
+  value (`rfdetr.config._detect_device`: the available accelerator, else `"cpu"`).
+- **Weights.** On construction, `rf-detr-nano.pth` is downloaded once to the model cache
+  (`~/.roboflow/models`, or `RF_HOME`) from `storage.googleapis.com/rfdetr/nano_coco/...`
+  and checked against an md5 in `rfdetr/assets/model_weights.py`. Loading uses
+  `torch.load(weights_only=True)` unless `trust_checkpoint=True` is passed.
+- **predict.** `predict(images, threshold=0.5, shape=None, patch_size=None,
+  include_source_image=True, **kwargs)` returns a `supervision.Detections` for a single
+  image. Images are expected in **RGB**. A uint8 HxWx3 numpy array is accepted, and a
+  negative-stride view such as `bgr[:, :, ::-1]` is copied internally. The image is resized
+  (stretched, no letterbox, bilinear) to `shape=(h, w)`, or to `(resolution, resolution)` when
+  `shape` is None. Both sides must be divisible by `patch_size * num_windows` (32 for Nano),
+  otherwise it raises `ValueError`. The backbone interpolates its positional encoding at run
+  time (`interpolate_pos_encoding`), so another `shape` works with the 384 weights. Boxes come
+  back in source-image pixels (`target_sizes` = original size). Detections are kept when
+  `score > threshold` (strict).
+- **Person class.** For the pretrained COCO checkpoint, `class_id` is the raw COCO category ID
+  (1-90, sparse), not a 0-based index. Person is `class_id == 1`
+  (`rfdetr/assets/coco_classes.py`). `detections.data["class_name"]` also carries `"person"`.
+- **supervision ByteTrack.** `supervision.ByteTrack(track_activation_threshold=0.25,
+  lost_track_buffer=30, minimum_matching_threshold=0.8, frame_rate=30,
+  minimum_consecutive_frames=1)`, updated with `update_with_detections(detections) ->
+  Detections` (with `tracker_id`). It requires `confidence`. It returns only tracks matched
+  to a detection in the current frame. The lost buffer is counted in calls, scaled by
+  `frame_rate / 30`. **The class is deprecated since supervision 0.28.0 and is removed in
+  0.31.0.** The deprecation notice points to `ByteTrackTracker` in the `trackers` package.
+- **trackers ByteTrackTracker** (alternative). `trackers.ByteTrackTracker(lost_track_buffer=30,
+  frame_rate=30.0, track_activation_threshold=0.7, minimum_consecutive_frames=2,
+  minimum_iou_threshold=0.1, high_conf_det_threshold=0.6)`, with `update(detections,
+  frame=None, timestamp=None) -> sv.Detections`. Immature tracks get `tracker_id == -1`.
+  `timestamp` (absolute seconds) makes the lost buffer time-based instead of per call.
+  Passing `frame` only emits a warning.
+- **torch CPU wheel.** `torch 2.14.1+cpu` and `torchvision 0.29.1+cpu` resolve for
+  cp311/win_amd64 from `https://download.pytorch.org/whl/cpu`. rfdetr needs `torch>=2.2.0`,
+  `torchvision>=0.17.0` and `transformers>=5.1,<6`.
+**Decision.** None yet. These are the facts the phase 02 plan is built on. The choices
+(tracker package, det-size mechanism, threading) are recorded in a later entry after approval.
+**Status.** Facts recorded. Re-verified after install (D-016) with `inspect.signature` and the
+config defaults: no difference.
+
+## D-016 · 2026-10-08 · Phase 02 dependencies, pinned; ByteTrack from `trackers`, not `supervision`
+**Context.** Phase 02 needs a detector and a tracker. D-015 found that `supervision.ByteTrack`,
+the tracker named in PHASE_02 and D-003, is deprecated and is removed in supervision 0.31.0.
+The developer approved the dependencies on 2026-10-08, on these conditions: exact pins,
+licences recorded, the CPU torch build, and the existing tests passing after the install.
+**Decision.**
+- Runtime dependencies, pinned exactly in `pyproject.toml`:
+
+  | Package | Version | Licence | Why |
+  |---|---|---|---|
+  | torch | 2.14.1 (+cpu wheel) | `Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND MIT` (wheel metadata) | rfdetr runtime |
+  | torchvision | 0.29.1 (+cpu wheel) | BSD | rfdetr runtime |
+  | rfdetr | 1.11.2 | Apache-2.0. The Nano config states `license="Apache-2.0"` for the model | detector |
+  | supervision | 0.30.8 | MIT | `Detections` type returned by rfdetr and taken by trackers |
+  | trackers | 2.6.1 | Apache-2.0 | ByteTrack |
+
+  All five allow use in a private product. torch and torchvision come from
+  `https://download.pytorch.org/whl/cpu`, installed **before** `pip install -e ".[dev]"`.
+  pyproject cannot name that index, so the order is in README and CLAUDE.md. `torch==2.14.1`
+  matches the installed `2.14.1+cpu`, because a pin without a local label ignores it.
+- **Tracker: `trackers.ByteTrackTracker`** instead of `supervision.ByteTrack`. This deviates
+  from PHASE_02 and D-003 ("ByteTrack from supervision"). It is the same algorithm, from the
+  maintained package that the supervision deprecation notice points to. Checked in the
+  installed source (`trackers/core/base.py`, `trackers/utils/base_tracklet.py`):
+  - With `update(dets, timestamp=t)`, a lost track is kept for `maximum_time_without_update
+    = lost_track_buffer / 30.0` **seconds** (default `lost_track_buffer=30`, so 1.0 s),
+    measured with `time_since_update_seconds`. This holds at any processing rate. Without
+    timestamps it counts calls. Pointr passes `Frame.t_recv`. `frame_rate` (default 30) only
+    converts elapsed seconds into Kalman steps.
+  - **No observed/predicted state.** `update()` returns the current frame's detections,
+    indexed, with `tracker_id` (`-1` for immature or unmatched ones). Coasting tracks are not
+    returned and no per-track state is exposed. `TrackObs.state` is therefore `None`, and the
+    `tracks.csv` `state` column will be empty, as the contract allows. `TrackObs.confidence`
+    is the matched detection's score.
+  - Defaults kept and recorded: `lost_track_buffer=30`, `frame_rate=30.0`,
+    `track_activation_threshold=0.7`, `minimum_consecutive_frames=2`,
+    `minimum_iou_threshold=0.1`, `high_conf_det_threshold=0.6`.
+- **Install footprint**, measured: `.venv` grew from 236 MB to 1363 MB (+1127 MB). The largest
+  are torch 544 MB, transformers 120 MB and scipy 119 MB. 53 packages were added and
+  setuptools was upgraded from 65.5.0 to 78.1.0. The dry run had predicted 84; the real
+  install resolved 78.1.0. pip install -e ".[dev]" and the 171 earlier tests passed after it.
+- **Transitive packages that are not detection or tracking**, pulled by rfdetr (through
+  transformers) and supervision: `transformers` (the DINOv2 backbone code; imported, about
+  10 s at import), `huggingface_hub` + `hf-xet` + `httpx`/`anyio` (Hugging Face Hub client),
+  `tokenizers`, `regex`, `safetensors` (NLP tokenizer and weight formats), `typer`/`click`/
+  `rich`/`shellingham` (CLI tooling), `matplotlib` and its font and plot libraries, and `av`
+  (PyAV video I/O). No training or logging SDK is installed: rfdetr's `train`, `loggers`,
+  `onnx` and similar extras are not requested.
+**Consequences.**
+- With the detector threshold at 0.5, a person scored in [0.5, 0.7) is detected but never
+  **starts** a track (`track_activation_threshold=0.7`). Scores in [0.5, 0.6) only extend
+  existing tracks (the low-confidence stage). The HUD shows people (detections) and tracks
+  separately, so A6 shows it if it happens. The values are not tuned in this phase.
+- `supervision` stays a direct dependency, because the tracker adapter builds
+  `sv.Detections`.
+**Status.** Accepted.
