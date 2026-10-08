@@ -16,7 +16,7 @@ Package versions (working repo `.venv`): Python 3.11.9, numpy 2.4.6, opencv-pyth
 | A6 | Laptop webcam opens and previews | manual | Pass |
 | A7 | Phone over Wi-Fi (DroidCam) opens and previews | manual | Pass (attempt 2) |
 | A8 | Wi-Fi off / cable unplugged → LOST or FROZEN + event; back → recovers or exits cleanly (Wi-Fi and USB) | manual | _pending_ |
-| A9 | Covering the lens shows DARK | manual | _pending_ |
+| A9 | Covering the lens shows DARK | manual | Pass |
 | A9b | Still, empty scene for 60 s over the phone does not show FROZEN | manual | Pass |
 
 Supporting tests (no criterion of their own):
@@ -79,7 +79,7 @@ it here; it then goes into DECISIONS.md as the tuned value (D-013 holds the init
 | A8 | Wi-Fi | | | |
 | A8 | USB | | | |
 | A8 | IP Webcam (optional) | | | |
-| A9 | | | | |
+| A9 | | PASS | n/a | Lens covered by finger: dark_frames at +16.48 s (brightness 7.4 < 20), banner DARK, returned to OK on uncover. Run 33 s, 986 captured, 14 dropped, 0 failed reads. No end event logged (see BACKLOG item from A9b) |
 | A9b | Wi-Fi | PASS | n/a | Still desk scene, phone on Wi-Fi, 09:40:30-09:41:30 local (+208 to +268 s): no frozen_frames, banner OK. frozen_diff 0.5 holds on real footage. Run: 405 s, 12166 captured, 116 dropped (~1%), 0 failed reads. Unplanned events earlier in the same run: dark (brightness 11) at +45.6 s; frozen (diff 0.00) at +110.5 s; dark (brightness 0.0) at +116.5 s. The diff 0.00 + brightness 0.0 pair matches the DroidCam feed going black (cause: not observed). Banner returned to OK, but no end event exists for DARK/FROZEN (BACKLOG) |
 
 ## Measurements
