@@ -15,5 +15,8 @@ sessions/
 *.mkv
 pointr.db*
 
+# Downloaded test images of real people: fetched by the slow tests, never committed (rule 9)
+tests/fixtures/downloads/
+
 # Local copy of the docs bundle
 pointr-docs.zip

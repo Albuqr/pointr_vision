@@ -7,7 +7,17 @@ name = "pointr"
 version = "0.0.0"
 description = "Pointr: sports training data from a live camera"
 requires-python = ">=3.11"
-dependencies = ["numpy>=2,<3", "opencv-python>=5,<6"]
+# Exact pins: the perception APIs were verified against these versions (D-015, D-016).
+# torch/torchvision: install the CPU wheels first from the PyTorch CPU index (README).
+dependencies = [
+    "numpy>=2,<3",
+    "opencv-python>=5,<6",
+    "torch==2.14.1",
+    "torchvision==0.29.1",
+    "rfdetr==1.11.2",
+    "supervision==0.30.8",
+    "trackers==2.6.1",
+]
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff", "jsonschema"]
@@ -29,3 +39,5 @@ known-first-party = ["services", "fixtures"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+addopts = "-m 'not slow'"
+markers = ["slow: needs the real model weights and network on first run (pytest -m slow)"]

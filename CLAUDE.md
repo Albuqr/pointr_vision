@@ -47,11 +47,16 @@ synced to a server when one is reachable. Basketball first. This is a TCC projec
 
 - Windows 11, PyCharm, Git Bash. Python 3.11+. Virtualenv at `.venv`
   (`source .venv/Scripts/activate`).
-- Install (runtime + dev tools): `pip install -e ".[dev]"`.
+- Install (runtime + dev tools), in this order, so torch is the CPU build:
+  `pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cpu`,
+  then `pip install -e ".[dev]"`. Check: `python -c "import torch; print(torch.__version__,
+  torch.cuda.is_available())"` prints `2.14.1+cpu False`.
 - If Git Bash loses PATH: `export PATH="/usr/bin:/bin:/mingw64/bin:/cmd:$PATH"`.
 - Docker Desktop must be running before any `docker build` (server phases).
 - Tooling: `ruff` (lint + format), `pytest`. Run both before declaring anything done.
-- Setup: `source .venv/Scripts/activate && pip install -e ".[dev]"`
+- Setup: `source .venv/Scripts/activate`, then the two install commands above.
+- `pytest` skips tests marked `slow` (real model weights, downloaded once). Run them with
+  `pytest -m slow`.
 
 ## Git
 
