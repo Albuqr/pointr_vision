@@ -341,4 +341,41 @@ BACKLOG items to the scope.
 **Consequences.** No contract change: phase 02 writes no files. `run.json` needs fields for
 det-size and the requested capture size before phase 03 writes it (BACKLOG). Q-02 (numeric
 RNF02 target) stays open until the A7 baseline exists.
+**Status.** Accepted; the shutdown, load order and threshold points are amended by D-018.
+
+## D-018 · 2026-10-08 · Phase 02 gate fixes: drain at shutdown, model before source, "above" threshold
+**Context.** At the phase 02 gate, contract-guardian (MAJOR) and code-reviewer (MINOR) found
+that a run stopped mid-stream (`--benchmark` end, `q`, Ctrl+C) left the frame waiting in
+`proc_queue` neither processed nor counted, so `captured = processed + dropped + 1`. That
+breaks rule 6 and would put wrong counts into `run.json` in phase 03. test-auditor (MAJOR)
+showed the A3 tests passed with an adapter that numbered tracks by list position. The fix
+round's first version, swapping the detection order on odd frames, still passed that
+mutation: the library returns tracks in track order, not detection order. Only a person
+leaving the frame exposes it.
+**Decision.**
+- **Shutdown drains.** `Processor.stop()` now waits for the thread to exit on its own:
+  capture stops first, `capture.done` is set, the processor handles the frame still in
+  `proc_queue` and finishes. Only past the timeout is it told to stop. Frames still left
+  after that, or the frame in hand when the detector raises, are counted in `unprocessed`,
+  which is printed in the summary and the benchmark. So `captured = processed + dropped +
+  unprocessed` always holds, with `unprocessed = 0` on a normal stop.
+- **Model loads before the source opens.** `open_source()` still checks the ref first (bad
+  files fail fast), then the model loads and warms up (at `--width x --height`), and only
+  then does the device open. A stream no longer sits unread for the load time and buffers
+  stale frames with fresh `t_recv` stamps. The cost: a camera index that does not exist is
+  reported after the model load, not before.
+- **Threshold is strict.** The detector keeps `confidence > threshold`, matching the contract
+  ("above threshold") and rfdetr's own filter. This supersedes D-017's `>=`.
+- **Shutdown guards.** Each stop step and the summary have their own Ctrl+C guard. A
+  processing thread that does not stop is reported, like capture. `--benchmark` and other
+  float flags reject `nan` and `inf`. The preview receives `latest()` and `done` instead of
+  the `Processor`. The benchmark gets det-size and device as values, not from the detector.
+  FPS and drop rate are computed by the pure function `rates()`.
+- **Correction to D-016.** "about 10 s at import" was one measurement during verification
+  (2026-10-08) of importing `rfdetr`, `supervision` and `trackers` together: 10.5 s. It was
+  not transformers alone. The phase 02 report records it.
+**Consequences.** Tests: a mid-stream stop, the detector failure accounting, model-load
+failure (event, null `t_mono`, exit 1, source never opened), the delivered-size CLI line, the
+benchmark stopping after its seconds, and the label pixels. A3 now has one person leaving
+while the other must keep their ID, and that test fails under the position mutation.
 **Status.** Accepted.

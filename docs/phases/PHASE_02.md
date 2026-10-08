@@ -68,16 +68,16 @@ Writing files (phase 03), recording, reports, pose, athlete identity.
 ## Traceability
 | # | Test | Result |
 |---|---|---|
-| A1 | `tests/edge/test_perception.py::test_detector_keeps_only_persons_at_or_above_threshold`, `::test_detector_feeds_the_model_rgb_at_det_size` | see report |
+| A1 | `tests/edge/test_perception.py::test_detector_keeps_only_persons_above_threshold`, `::test_detector_feeds_the_model_rgb_at_det_size` | see report |
 | A2 | `tests/edge/test_perception.py::test_detections_shapes` (0, 1, 7) | see report |
-| A3 | `tests/edge/test_perception.py::test_tracker_keeps_one_id_for_a_smoothly_moving_box`, `::test_tracker_gives_separate_people_separate_ids` | see report |
+| A3 | `tests/edge/test_perception.py::test_tracker_keeps_one_id_for_a_smoothly_moving_box`, `::test_each_person_keeps_their_own_id` (detection order swapped; one person leaves, the other keeps their ID) | see report |
 | A4 | `tests/edge/test_perception.py::test_empty_frames_give_no_tracks`, `::test_empty_frames_after_tracks_give_no_tracks` | see report |
 | A5 | `tests/edge/test_detector_slow.py` (`pytest -m slow`) | see report |
 | A6, A7 | manual, commands in `PHASE_02_REPORT.md` | see report |
-| B1 | `tests/edge/test_sources.py::test_camera_requests_size_and_reports_what_it_delivers`, `::test_camera_without_size_requests_nothing`, `::test_open_source_passes_size_to_cameras_only` | see report |
-| B2, B3 | `tests/edge/test_cli.py::test_bad_phase02_flags_are_rejected`, `::test_defaults` | see report |
-| B4 | `tests/edge/test_perception.py::test_slow_processing_drops_frames_and_keeps_app_delay_bounded`, `::test_processed_timings_are_ordered`, `::test_detector_failure_is_an_error_event` | see report |
-| B5 | `tests/edge/test_cli.py::test_benchmark_prints_the_baseline_block`, `::test_file_runs_to_end`, `tests/edge/test_perception.py::test_capture_only_mode_counts_every_frame`, `::test_delay_stats` | see report |
+| B1 | `tests/edge/test_sources.py::test_camera_requests_size_and_reports_what_it_delivers`, `::test_camera_without_size_requests_nothing`, `::test_open_source_passes_size_to_cameras_only`, `tests/edge/test_cli.py::test_cli_prints_the_size_the_camera_delivers` | see report |
+| B2, B3 | `tests/edge/test_cli.py::test_bad_phase02_flags_are_rejected` (incl. nan/inf), `::test_valid_phase02_flags_are_accepted`, `::test_defaults` | see report |
+| B4 | `tests/edge/test_perception.py::test_slow_processing_drops_frames_and_keeps_app_delay_bounded`, `::test_stop_mid_stream_accounts_for_every_frame`, `::test_processed_timings_are_ordered`, `::test_detector_failure_is_an_error_event` | see report |
+| B5 | `tests/edge/test_cli.py::test_benchmark_prints_the_baseline_block`, `::test_benchmark_stops_after_its_seconds`, `::test_file_runs_to_end`, `tests/edge/test_perception.py::test_capture_only_mode_counts_every_frame`, `::test_rates`, `::test_delay_stats` | see report |
 | B6 | `tests/edge/test_cli.py::test_hud_status_is_one_text_pass_on_a_dark_strip`, `::test_draw_hud_every_state`, `::test_draw_tracks_labels_each_track`; manual in A6 | see report |
 | B7 | manual | see report |
 
