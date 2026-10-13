@@ -15,11 +15,16 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import cv2
+import numpy as np
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from services.app.calibrations import CalibrationStore
 from services.app.config import CameraConfig
+from services.edge.calibration.court import court_model
+from services.edge.calibration.homography import fit_calibration
+from services.edge.calibration.render import projected_court_lines
 from services.edge.capture.sources import SourceOpenError, open_source
 from services.edge.capture.types import SourceEnded
 from services.edge.launcher import Camera, ConfigError, Launcher, Options, parse_config
@@ -43,6 +48,7 @@ class Studio:
     def __init__(self, out: str, config=None, launcher_factory=Launcher):
         self.out = str(Path(out).resolve())
         self.config = config or CameraConfig()
+        self.calibrations = CalibrationStore(self.config.path.parent)
         self.launcher_factory = launcher_factory
         self.launcher = None
         self.worker = None
@@ -51,6 +57,7 @@ class Studio:
         self.lock = threading.RLock()
         self.final: dict[str, dict] = {}
         self.frame_cache = {}
+        self.calibration_frames = {}
         self.active_group_path = self.config.path.with_name("active_group.json")
         self.recover_interrupted_group()
 
@@ -111,20 +118,34 @@ class Studio:
                 while port in self.preview_ports.values():
                     port = self.free_port()
                 self.preview_ports[camera.camera_id] = port
-            cameras = [
-                Camera(
-                    camera.camera_id,
-                    camera.source,
-                    camera.link,
-                    camera.det_size,
-                    camera.preview,
-                    camera.track_lost_secs,
-                    camera.track_activation,
-                    camera.track_min_frames,
-                    self.preview_ports[camera.camera_id],
+            configured = []
+            for camera in cameras:
+                try:
+                    saved = self.calibrations.load(camera.camera_id)
+                except ValueError as exc:
+                    raise HTTPException(422, str(exc)) from exc
+                calibration_path = None
+                if saved:
+                    calibration_path = str(
+                        self.calibrations.camera_dir(camera.camera_id)
+                        / saved["calibration_id"]
+                        / "calibration.json"
+                    )
+                configured.append(
+                    Camera(
+                        camera.camera_id,
+                        camera.source,
+                        camera.link,
+                        camera.det_size,
+                        camera.preview,
+                        camera.track_lost_secs,
+                        camera.track_activation,
+                        camera.track_min_frames,
+                        self.preview_ports[camera.camera_id],
+                        calibration_path,
+                    )
                 )
-                for camera in cameras
-            ]
+            cameras = configured
             opts = Options(self.out, self.group_id)
             self.launcher = self.launcher_factory(cameras, opts)
             self.active_group_path.parent.mkdir(parents=True, exist_ok=True)
@@ -222,6 +243,15 @@ class Studio:
                     "last_event": events[-1] if events else None,
                     "session_folder": str(session_dir) if session_dir else None,
                     "preview_port": preview_port,
+                    "error": getattr(child, "failure", None),
+                    "calibration": (
+                        {
+                            "calibration_id": session.get("calibration", {}).get("calibration_id"),
+                            "check_error_m": session.get("calibration", {}).get("check_error_m"),
+                        }
+                        if session.get("calibration")
+                        else None
+                    ),
                 }
             )
         return {"running": active, "group_id": self.group_id, "cameras": cameras, "final": finals}
@@ -302,6 +332,140 @@ class Studio:
             if source:
                 source.close()
 
+    def calibration_frame(self, camera_id, cache=True):
+        entry = next((item for item in self.entries() if item["camera_id"] == camera_id), None)
+        if entry is None:
+            raise HTTPException(404, "camera not found")
+        with self.lock:
+            child = next(
+                (
+                    c
+                    for c in getattr(self.launcher, "children", [])
+                    if c.cam.camera_id == camera_id and c.running
+                ),
+                None,
+            )
+            port = child.preview_port if child else None
+        try:
+            if port:
+                with urllib.request.urlopen(
+                    f"http://127.0.0.1:{port}/raw-snapshot.jpg", timeout=3
+                ) as r:
+                    jpeg = r.read()
+                image = cv2.imdecode(np.frombuffer(jpeg, dtype=np.uint8), cv2.IMREAD_COLOR)
+                if image is None:
+                    raise ValueError("recording process returned an invalid JPEG")
+            else:
+                source = open_source(str(entry["source"]), None)
+                try:
+                    source.open()
+                    deadline = time.monotonic() + 3
+                    image = None
+                    while time.monotonic() < deadline and image is None:
+                        try:
+                            frame = source.read()
+                        except SourceEnded:
+                            break
+                        if frame is not None:
+                            image = frame.image.copy()
+                    if image is None:
+                        raise ValueError("no frame received")
+                finally:
+                    source.close()
+                ok, encoded = cv2.imencode(".jpg", image)
+                if not ok:
+                    raise ValueError("JPEG encoding failed")
+                jpeg = encoded.tobytes()
+        except (SourceOpenError, OSError, ValueError, cv2.error) as exc:
+            raise HTTPException(502, f"could not capture calibration frame: {exc}") from exc
+        token = str(uuid.uuid4())
+        if cache:
+            self.calibration_frames[camera_id] = {
+                "token": token,
+                "jpeg": jpeg,
+                "image": image.copy(),
+            }
+        return jpeg, token, image.shape[1], image.shape[0]
+
+    def calibration_fit(self, camera_id, payload, save=False):
+        cached = self.calibration_frames.get(camera_id)
+        if not cached or payload.get("frame_token") != cached["token"]:
+            raise HTTPException(409, "capture a fresh frame before fitting or saving")
+        try:
+            court = court_model(
+                payload.get("court_kind", "custom"),
+                float(payload.get("length_m", 28)),
+                float(payload.get("width_m", 15)),
+                payload.get("custom_landmarks"),
+            )
+            points = payload["points"]
+            for point in points:
+                image_x, image_y = point["image_px"]
+                if (
+                    not 0 <= image_x < cached["image"].shape[1]
+                    or not 0 <= image_y < cached["image"].shape[0]
+                ):
+                    raise ValueError("image point is outside the captured frame")
+                x, y = point["court_m"]
+                if not 0 <= x <= court.length_m or not 0 <= y <= court.width_m:
+                    raise ValueError("court point is outside the court dimensions")
+            result = fit_calibration(
+                points,
+                float(payload.get("max_check_error_m", 0.5)),
+                bool(payload.get("save_anyway", False)),
+                enforce_limit=save,
+                require_checks=save,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(422, str(exc)) from exc
+        result["projected_court_lines"] = projected_court_lines(
+            result["homography_image_to_court"], court
+        )
+        result["court"] = {
+            "kind": court.kind,
+            "length_m": court.length_m,
+            "width_m": court.width_m,
+            "landmarks": court.landmarks,
+        }
+        result["point_errors_m"] = []
+        calibration_index = check_index = 0
+        for point in points:
+            if point["role"] == "calibration":
+                result["point_errors_m"].append(result["calibration_errors_m"][calibration_index])
+                calibration_index += 1
+            else:
+                result["point_errors_m"].append(result["check_errors_m"][check_index])
+                check_index += 1
+        if save:
+            residual_iter = iter(result["point_errors_m"])
+            document = {
+                "contract_version": "0.8.0",
+                "calibration_id": str(uuid.uuid4()),
+                "camera_id": camera_id,
+                "created_at": dt.datetime.now(dt.UTC).isoformat().replace("+00:00", "Z"),
+                "court": result["court"],
+                "image_size": {
+                    "width": cached["image"].shape[1],
+                    "height": cached["image"].shape[0],
+                },
+                "homography_image_to_court": result["homography_image_to_court"],
+                "points": [{**p, "residual_m": next(residual_iter)} for p in points],
+                "errors": {
+                    key: result[key]
+                    for key in ("calibration_mean_m", "check_mean_m", "check_max_m")
+                },
+                "max_check_error_m": float(payload.get("max_check_error_m", 0.5)),
+                "forced": result["forced"],
+                "audit_frame": "frame.jpg",
+            }
+            try:
+                path = self.calibrations.save(document, cached["jpeg"])
+            except (OSError, ValueError) as exc:
+                raise HTTPException(422, str(exc)) from exc
+            result["calibration"] = document
+            result["path"] = str(path)
+        return result
+
 
 def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher):
     studio = Studio(out, config, launcher_factory)
@@ -374,6 +538,65 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
     @app.post("/api/cameras/{camera_id}/test")
     def test_camera(camera_id: str):
         return studio.test_camera(camera_id)
+
+    @app.get("/api/cameras/{camera_id}/calibration")
+    def get_calibration(camera_id: str):
+        try:
+            return studio.calibrations.load(camera_id)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.get("/api/cameras/{camera_id}/calibration/frame")
+    def calibration_frame(camera_id: str):
+        jpeg, token, width, height = studio.calibration_frame(camera_id)
+        return Response(
+            jpeg,
+            media_type="image/jpeg",
+            headers={
+                "X-Frame-Token": token,
+                "X-Frame-Width": str(width),
+                "X-Frame-Height": str(height),
+                "Cache-Control": "no-store",
+            },
+        )
+
+    @app.post("/api/cameras/{camera_id}/calibration/fit")
+    async def fit_camera_calibration(camera_id: str, request: Request):
+        return studio.calibration_fit(camera_id, await request.json())
+
+    @app.put("/api/cameras/{camera_id}/calibration")
+    async def save_camera_calibration(camera_id: str, request: Request):
+        return studio.calibration_fit(camera_id, await request.json(), save=True)
+
+    @app.get("/api/cameras/{camera_id}/calibration/compare")
+    def compare_calibration(camera_id: str):
+        try:
+            saved = studio.calibrations.load(camera_id)
+            if saved is None:
+                raise HTTPException(404, "no saved calibration")
+            audit = studio.calibrations.audit_frame(saved)
+            fresh_jpeg, _, width, height = studio.calibration_frame(camera_id, cache=False)
+            old_image = cv2.imdecode(np.frombuffer(audit, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+            new_image = cv2.imdecode(
+                np.frombuffer(fresh_jpeg, dtype=np.uint8), cv2.IMREAD_GRAYSCALE
+            )
+            score = None
+            if (
+                old_image is not None
+                and new_image is not None
+                and old_image.shape == new_image.shape
+            ):
+                score = float(cv2.absdiff(old_image, new_image).mean() / 255)
+            return {
+                "calibration_id": saved["calibration_id"],
+                "difference_score": score,
+                "warning": score is None or score > 0.15,
+                "audit_frame": base64.b64encode(audit).decode("ascii"),
+                "fresh_frame": base64.b64encode(fresh_jpeg).decode("ascii"),
+                "resolution": [width, height],
+            }
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
 
     @app.post("/api/recording/start")
     def start_recording():

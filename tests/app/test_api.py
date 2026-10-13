@@ -3,8 +3,12 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
+import cv2
+import numpy as np
 import pytest
+from jsonschema import Draft202012Validator
 from starlette.testclient import TestClient
 
 from scripts import run_cameras
@@ -70,6 +74,10 @@ def test_cli_and_app_share_launcher_library_and_http_preview_flag():
     camera = Camera("cam1", "0", "builtin", http_preview_port=45678)
     command = child_command(camera, Options("C:/sessions", "group"))
     assert "--http-preview=45678" in command
+    calibrated = Camera("cam1", "0", "builtin", calibration_path="C:/calibration.json")
+    assert "--calibration=C:/calibration.json" in child_command(
+        calibrated, Options("C:/sessions", "group")
+    )
     result = subprocess.run(
         [sys.executable, "scripts/run_cameras.py", "--help"],
         capture_output=True,
@@ -187,3 +195,66 @@ def test_camera_test_uses_fixture_without_model_and_is_refused_during_recording(
     client.post("/api/recording/start")
     assert client.post("/api/cameras/clip/test").status_code == 409
     client.post("/api/recording/stop")
+
+
+def test_calibration_frame_endpoint_returns_raw_full_resolution_frame(client, tmp_path):
+    fixture = make_clips(tmp_path)["moving"]
+    client.post("/api/cameras", json={"camera_id": "clip", "source": str(fixture), "link": "file"})
+    response = client.get("/api/cameras/clip/calibration/frame")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/jpeg"
+    assert response.headers["x-frame-token"]
+    assert response.content.startswith(b"\xff\xd8")
+    decoded = cv2.imdecode(np.frombuffer(response.content, dtype=np.uint8), cv2.IMREAD_COLOR)
+    assert decoded.shape[1] == int(response.headers["x-frame-width"])
+    assert decoded.shape[0] == int(response.headers["x-frame-height"])
+
+
+def test_calibration_fit_save_and_load_round_trip(client, tmp_path):
+    fixture = make_clips(tmp_path)["moving"]
+    client.post("/api/cameras", json={"camera_id": "clip", "source": str(fixture), "link": "file"})
+    captured = client.get("/api/cameras/clip/calibration/frame")
+    points = [
+        {"image_px": [0, 0], "court_m": [0, 0], "role": "calibration"},
+        {"image_px": [400, 0], "court_m": [4, 0], "role": "calibration"},
+        {"image_px": [400, 300], "court_m": [4, 3], "role": "calibration"},
+        {"image_px": [0, 300], "court_m": [0, 3], "role": "calibration"},
+        {"image_px": [100, 100], "court_m": [1, 1], "role": "check"},
+        {"image_px": [300, 200], "court_m": [3, 2], "role": "check"},
+    ]
+    payload = {
+        "frame_token": captured.headers["x-frame-token"],
+        "court_kind": "custom",
+        "length_m": 4,
+        "width_m": 3,
+        "max_check_error_m": 0.5,
+        "points": points,
+    }
+    fitted = client.post("/api/cameras/clip/calibration/fit", json=payload)
+    assert fitted.status_code == 200, fitted.text
+    assert fitted.json()["check_mean_m"] < 1e-6
+    saved = client.put("/api/cameras/clip/calibration", json=payload)
+    assert saved.status_code == 200, saved.text
+    document = saved.json()["calibration"]
+    assert client.get("/api/cameras/clip/calibration").json() == document
+    schema_path = Path(__file__).resolve().parents[2] / "contracts/calibration.schema.json"
+    Draft202012Validator(json.loads(schema_path.read_text(encoding="utf-8"))).validate(document)
+    assert (
+        client.get("/api/cameras/clip/calibration/compare").json()["difference_score"] is not None
+    )
+    assert (tmp_path / "calibrations/clip" / document["calibration_id"] / "frame.jpg").is_file()
+    recaptured = client.get("/api/cameras/clip/calibration/frame")
+    forced_payload = {
+        **payload,
+        "frame_token": recaptured.headers["x-frame-token"],
+        "max_check_error_m": 0.05,
+    }
+    forced_payload["points"] = [*points[:-1], {**points[-1], "court_m": [4, 3]}]
+    refused = client.put("/api/cameras/clip/calibration", json=forced_payload)
+    assert refused.status_code == 422 and "exceeds" in refused.text
+    forced_payload["save_anyway"] = True
+    forced = client.put("/api/cameras/clip/calibration", json=forced_payload)
+    assert forced.status_code == 200 and forced.json()["calibration"]["forced"] is True
+    client.post("/api/recording/start")
+    camera = FakeLauncher.instances[-1].cameras[0]
+    assert camera.calibration_path.endswith("calibration.json")

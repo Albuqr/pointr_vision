@@ -4,6 +4,7 @@ import threading
 import time
 import urllib.request
 
+import cv2
 import numpy as np
 
 from services.edge.capture.types import Frame
@@ -40,6 +41,23 @@ def test_preview_endpoint_encodes_fake_frame_and_falls_back_on_busy_port():
         with urllib.request.urlopen(f"http://127.0.0.1:{preview.port}/snapshot.jpg") as response:
             assert response.headers["Content-Type"] == "image/jpeg"
             assert response.read().startswith(b"\xff\xd8")
+    finally:
+        preview.close()
+
+
+def test_raw_snapshot_endpoint_uses_a_copy_from_the_capture_provider():
+    image = np.full((42, 64, 3), 180, np.uint8)
+    preview = HttpPreview(
+        0, lambda: "OK", lambda: HudInfo(0, 0, 0, 0, 0, 0), raw_snapshot=lambda: image.copy()
+    )
+    preview.start()
+    try:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{preview.port}/raw-snapshot.jpg"
+        ) as response:
+            assert response.headers["Content-Type"] == "image/jpeg"
+            decoded = cv2.imdecode(np.frombuffer(response.read(), np.uint8), cv2.IMREAD_COLOR)
+        assert decoded.shape[:2] == (42, 64)
     finally:
         preview.close()
 
