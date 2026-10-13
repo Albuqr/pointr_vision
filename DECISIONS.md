@@ -585,3 +585,50 @@ finding). Wi-Fi off on the phone: `source_lost` about 2 s later (FFmpeg read tim
 i7-10510U: 1.5-1.7 fps (laptop) and 0.35-0.57 fps (phone URL) against about 2-2.4 fps alone;
 the second model load took 27-30 s. Runbook: CPU-only PC, at most 2 cameras with det_size 320.
 **Status.** Accepted; merged to main.
+
+## D-023 · 2026-10-13 · v0 movement report per person, contract 0.7.0
+**Context.** Tonight's recordings need a readable result per camera. The processing rate on
+the dev CPU is low and uneven (0.35 to about 2.4 fps), so a track has few, unevenly spaced
+samples; the report must say what it can and cannot support.
+**Decision.**
+- **Contract 0.7.0** (minor, additive): new file `runs/<run_id>/report.json`, DATA_CONTRACTS
+  section 8 and `contracts/report.schema.json`. Every measurement is `{value, unit}`; a null
+  value carries a reason; counts are plain `n_*` integers; a top-level `caveats` list is
+  required. Chosen over unit suffixes in key names (`path_length_px`) so that calibration can
+  change the unit without renaming keys.
+- **Positions go through a function** (`PositionMap`: pixel point to output point, plus the
+  unit and default activity thresholds). `PixelPositions` is the only implementation now; part 5
+  (calibration) supplies metres without touching the report code.
+- **Definitions** (all in section 8): position = box bottom-centre at the frame's `t_recv`
+  (tracks.csv has no time, joined on `seq`); per-track moving median of 3 samples inside runs
+  of samples at most `max_gap` apart (symmetric, shrinking to 1 at the ends so a two-sample run
+  is never flattened into zero speed); only intervals up to `--max-gap` (1.0 s) count for path,
+  speed and activity, the rest are counted (`n_gaps_excluded`, `gap_time`); speed is null with
+  a reason below 2 valid intervals; activity shares are by interval speed, weighted by interval
+  time. The default thresholds, 40 and 400 px/s, are placeholders that depend on camera
+  distance (an estimate from typical speeds, not a measurement: a 1280 px wide view of about 8 m
+  puts walking near 220 px/s and running near 640 px/s); they are labelled as such in the caveats and configurable.
+- **Reuse.** processed fps and app delay percentiles use `perception.loop.rates` and
+  `delay_stats`, so the report and the benchmark agree.
+- **Placement.** Code in `services/edge/reports/` (ARCHITECTURE section 3); the CLI the phase
+  file names, `python -m services.edge.report`, is a one-line module that calls it. The CLI takes
+  a session folder, not a session id: a folder is `<camera_id>_<session_id>` (D-022), found by
+  path or, in group form, by reading each `session.json`.
+- **Automatic.** A live session writes `report.json` and prints a summary after the final
+  `session.json`; a report failure is printed and never changes the session's status or exit
+  code. The launcher then prints one table with a row per camera, rebuilt from the run's files with
+  the default parameters (not read from `report.json`, which may have been rerun with others). Group form (`--group G --out DIR`) prints one section per camera: no fusion.
+**Not decided / out of scope.** Calibration, pose, basketball actions, cross-camera fusion,
+accuracy against ground truth (PHASE_05 keeps it out), identity.
+**Gate (code-reviewer, contract-guardian).** Both PASS, no BLOCKER or MAJOR (the first attempt of
+both subagents died on a session rate limit, nothing was reviewed; they were run again).
+Fixed from the MINORs: activity share needs the same minimum of valid intervals as speed (it
+was built from one interval); malformed CSV rows are skipped and counted; a duplicate
+(track, seq) is one sample; one processed frame gives no fps or interval; drop-rate and event
+nulls carry the right reason (`event precedes t0`: every null in the report has a reason);
+`--run` must be one of the session's runs; one broken camera does not stop a group report;
+nonsense thresholds are refused; the console summary lists the 20 longest tracks; Ctrl+C during
+the report cannot change the session's exit code; a launcher report failure is printed. The
+launcher's table is rebuilt from the files with default parameters, not read from `report.json`.
+Rest in BACKLOG.
+**Status.** Accepted; merged to main.

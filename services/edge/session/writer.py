@@ -32,7 +32,7 @@ from services.edge.session.types import (
     SessionMeta,
 )
 
-CONTRACT_VERSION = "0.6.0"
+CONTRACT_VERSION = "0.7.0"
 FRAMES_COLUMNS = [
     "seq", "t_recv", "t_proc_start", "t_proc_end", "app_delay_ms",
     "n_detections", "n_tracks", "dropped_total",
@@ -212,6 +212,11 @@ class FileSessionWriter:
         write_json(self.dir / "session.json", self._session)
         write_json(self._run_dir / "run.json", self._run_doc)
         self._thread.start()
+
+    @property
+    def run_dir(self) -> Path:
+        """runs/<run_id>/ of this session, once start() has run."""
+        return self._run_dir
 
     def set_t0(self, t0: float, t0_wall: str) -> None:
         self._t0 = t0

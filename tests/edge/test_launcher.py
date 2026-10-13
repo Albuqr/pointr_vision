@@ -241,9 +241,9 @@ def test_a_child_that_fails_to_start_does_not_stop_the_others(tmp_path, capsys):
     assert rows["cam1"][2] == rows["cam3"][2] == "interrupted"
     assert rows["cam1"][3] == "10.48"  # 11 frames over 1.05 s, as the benchmark computes it
     assert rows["cam1"][4] == "0"  # failed reads, from the child's last line
-    assert [line.split()[1] for line in out[out.index("result:") :].splitlines()[1:]] == [
-        "camera_id", "cam1", "bad", "cam3"
-    ]  # fmt: skip
+    result = out[out.index("result:") :].split("report (per camera")[0].splitlines()[1:-1]
+    result = [line for line in result if "report failed" not in line]  # fake sessions: no files
+    assert [line.split()[1] for line in result] == ["camera_id", "cam1", "bad", "cam3"]
 
 
 def test_a_start_that_never_gets_a_session_is_stopped_and_marked_failed(tmp_path):
@@ -359,7 +359,7 @@ def test_a_stop_before_the_threads_start_still_ends_the_session(monkeypatch, tmp
     assert session["status"] == "interrupted" and session["ended_at"]
 
 
-def test_launcher_with_real_children_end_to_end(tmp_path, long_clips):
+def test_launcher_with_real_children_end_to_end(tmp_path, long_clips, capsys):
     """Two real processes, started one at a time, stopped by one Ctrl+C: two valid sessions."""
     out = tmp_path / "out"
     cams = [rc.Camera(f"cam{i + 1}", str(p), "file") for i, p in enumerate(long_clips)]
@@ -383,6 +383,14 @@ def test_launcher_with_real_children_end_to_end(tmp_path, long_clips):
     assert docs[0]["session_id"] != docs[1]["session_id"]
     rows = [lau.summary(c) for c in lau.children]
     assert all(r[2] == "interrupted" and r[3] != "-" and r[4] == "0" for r in rows), rows
+    # each child wrote its report at the end, and the launcher printed one row per camera
+    for c in ("cam1", "cam2"):
+        [folder] = out.glob(f"{c}_*")
+        [report] = folder.glob("runs/*/report.json")
+        assert json.loads(report.read_text())["camera_id"] == c
+    shown = capsys.readouterr().out
+    table = shown[shown.index("report (per camera") :].splitlines()
+    assert [line.split()[1] for line in table[1:]] == ["camera", "cam1", "cam2"]
 
 
 # -- device_id --------------------------------------------------------------------------------

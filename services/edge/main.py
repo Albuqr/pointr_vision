@@ -35,6 +35,7 @@ from services.edge.capture.sources import CameraSource, SourceOpenError, open_so
 from services.edge.capture.types import Frame, HealthEvent, utc_now
 from services.edge.perception.detector import DET_SIZE_MULTIPLE
 from services.edge.perception.loop import Processor, delay_stats, rates
+from services.edge.reports.build import format_summary, write_report
 from services.edge.session.types import (
     CAMERA_ID_RE,
     GROUP_ID_RE,
@@ -573,6 +574,7 @@ def run(args: argparse.Namespace) -> int:
                 det = "off" if detector is None else detector.det_size
                 device = "-" if detector is None else detector.device
                 print_benchmark(args.benchmark, info.link, det, device, capture, processor)
+            print_report(writer.run_dir)
         except KeyboardInterrupt:
             status = EXIT_INTERRUPTED
         except OSError:  # stdout is gone (the launcher died): the files are already saved
@@ -580,6 +582,17 @@ def run(args: argparse.Namespace) -> int:
     if (capture.error or processor.error or writer.status != session_status) and not status:
         status = EXIT_CAPTURE_ERROR
     return status
+
+
+def print_report(run_dir) -> None:
+    """Write report.json and print its summary. A failure is a warning: the session is saved
+    and its status and exit code stay as they are (D-023)."""
+    try:
+        print(format_summary(write_report(run_dir)))
+    except Exception as e:
+        print(f"warning: report not written: {e!r}", file=sys.stderr)
+    except KeyboardInterrupt:  # Ctrl+C now would turn a saved "ended" session into exit 130
+        print("warning: report interrupted; run python -m services.edge.report", file=sys.stderr)
 
 
 def print_benchmark(
