@@ -45,7 +45,7 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
   "session_id": "uuid",
   "device_id": "uuid",
   "camera_id": "cam1 | null",
-  "group_id": "uuid | null",
+  "group_id": "token | null",
   "started_at": "2026-10-07T18:00:00Z",
   "ended_at": "2026-10-07T18:45:00Z",
   "status": "running | ended | interrupted | error",
