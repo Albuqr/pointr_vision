@@ -148,7 +148,8 @@ Always `--out C:/pointr_sessions`: outside OneDrive (it locks files) and outside
 
 **4.3 Stop.**
 
-- **Ctrl+C once, in the launcher's Git Bash window.** The launcher asks every camera to stop
+- **Ctrl+C once, in the launcher's Git Bash window.** (Checked on real hardware: it reaches
+  every camera and both sessions ended `interrupted`.) The launcher asks every camera to stop
   the way Ctrl+C stops a single one, waits for each to save, then prints the result table. Wait
   for it (a few seconds). A second Ctrl+C only prints a reminder.
 - **`q` in a camera's preview window stops only that camera** (its session ends `ended`); the
@@ -182,8 +183,14 @@ source, 12 s into detection): about **610 MB resident per process (peak 862 MB),
 committed**, and the launcher itself about 4 MB. The two cameras shared one CPU: 2.10 and 1.56
 processed fps, against 2.84 for one camera alone on the same clip (one short run each, not a
 benchmark). A GPU PC was not measured; CUDA adds its own host memory. With N cameras expect
-about N GB of RAM and watch Task Manager during the first run; if the PC is short of RAM or
-slow, record fewer cameras per PC, use `det_size` 320, or drop `--preview`.
+about N GB of RAM and watch Task Manager during the first run.
+
+**CPU contention, measured on real hardware (laptop webcam + phone URL, i7-10510U, CPU
+build):** the laptop camera processed 1.5-1.7 fps and the phone URL camera 0.35-0.57 fps, against
+about 2-2.4 fps for one camera alone; the second camera's model load took 27-30 s. So: **on a
+CPU-only PC use at most 2 cameras, both with `"det_size": 320`**. **On a GPU PC, check that each
+camera's `[camN] device:` line says `cuda:0 (...)`**: a camera that says `cpu` is slowing the
+others. If the PC is short of RAM or slow, record fewer cameras per PC or drop `--preview`.
 
 **4.6 One camera, without the launcher (fallback).**
 
@@ -242,7 +249,7 @@ for you. `"error"` = read `events` in `session.json`.
 | Launcher: `[cam2] ... failed to start (exit 2)` in the table | That camera's source did not open (see its `[cam2]` lines above); the other cameras recorded normally. Fix it, then stop and start the launcher again |
 | Launcher: `failed: no session after 180 s` | The model load or the source open is stuck. Look at that camera's `[camN]` lines; try `--device cpu`, or fewer cameras |
 | Table says `running (killed)` | A camera did not stop within 45 s and was killed: its files are readable up to the last second, the counts are missing |
-| One camera shows `source_lost` and the others do not | That phone lost its Wi-Fi or went to sleep (phone screen off, app in the background). It reconnects by itself when the feed returns (`source_recovered`) |
+| One camera shows `source_lost` and the others do not | That phone lost its Wi-Fi or went to sleep (phone screen off, app in the background). Checked on real hardware: `source_lost` about 2 s after the Wi-Fi went off (the stream read times out after 2.1 s), `source_recovered` when it came back, the other camera unaffected |
 | Solid green image, `FROZEN` banner | DroidCam virtual camera is off: press the client hotkey (again after every client restart). Only one active source in the client |
 | Phone URL does not open | Open `http://<ip>:4747/video` in the PC browser first (then close the tab). PC and phone on the same Wi-Fi? Some networks (campus, guest Wi-Fi, some routers) isolate devices: use a **phone hotspot** (turn it on on one phone; connect the PC and the other phones to it) |
 | Low fps, laggy | Run with `--det-size 320`. Read the `device:` line: it must say `cuda:0 (...)` on a GPU PC; `cpu` means the CPU is detecting. Close the preview (`--preview` off) and other heavy programs |

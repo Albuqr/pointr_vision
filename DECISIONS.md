@@ -578,4 +578,10 @@ launcher output, leading `-` in values, `not started` rows, `error` events; rest
 processes on one GPU is fast enough is not measured here: the manual check records only that the
 sessions are valid. RAM per process is measured on the dev notebook (CPU) and written in the
 runbook.
-**Status.** Accepted; manual check pending (laptop webcam + phone, keyboard Ctrl+C, Wi-Fi drop).
+**Manual check (2026-10-13, real hardware, passed both runs).** Laptop webcam + phone URL: Ctrl+C
+from Git Bash reached all children, both sessions `interrupted` (this closes the open mintty
+finding). Wi-Fi off on the phone: `source_lost` about 2 s later (FFmpeg read timeout 2.1 s),
+`source_recovered` when it returned, the laptop camera unaffected. CPU contention on the
+i7-10510U: 1.5-1.7 fps (laptop) and 0.35-0.57 fps (phone URL) against about 2-2.4 fps alone;
+the second model load took 27-30 s. Runbook: CPU-only PC, at most 2 cameras with det_size 320.
+**Status.** Accepted; merged to main.
