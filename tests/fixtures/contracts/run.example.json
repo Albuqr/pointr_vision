@@ -1,24 +1,45 @@
 {
-  "contract_version": "0.3.0",
+  "contract_version": "0.4.0",
   "run_id": "c2b9e6f4-1d3a-4c8e-9f7b-5a0d2e4c6b81",
   "session_id": "3f1c2a8e-5b7d-4e9a-8c21-6d4f0b9e7a13",
   "mode": "live",
-  "input": {"kind": "camera", "ref": "1", "sha256": null},
+  "input": {
+    "kind": "camera",
+    "ref": "1",
+    "sha256": null,
+    "requested_width": 1280,
+    "requested_height": 720
+  },
   "detector": {
     "name": "rfdetr",
     "variant": "nano",
     "weights": "coco-pretrained",
     "package_version": "0.0.0",
-    "threshold": 0.5
+    "threshold": 0.5,
+    "det_size": 384
   },
   "tracker": {
     "name": "bytetrack",
-    "package": "supervision",
+    "package": "trackers",
     "package_version": "0.0.0",
     "params": {}
   },
-  "runtime": {"python": "3.11.9", "platform": "Windows-11", "device": "cpu"},
+  "health": {
+    "lost_reads": 30,
+    "lost_secs": 2.0,
+    "frozen_diff": 0.5,
+    "frozen_secs": 2.0,
+    "dark_level": 20.0,
+    "dark_secs": 1.0
+  },
+  "runtime": {
+    "python": "3.11.9",
+    "platform": "Windows-11",
+    "device": "cpu",
+    "packages": {"opencv": "5.0.0", "numpy": "2.0.0", "torch": "2.14.1", "supervision": null}
+  },
   "started_at": "2026-10-07T18:00:00Z",
+  "t0_wall": "2026-10-07T18:00:00.500Z",
   "ended_at": "2026-10-07T18:01:00Z",
-  "counts": {"captured": 10, "processed": 8, "dropped": 2, "rec_dropped": 0}
+  "counts": {"captured": 10, "processed": 7, "dropped": 2, "unprocessed": 1, "rec_dropped": 0}
 }

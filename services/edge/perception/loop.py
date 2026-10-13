@@ -27,8 +27,9 @@ class Processed:
     frame: Frame
     dets: Detections
     tracks: list[TrackObs]
-    t_proc_start: float  # time.monotonic()
+    t_proc_start: float  # time.perf_counter()
     t_proc_end: float
+    dropped_total: int = 0  # capture's drop count when this frame was taken (frames.csv)
 
     @property
     def app_delay_ms(self) -> float:
@@ -46,12 +47,16 @@ class Processor:
         detector: Detector | None,
         tracker: Tracker | None,
         on_event: Callable[[HealthEvent], None],
+        on_processed: Callable[[Processed], None] | None = None,
+        dropped: Callable[[], int] = lambda: 0,
     ):
         self.proc_queue = proc_queue
         self.source_done = source_done  # set when capture has stopped: drain, then finish
         self.detector = detector
         self.tracker = tracker
         self.on_event = on_event  # called on the processing thread
+        self.on_processed = on_processed  # called on the processing thread, once per frame
+        self.dropped = dropped  # capture's running drop count
         # written by the processing thread only; other threads read them for display
         self.latest: Processed | None = None
         self.processed = 0
@@ -88,14 +93,14 @@ class Processor:
                 return True
             self.unprocessed += 1
 
-    def _process(self, frame: Frame) -> Processed:
-        t_start = time.monotonic()
+    def _process(self, frame: Frame, dropped_total: int) -> Processed:
+        t_start = time.perf_counter()
         if self.detector is None:
             dets, tracks = NO_DETECTIONS, []
         else:
             dets = self.detector.detect(frame)
             tracks = self.tracker.update(dets, frame)
-        return Processed(frame, dets, tracks, t_start, time.monotonic())
+        return Processed(frame, dets, tracks, t_start, time.perf_counter(), dropped_total)
 
     def _run(self) -> None:
         try:
@@ -106,8 +111,9 @@ class Processor:
                     if self.source_done.is_set() and self.proc_queue.empty():
                         break
                     continue
+                dropped_total = self.dropped()  # frames with a lower seq dropped so far
                 try:
-                    result = self._process(frame)
+                    result = self._process(frame, dropped_total)
                 except Exception:
                     self.unprocessed += 1  # the frame in hand is counted, not lost
                     raise
@@ -120,10 +126,12 @@ class Processor:
                 span = self._ends[-1] - self._ends[0]
                 self.fps = (len(self._ends) - 1) / span if span > 0 else None
                 self.latest = result
+                if self.on_processed is not None:
+                    self.on_processed(result)
         except Exception as e:  # a failure ends processing as an event, never silently
             self.error = e
             self.on_event(
-                HealthEvent("error", utc_now(), time.monotonic(), f"processing stopped: {e!r}")
+                HealthEvent("error", utc_now(), time.perf_counter(), f"processing stopped: {e!r}")
             )
         finally:
             self.done.set()

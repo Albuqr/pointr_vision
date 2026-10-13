@@ -28,7 +28,7 @@ synced to a server when one is reachable. Basketball first. This is a TCC projec
    before writing the code.
 3. **Verify third-party APIs.** Check every `rfdetr`, `supervision` and `opencv` call against
    the installed version (read the source or `help()`), not against memory or blog posts.
-   Record versions in `session.json`.
+   Record versions in `run.json` (DATA_CONTRACTS section 3).
 4. **Layers behind interfaces.** Each layer implements a Protocol from
    `docs/ARCHITECTURE.md`. Layers receive data as arguments; they do not reach into each
    other's internals or global state.

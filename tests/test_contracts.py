@@ -82,13 +82,41 @@ def test_run_without_recording_has_null_rec_dropped():
 
 
 def test_run_valid_while_running():
-    validator("run").validate(mutate(example("run"), ("ended_at",), None))
+    """No end time, no counts and possibly no t0 yet: null, not absent and not 0 (D-020)."""
+    doc = mutate(example("run"), ("ended_at",), None)
+    doc = mutate(doc, ("counts",), None)
+    validator("run").validate(mutate(doc, ("t0_wall",), None))
 
 
-@pytest.mark.parametrize("link", ["usb", "wifi", "builtin", "file", None])
+def test_run_without_detection():
+    """--no-detect: no detector, no tracker, no device (D-020)."""
+    doc = mutate(example("run"), ("detector",), None)
+    doc = mutate(doc, ("tracker",), None)
+    validator("run").validate(mutate(doc, ("runtime", "device"), None))
+
+
+@pytest.mark.parametrize("link", ["usb", "wifi", "builtin", None])
 def test_session_source_links(link):
     """source.link is declared with --link; null when not given (D-012)."""
     validator("session").validate(mutate(example("session"), ("source", "link"), link))
+
+
+@pytest.mark.parametrize(
+    "kind,link,ok",
+    [
+        ("file", "file", True),
+        ("file", None, True),
+        ("file", "usb", False),
+        ("camera", "file", False),
+        ("stream", "file", False),
+        ("stream", "wifi", True),
+    ],
+)
+def test_session_source_link_agrees_with_kind(kind, link, ok):
+    """link is file exactly when kind is file, or link is null (D-020)."""
+    doc = mutate(mutate(example("session"), ("source", "kind"), kind), ("source", "link"), link)
+    errors = list(validator("session").iter_errors(doc))
+    assert (not errors) == ok, errors
 
 
 def test_session_source_open_failed_event():
@@ -160,6 +188,21 @@ BROKEN = {
         (("counts", "dropped"), -1),
         (("counts", "processed"), None),
         (("counts", "captured"), 1.5),
+        (("counts", "unprocessed"), DELETE),
+        (("counts", "unprocessed"), None),
+        (("t0_wall",), DELETE),
+        (("t0_wall",), "2026-10-07 18:00:00"),
+        (("detector", "det_size"), DELETE),
+        (("detector", "det_size"), 0),
+        (("input", "requested_width"), 0),
+        (("input", "requested_height"), DELETE),
+        (("health",), DELETE),
+        (("health", "lost_reads"), 0),
+        (("health", "extra"), 1),
+        (("runtime", "device"), "cuda"),
+        (("runtime", "packages"), DELETE),
+        (("runtime", "packages", "torch"), ""),
+        (("runtime", "packages", "extra"), "1"),
         (("extra",), 1),
     ],
 }

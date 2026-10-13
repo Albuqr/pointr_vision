@@ -36,9 +36,9 @@ def test_slow_consumer_accounting():
     n = 150
     capture, _ = run_capture(FakeSource((image(i) for i in range(n)), delay=0.001))
     consumed, sizes = [], []
-    deadline = time.monotonic() + 30
+    deadline = time.perf_counter() + 30
     while not (capture.done.is_set() and capture.proc_queue.empty()):
-        assert time.monotonic() < deadline, "capture never finished"
+        assert time.perf_counter() < deadline, "capture never finished"
         sizes.append(capture.proc_queue.qsize())
         try:
             consumed.append(capture.proc_queue.get(timeout=0.1).seq)
@@ -78,9 +78,9 @@ def test_source_exception_becomes_error_event():
 
 def test_stop_ends_an_endless_source():
     capture, _ = run_capture(FakeSource(image(i) for i in itertools.count()))  # never ends
-    deadline = time.monotonic() + 5
+    deadline = time.perf_counter() + 5
     while capture.captured == 0:
-        assert time.monotonic() < deadline, "capture thread never read"
+        assert time.perf_counter() < deadline, "capture thread never read"
         time.sleep(0.01)
     assert capture.stop(timeout=2)
     assert capture.done.is_set()

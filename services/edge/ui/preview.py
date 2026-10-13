@@ -83,7 +83,7 @@ def run_preview(
     until: float | None,
 ) -> None:
     """Show the latest processed frame until q, the window is closed, `done` is set
-    (processing stopped), or the time.monotonic() deadline `until`. Main thread only.
+    (processing stopped), or the time.perf_counter() deadline `until`. Main thread only.
 
     The image changes at the processing rate; the window, banner and HUD refresh every
     REFRESH_MS, so LOST is visible while no frames arrive."""
@@ -92,7 +92,7 @@ def run_preview(
     cv2.namedWindow(WINDOW)
     try:
         while not done.is_set():
-            if until is not None and time.monotonic() >= until:
+            if until is not None and time.perf_counter() >= until:
                 break
             current = latest()
             if current is not None and current is not shown:

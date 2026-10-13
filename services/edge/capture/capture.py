@@ -70,7 +70,7 @@ class Capture:
             self.proc_queue.put_nowait(frame)
 
     def _run(self) -> None:
-        self.t0 = time.monotonic()
+        self.t0 = time.perf_counter()
         self.t0_wall = utc_now()
         try:
             while not self._stop.is_set():
@@ -94,7 +94,7 @@ class Capture:
         except Exception as e:  # any failure ends capture as an event, never silently
             self.error = e
             self.on_event(
-                HealthEvent("error", utc_now(), time.monotonic(), f"capture stopped: {e!r}")
+                HealthEvent("error", utc_now(), time.perf_counter(), f"capture stopped: {e!r}")
             )
         finally:
             self.done.set()

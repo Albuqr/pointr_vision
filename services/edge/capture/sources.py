@@ -58,7 +58,7 @@ class _CvSource:
         if self._cap is None:
             raise RuntimeError(f"{self.kind} {self.ref!r} read before open()")
         ok, image = self._cap.read()
-        t_recv = time.monotonic()
+        t_recv = time.perf_counter()
         seq = self._seq
         self._seq += 1
         if not ok or image is None:
@@ -89,7 +89,7 @@ class _LiveSource(_CvSource):
         if frame is not None:
             self._next_reopen = None
             return frame
-        now = time.monotonic()
+        now = time.perf_counter()
         if self._next_reopen is None:
             self._next_reopen = now + self.reopen_after
         elif now >= self._next_reopen:
@@ -157,7 +157,7 @@ class FileSource(_CvSource):
 
     def read(self) -> Frame | None:
         if self._period:
-            now = time.monotonic()
+            now = time.perf_counter()
             self._next_due = now if self._next_due is None else self._next_due
             time.sleep(max(0.0, self._next_due - now))
             self._next_due += self._period

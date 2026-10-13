@@ -34,10 +34,10 @@ def _mean(image: np.ndarray) -> float:
 
 class HealthMonitor:
     """Implements SourceHealth. Frame timing uses frame.t_recv; failed reads have no frame,
-    so they are timed with clock(), which must be the same clock (time.monotonic)."""
+    so they are timed with clock(), which must be the same clock (time.perf_counter)."""
 
     def __init__(
-        self, config: HealthConfig | None = None, clock: Callable[[], float] = time.monotonic
+        self, config: HealthConfig | None = None, clock: Callable[[], float] = time.perf_counter
     ):
         self.config = config or HealthConfig()
         self._clock = clock

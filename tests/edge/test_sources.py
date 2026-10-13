@@ -50,12 +50,12 @@ def test_file_reads_every_frame_in_order(clips, name):
 def test_file_realtime_is_paced_to_its_fps(clips):
     source = FileSource(clips["moving"])
     source.open()
-    start = time.monotonic()
+    start = time.perf_counter()
     try:
         assert len(read_all(source)) == N_FRAMES
     finally:
         source.close()
-    assert time.monotonic() - start >= 0.9 * (N_FRAMES - 1) / FPS
+    assert time.perf_counter() - start >= 0.9 * (N_FRAMES - 1) / FPS
 
 
 def test_open_source_dispatch(clips, tmp_path):
