@@ -1,12 +1,13 @@
-"""CLI entry point (PHASE_01, PHASE_02).
+"""CLI entry point (PHASE_01, PHASE_02, PHASE_03).
 
     python -m services.edge.main --source <ref> [--preview] [--link usb|wifi|builtin|file]
         [--threshold T] [--device auto|cpu|cuda] [--det-size N] [--width W --height H]
-        [--benchmark SECONDS] [--no-detect]
+        [--benchmark SECONDS] [--no-detect] [--out DIR]
 
 ref: a webcam index (0, 1, ...), a stream URL (http, https, rtsp) or an .mp4/.mov file.
 Each frame taken from capture is detected (RF-DETR Nano, person only) and tracked
-(ByteTrack). Events print to the console; nothing is written to disk before phase 03.
+(ByteTrack). Once the source opens, the session is logged to DIR/<session_id>/ (default
+./sessions): session.json, runs/<run_id>/run.json, frames.csv, tracks.csv (D-020).
 """
 
 import argparse
@@ -16,7 +17,9 @@ import platform
 import sys
 import threading
 import time
+import uuid
 from collections import Counter
+from importlib.metadata import PackageNotFoundError, version
 
 import cv2
 import numpy as np
@@ -27,6 +30,8 @@ from services.edge.capture.sources import CameraSource, SourceOpenError, open_so
 from services.edge.capture.types import Frame, HealthEvent, utc_now
 from services.edge.perception.detector import DET_SIZE_MULTIPLE
 from services.edge.perception.loop import Processor, delay_stats, rates
+from services.edge.session.types import FrameRecord, RunCounts, RunMeta, SessionEvent, SessionMeta
+from services.edge.session.writer import FileSessionWriter, device_id
 from services.edge.ui.preview import HudInfo, run_preview
 
 EXIT_OPEN_FAILED = 2
@@ -92,6 +97,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="run for SECONDS, then print processing FPS, app delay p50/p95/max and drops",
     )
     p.add_argument("--no-detect", action="store_true", help="capture only, no detection")
+    p.add_argument("--out", default="sessions", help="folder for session data (default sessions)")
     p.add_argument("--lost-reads", type=positive(int), default=d.lost_reads)
     p.add_argument("--lost-secs", type=positive(float), default=d.lost_secs)
     p.add_argument("--frozen-diff", type=positive(float), default=d.frozen_diff)
@@ -110,8 +116,6 @@ def load_perception(args: argparse.Namespace):
     """Detector and tracker, warmed up with one inference so the first slow call is not
     counted in the run. Imported here: torch loads only when detection is on. Called before
     the source opens, so a stream does not buffer stale frames during the load (D-018)."""
-    from importlib.metadata import version
-
     import torch
 
     from services.edge.perception.detector import RFDETRDetector
@@ -141,6 +145,72 @@ def open_failed(ref: str, e: Exception) -> int:
     print_event(HealthEvent("source_open_failed", utc_now(), None, reason), None)
     print(f"error: cannot open source {ref!r}: {reason}", file=sys.stderr)
     return EXIT_OPEN_FAILED
+
+
+def package_version(name: str) -> str | None:
+    try:
+        return version(name)
+    except PackageNotFoundError:
+        return None
+
+
+def normalise_device(device: str) -> str:
+    """torch device string to the contract's cpu | cuda:N ("cuda" alone is cuda:0)."""
+    return "cuda:0" if device == "cuda" else device
+
+
+def run_meta(args, info, config: HealthConfig, detector, tracker) -> RunMeta:
+    """run.json fields known at start: input, detector, tracker, thresholds, versions."""
+    camera = info.kind == "camera"
+    return RunMeta(
+        run_id=str(uuid.uuid4()),
+        mode="live",
+        input={
+            "kind": info.kind,
+            "ref": info.ref,
+            "sha256": None,
+            "requested_width": args.width if camera else None,
+            "requested_height": args.height if camera else None,
+        },
+        detector=None
+        if detector is None
+        else {
+            "name": "rfdetr",
+            "variant": "nano",
+            "weights": "coco-pretrained",
+            "package_version": package_version("rfdetr"),
+            "threshold": detector.threshold,
+            "det_size": detector.det_size,
+        },
+        tracker=None
+        if tracker is None
+        else {
+            "name": "bytetrack",
+            "package": "trackers",
+            "package_version": package_version("trackers"),
+            "params": tracker.params,
+        },
+        health=dataclasses.asdict(config),
+        runtime={
+            "python": sys.version.split()[0],
+            "platform": platform.platform(),
+            "device": None if detector is None else normalise_device(detector.device),
+            "packages": {
+                "opencv": cv2.__version__,
+                "numpy": np.__version__,
+                "torch": package_version("torch"),
+                "supervision": package_version("supervision"),
+            },
+        },
+        started_at=utc_now(),
+    )
+
+
+def link_conflict(kind: str, link: str | None) -> str | None:
+    """link is file exactly when kind is file, or link is not given (D-020)."""
+    if link is not None and (kind == "file") != (link == "file"):
+        return f"--link {link} contradicts a {kind} source"
+    return None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -174,6 +244,10 @@ def run(args: argparse.Namespace) -> int:
         source = open_source(args.source, (args.width, args.height))  # checks the ref only
     except SourceOpenError as e:
         return open_failed(args.source, e)
+    conflict = args.link and link_conflict(source.kind, args.link)
+    if conflict:  # before the slow model load
+        print(f"error: {conflict}", file=sys.stderr)
+        return EXIT_OPEN_FAILED
 
     detector = tracker = None
     if not args.no_detect:
@@ -197,9 +271,54 @@ def run(args: argparse.Namespace) -> int:
     py = sys.version.split()[0]
     print(f"versions: python {py}, opencv {cv2.__version__}, numpy {np.__version__}")
 
+    writer = FileSessionWriter(args.out)
+    try:
+        session_id = str(uuid.uuid4())
+        meta = SessionMeta(session_id, device_id(args.out), utc_now(), info, False)
+        writer.start(meta, run_meta(args, info, config, detector, tracker))
+    except OSError as e:
+        source.close()
+        print(f"error: cannot write session data under {args.out!r}: {e}", file=sys.stderr)
+        return EXIT_CAPTURE_ERROR
+    print(f"session: {writer.dir}")
+
+    def rel(t: float | None) -> float | None:
+        """time.monotonic() to s since the run's t0; None before t0 (D-011, D-014)."""
+        t0 = capture.t0 if capture else None
+        return None if t is None or t0 is None or t < t0 else t - t0
+
+    def log_event(ev: HealthEvent) -> None:
+        on_event(ev)
+        writer.event(SessionEvent(ev.t_wall, rel(ev.t_mono), ev.kind, ev.detail))
+
+    def log_frame(p) -> None:
+        t0 = capture.t0
+        n_dets = None if detector is None else len(p.dets.xyxy)
+        n_tracks = None if detector is None else len(p.tracks)
+        rec = FrameRecord(
+            p.frame.seq,
+            p.frame.t_recv - t0,
+            p.t_proc_start - t0,
+            p.t_proc_end - t0,
+            n_dets,
+            n_tracks,
+            p.dropped_total,
+        )
+        writer.frame(rec)
+        if p.tracks:
+            writer.tracks(p.frame.seq, p.tracks)
+
     monitor = HealthMonitor(config)
-    capture = Capture(source, monitor, on_event)
-    processor = Processor(capture.proc_queue, capture.done, detector, tracker, on_event)
+    capture = Capture(source, monitor, log_event)
+    processor = Processor(
+        capture.proc_queue,
+        capture.done,
+        detector,
+        tracker,
+        log_event,
+        on_processed=log_frame,
+        dropped=lambda: capture.dropped,
+    )
 
     def hud() -> HudInfo:
         latest = processor.latest
@@ -213,10 +332,14 @@ def run(args: argparse.Namespace) -> int:
         )
 
     status = 0
+    session_status = "ended"
     capture.start()
     processor.start()
     until = time.monotonic() + args.benchmark if args.benchmark else None
     try:
+        while capture.t0_wall is None:  # set first thing by the capture thread
+            time.sleep(0.001)
+        writer.set_t0(capture.t0, capture.t0_wall)
         if args.preview:
             run_preview(lambda: processor.latest, processor.done, hud, lambda: monitor.state, until)
         else:
@@ -224,11 +347,13 @@ def run(args: argparse.Namespace) -> int:
                 if until is not None and time.monotonic() >= until:
                     break
     except KeyboardInterrupt:
-        on_event(HealthEvent("interrupted", utc_now(), time.monotonic(), "Ctrl+C"))
+        session_status = "interrupted"
         status = EXIT_INTERRUPTED
+        log_event(HealthEvent("interrupted", utc_now(), time.monotonic(), "Ctrl+C"))
     except Exception as e:  # one shutdown path; the failure is an event, not a traceback
-        on_event(HealthEvent("error", utc_now(), time.monotonic(), f"main loop: {e!r}"))
+        session_status = "error"
         status = EXIT_CAPTURE_ERROR
+        log_event(HealthEvent("error", utc_now(), time.monotonic(), f"main loop: {e!r}"))
     finally:
         # capture first, then processing drains the last frame (ARCHITECTURE section 5).
         # A second Ctrl+C must not skip a step or the summary.
@@ -255,7 +380,29 @@ def run(args: argparse.Namespace) -> int:
             )
         if not proc_ok:
             print("warning: processing did not stop in time; counts may be short", file=sys.stderr)
+        if session_status == "ended" and (
+            capture.error or processor.error or not (cap_ok and proc_ok)
+        ):
+            session_status = "error"
+        if not (cap_ok and proc_ok):  # the shortfall goes into the data, not only stderr
+            which = " and ".join(
+                n for n, ok in (("capture", cap_ok), ("processing", proc_ok)) if not ok
+            )
+            detail = f"{which} did not stop in time; counts may be short"
+            log_event(HealthEvent("error", utc_now(), time.monotonic(), detail))
+        counts = RunCounts(
+            capture.captured, processor.processed, capture.dropped, processor.unprocessed
+        )
+        while writer.status is None:  # a second Ctrl+C must not skip the final write
+            try:
+                writer.close(session_status, counts)
+            except KeyboardInterrupt:
+                pass
+            except Exception as e:  # cannot write at all: say so, keep shutting down
+                print(f"error: final session files not written: {e!r}", file=sys.stderr)
+                break
         try:
+            print(f"session {writer.status}: {writer.dir}")
             print(
                 f"t0_wall={capture.t0_wall} captured={capture.captured} dropped={capture.dropped} "
                 f"failed_reads={capture.failed_reads} processed={processor.processed} "
@@ -267,7 +414,7 @@ def run(args: argparse.Namespace) -> int:
                 print_benchmark(args.benchmark, info.link, det, device, capture, processor)
         except KeyboardInterrupt:
             status = EXIT_INTERRUPTED
-    if (capture.error or processor.error) and not status:
+    if (capture.error or processor.error or writer.status != session_status) and not status:
         status = EXIT_CAPTURE_ERROR
     return status
 

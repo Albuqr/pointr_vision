@@ -16,9 +16,18 @@ from services.edge.ui.preview import BANNERS, HUD_STRIP, TRACK_COLOUR, HudInfo, 
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def run_cli(*args: str) -> subprocess.CompletedProcess:
+@pytest.fixture(autouse=True)
+def out_dir(tmp_path, monkeypatch) -> Path:
+    """Session data goes to a temp folder, never to ./sessions."""
+    out = tmp_path / "sessions"
+    real = cli.parse_args
+    monkeypatch.setattr(cli, "parse_args", lambda argv: real([*argv, "--out", str(out)]))
+    return out
+
+
+def run_cli(out: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, "-m", "services.edge.main", "--no-detect", *args],
+        [sys.executable, "-m", "services.edge.main", "--no-detect", "--out", str(out), *args],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -35,21 +44,22 @@ def run_cli(*args: str) -> subprocess.CompletedProcess:
         ("not-a-source", "not a camera index"),
     ],
 )
-def test_bad_ref_exits_cleanly(tmp_path, name, reason):
+def test_bad_ref_exits_cleanly(tmp_path, out_dir, name, reason):
     (tmp_path / "notes.txt").write_text("x")
     (tmp_path / "corrupt.mp4").write_bytes(b"this is not a video")
     ref = name if name == "not-a-source" else str(tmp_path / name)
-    result = run_cli("--source", ref)
+    result = run_cli(out_dir, "--source", ref)
     assert result.returncode == EXIT_OPEN_FAILED != 0
     assert "Traceback" not in result.stdout + result.stderr
     assert "source_open_failed" in result.stdout
     assert reason in result.stdout
     assert f"error: cannot open source {ref!r}: " in result.stderr
     assert reason in result.stderr
+    assert not out_dir.exists()  # no session before the source opens (D-020)
 
 
-def test_file_runs_to_end(clips):
-    result = run_cli("--source", str(clips["moving"]), "--link", "file")
+def test_file_runs_to_end(clips, out_dir):
+    result = run_cli(out_dir, "--source", str(clips["moving"]), "--link", "file")
     assert result.returncode == 0, result.stderr
     assert "Traceback" not in result.stderr
     assert "link='file'" in result.stdout
@@ -61,8 +71,10 @@ def test_file_runs_to_end(clips):
     assert "requested 1280x720" not in result.stdout  # a file delivers its own size
 
 
-def test_benchmark_prints_the_baseline_block(clips):
-    result = run_cli("--source", str(clips["moving"]), "--link", "file", "--benchmark", "60")
+def test_benchmark_prints_the_baseline_block(clips, out_dir):
+    result = run_cli(
+        out_dir, "--source", str(clips["moving"]), "--link", "file", "--benchmark", "60"
+    )
     assert result.returncode == 0, result.stderr
     lines = [line for line in result.stdout.splitlines() if line.startswith("benchmark:")]
     assert len(lines) == 3, result.stdout
@@ -73,9 +85,11 @@ def test_benchmark_prints_the_baseline_block(clips):
     assert "unprocessed 0" in lines[1]
 
 
-def test_benchmark_stops_after_its_seconds(clips):
+def test_benchmark_stops_after_its_seconds(clips, out_dir):
     """The clip plays for 2 s in real time; --benchmark 0.3 must end the run first."""
-    result = run_cli("--source", str(clips["moving"]), "--link", "file", "--benchmark", "0.3")
+    result = run_cli(
+        out_dir, "--source", str(clips["moving"]), "--link", "file", "--benchmark", "0.3"
+    )
     assert result.returncode == 0, result.stderr
     captured = int(result.stdout.split("captured=")[1].split()[0])
     assert 0 < captured < 30

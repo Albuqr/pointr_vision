@@ -32,11 +32,12 @@ EXPECTED = {
     Detector: {"detect": ["frame"]},
     Tracker: {"update": ["dets", "frame"]},
     SessionWriter: {
-        "start": ["meta"],
+        "start": ["meta", "run"],
+        "set_t0": ["t0", "t0_wall"],
         "frame": ["rec"],
         "tracks": ["seq", "obs"],
         "event": ["ev"],
-        "close": ["status"],
+        "close": ["status", "counts"],
     },
     Recorder: {"start": ["path", "info"], "write": ["frame"], "stop": []},
 }
@@ -52,6 +53,7 @@ RETURNS = {
     (Detector, "detect"): Detections,
     (Tracker, "update"): list[TrackObs],
     (SessionWriter, "start"): NONE,
+    (SessionWriter, "set_t0"): NONE,
     (SessionWriter, "frame"): NONE,
     (SessionWriter, "tracks"): NONE,
     (SessionWriter, "event"): NONE,
@@ -166,3 +168,10 @@ def test_app_delay_ms():
         dropped_total=0,
     )
     assert rec.app_delay_ms == pytest.approx(25.0)
+
+
+def test_writer_csv_headers_match_the_doc():
+    from services.edge.session.writer import FRAMES_COLUMNS, TRACKS_COLUMNS
+
+    assert FRAMES_COLUMNS == csv_columns("frames.csv")
+    assert TRACKS_COLUMNS == csv_columns("tracks.csv")
