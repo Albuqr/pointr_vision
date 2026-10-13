@@ -2,18 +2,22 @@
 
     python -m services.edge.main --source <ref> [--preview] [--link usb|wifi|builtin|file]
         [--threshold T] [--device auto|cpu|cuda] [--det-size N] [--width W --height H]
-        [--benchmark SECONDS] [--no-detect] [--out DIR]
+        [--benchmark SECONDS] [--no-detect] [--out DIR] [--camera-id ID] [--group-id ID]
+        [--stop-on-stdin]
 
 ref: a webcam index (0, 1, ...), a stream URL (http, https, rtsp) or an .mp4/.mov file.
 Each frame taken from capture is detected (RF-DETR Nano, person only) and tracked
-(ByteTrack). Once the source opens, the session is logged to DIR/<session_id>/ (default
+(ByteTrack). Once the source opens, the session is logged to DIR/<folder>/ (default
 ./sessions): session.json, runs/<run_id>/run.json, frames.csv, tracks.csv (D-020).
 """
 
+import _thread
 import argparse
 import dataclasses
 import math
 import platform
+import re
+import select
 import signal
 import sys
 import threading
@@ -31,7 +35,15 @@ from services.edge.capture.sources import CameraSource, SourceOpenError, open_so
 from services.edge.capture.types import Frame, HealthEvent, utc_now
 from services.edge.perception.detector import DET_SIZE_MULTIPLE
 from services.edge.perception.loop import Processor, delay_stats, rates
-from services.edge.session.types import FrameRecord, RunCounts, RunMeta, SessionEvent, SessionMeta
+from services.edge.session.types import (
+    CAMERA_ID_RE,
+    GROUP_ID_RE,
+    FrameRecord,
+    RunCounts,
+    RunMeta,
+    SessionEvent,
+    SessionMeta,
+)
 from services.edge.session.writer import FileSessionWriter, device_id
 from services.edge.ui.preview import HudInfo, run_preview
 
@@ -72,6 +84,20 @@ def det_size(text: str) -> int:
     return value
 
 
+def token(pattern: re.Pattern):
+    """argparse type: an id that is safe in a file name (DATA_CONTRACTS section 2)."""
+
+    def parse(text: str) -> str:
+        if not pattern.fullmatch(text):
+            raise argparse.ArgumentTypeError(
+                f"must match {pattern.pattern} (letters, digits, _ and -), got {text!r}"
+            )
+        return text
+
+    parse.__name__ = "id"
+    return parse
+
+
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     d = HealthConfig()
     p = argparse.ArgumentParser(prog="python -m services.edge.main", description=__doc__)
@@ -103,6 +129,21 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="run for SECONDS, then print processing FPS, app delay p50/p95/max and drops",
     )
     p.add_argument("--no-detect", action="store_true", help="capture only, no detection")
+    p.add_argument(
+        "--camera-id",
+        type=token(CAMERA_ID_RE),
+        help="label of this camera in a multi-camera recording, e.g. cam1 (D-022)",
+    )
+    p.add_argument(
+        "--group-id",
+        type=token(GROUP_ID_RE),
+        help="shared by the cameras recorded together; the launcher sets it (D-022)",
+    )
+    p.add_argument(
+        "--stop-on-stdin",
+        action="store_true",
+        help="launcher use: a line 'stop' on stdin, or its end, stops like Ctrl+C",
+    )
     p.add_argument("--out", default="sessions", help="folder for session data (default sessions)")
     p.add_argument("--lost-reads", type=positive(int), default=d.lost_reads)
     p.add_argument("--lost-secs", type=positive(float), default=d.lost_secs)
@@ -115,7 +156,10 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 def print_event(ev: HealthEvent, t0: float | None) -> None:
     rel = f"+{ev.t_mono - t0:.2f}s" if t0 is not None else "-"
-    print(f"[{ev.t_wall}] {rel} {ev.kind}: {ev.detail}", flush=True)
+    try:
+        print(f"[{ev.t_wall}] {rel} {ev.kind}: {ev.detail}", flush=True)
+    except OSError:  # the launcher that read this pipe is gone: the event still goes to the file
+        pass
 
 
 def resolve_device(requested: str) -> tuple[str, str | None]:
@@ -233,12 +277,78 @@ def ignore_ctrl_c():
     previous handler, or None off the main thread (handlers cannot be set there)."""
 
     def wait(signum, frame):
-        print("stopping, please wait: saving the session", file=sys.stderr, flush=True)
+        try:
+            print("stopping, please wait: saving the session", file=sys.stderr, flush=True)
+        except OSError:  # nobody is reading any more
+            pass
 
     try:
         return signal.signal(signal.SIGINT, wait)
     except ValueError:
         return None
+
+
+def stdin_ready() -> bool:
+    """True when stdin has input or has ended (the writer closed its end). Never blocks and never
+    reads: on Windows a thread blocked in a synchronous pipe read stalls other calls on that
+    handle, and a DLL's start-up code does make one (`import scipy` hung in the main thread)."""
+    fd = sys.stdin.fileno()
+    if sys.platform != "win32":
+        return bool(select.select([fd], [], [], 0)[0])
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    peek = kernel32.PeekNamedPipe
+    peek.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p,
+                     ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p]  # fmt: skip
+    peek.restype = wintypes.BOOL
+    available = wintypes.DWORD()
+    if peek(msvcrt.get_osfhandle(fd), None, 0, None, ctypes.byref(available), None):
+        return available.value > 0
+    error = ctypes.get_last_error()
+    if error in (109, 232):  # ERROR_BROKEN_PIPE, ERROR_NO_DATA: the other end is gone
+        return True
+    raise OSError(error, "stdin is not a pipe")
+
+
+def stop_on_stdin() -> None:
+    """Start a thread that turns any input on stdin, or its end, into Ctrl+C: the launcher's way
+    to stop this process, also when the launcher itself dies (D-022). Fires once."""
+
+    if hasattr(signal, "SIGBREAK"):
+        # Ctrl+Break (unlike Ctrl+C) reaches a child in its own process group and would kill it
+        # before it saves: the launcher's stdin is the only stop channel
+        try:
+            signal.signal(signal.SIGBREAK, signal.SIG_IGN)
+        except ValueError:  # not the main thread
+            pass
+
+    def watch() -> None:
+        try:
+            while not stdin_ready():
+                time.sleep(0.1)
+        except (OSError, ValueError, AttributeError) as e:  # a terminal, a file, no stdin
+            print(f"warning: --stop-on-stdin cannot watch stdin ({e}); use Ctrl+C", file=sys.stderr)
+            return
+        _thread.interrupt_main()  # the same path as Ctrl+C: KeyboardInterrupt in the main thread
+
+    threading.Thread(target=watch, name="stdin-stop", daemon=True).start()
+
+
+def hold_ctrl_c(arrived: threading.Event):
+    """Until release_ctrl_c, a Ctrl+C (or interrupt_main) only sets `arrived`. Returns the
+    previous handler, or None off the main thread (handlers cannot be set there)."""
+    try:
+        return signal.signal(signal.SIGINT, lambda signum, frame: arrived.set())
+    except ValueError:
+        return None
+
+
+def release_ctrl_c(previous) -> None:
+    if previous is not None:
+        signal.signal(signal.SIGINT, previous)
 
 
 def link_conflict(kind: str, link: str | None) -> str | None:
@@ -251,6 +361,8 @@ def link_conflict(kind: str, link: str | None) -> str | None:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
+        if args.stop_on_stdin:
+            stop_on_stdin()
         return run(args)
     except KeyboardInterrupt:  # Ctrl+C before capture started (model load, slow stream open)
         print_event(HealthEvent("interrupted", utc_now(), None, "Ctrl+C"), None)
@@ -313,12 +425,19 @@ def run(args: argparse.Namespace) -> int:
     py = sys.version.split()[0]
     print(f"versions: python {py}, opencv {cv2.__version__}, numpy {np.__version__}")
 
+    # A stop (Ctrl+C, or the launcher's) between the session folder and the main try would leave
+    # session.json "running": hold it back here and raise it inside the try.
+    stop_early = threading.Event()
+    held = hold_ctrl_c(stop_early)
     writer = FileSessionWriter(args.out)
     try:
         session_id = str(uuid.uuid4())
-        meta = SessionMeta(session_id, device_id(args.out), utc_now(), info, False)
+        meta = SessionMeta(
+            session_id, device_id(args.out), utc_now(), info, False, args.camera_id, args.group_id
+        )
         writer.start(meta, run_meta(args, info, config, detector, tracker, gpu))
     except OSError as e:
+        release_ctrl_c(held)
         source.close()
         print(f"error: cannot write session data under {args.out!r}: {e}", file=sys.stderr)
         return EXIT_CAPTURE_ERROR
@@ -330,8 +449,8 @@ def run(args: argparse.Namespace) -> int:
         return None if t is None or t0 is None or t < t0 else t - t0
 
     def log_event(ev: HealthEvent) -> None:
-        on_event(ev)
         writer.event(SessionEvent(ev.t_wall, rel(ev.t_mono), ev.kind, ev.detail))
+        on_event(ev)
 
     def log_frame(p) -> None:
         if writer.done.is_set():  # nothing is saved any more: end the run (status error)
@@ -375,17 +494,24 @@ def run(args: argparse.Namespace) -> int:
             tracks=None if detector is None else (len(latest.tracks) if latest else 0),
         )
 
+    release_ctrl_c(held)
     status = 0
     session_status = "ended"
-    capture.start()
-    processor.start()
     until = time.perf_counter() + args.benchmark if args.benchmark else None
     try:
+        # inside the try: a stop request right after "session:" must still end the session
+        if stop_early.is_set():
+            raise KeyboardInterrupt
+        capture.start()
+        processor.start()
         while capture.t0_wall is None:  # set first thing by the capture thread
             time.sleep(0.001)
         writer.set_t0(capture.t0, capture.t0_wall)
         if args.preview:
-            run_preview(lambda: processor.latest, processor.done, hud, lambda: monitor.state, until)
+            title = f"Pointr {args.camera_id} (q to quit)" if args.camera_id else None
+            run_preview(
+                lambda: processor.latest, processor.done, hud, lambda: monitor.state, until, title
+            )
         else:
             while not processor.done.wait(0.1):
                 if until is not None and time.perf_counter() >= until:
@@ -449,6 +575,8 @@ def run(args: argparse.Namespace) -> int:
                 print_benchmark(args.benchmark, info.link, det, device, capture, processor)
         except KeyboardInterrupt:
             status = EXIT_INTERRUPTED
+        except OSError:  # stdout is gone (the launcher died): the files are already saved
+            pass
     if (capture.error or processor.error or writer.status != session_status) and not status:
         status = EXIT_CAPTURE_ERROR
     return status

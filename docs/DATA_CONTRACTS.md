@@ -1,6 +1,6 @@
 # Data contracts
 
-Contract version: **0.5.0**. Any change bumps the version (minor for additive fields, major
+Contract version: **0.6.0**. Any change bumps the version (minor for additive fields, major
 for removals or meaning changes) and needs a `DECISIONS.md` entry. JSON Schemas in
 `contracts/` are written from this file and tests check them against it (D-009).
 
@@ -15,7 +15,7 @@ Windows), and only comparable within one run. Missing values are empty in CSV an
 
 ```
 sessions/device_id          one UUIDv4, created on first use, reused by every session
-sessions/<session_id>/
+sessions/<folder>/         <camera_id>_<session_id>, or <session_id> without a camera_id
   session.json
   runs/<run_id>/
     run.json
@@ -26,6 +26,9 @@ sessions/<session_id>/
 ```
 
 A live session produces one run. Each replay adds a run. Nothing is overwritten.
+`device_id` is created with an exclusive create: processes that start together on a fresh
+folder (one per camera, D-022) end up with the same id; a file that is not a UUIDv4 is
+replaced with a warning.
 The session folder is created once the source has opened (D-020). Failures before that (bad
 ref, model load, `source_open_failed`) are printed and exit non-zero; they leave no folder.
 
@@ -38,9 +41,11 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
 
 ```json
 {
-  "contract_version": "0.5.0",
+  "contract_version": "0.6.0",
   "session_id": "uuid",
   "device_id": "uuid",
+  "camera_id": "cam1 | null",
+  "group_id": "token | null",
   "started_at": "2026-10-07T18:00:00Z",
   "ended_at": "2026-10-07T18:45:00Z",
   "status": "running | ended | interrupted | error",
@@ -53,6 +58,13 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
 }
 ```
 
+`camera_id` and `group_id` (0.6.0) identify one camera inside a multi-camera recording
+(D-022): `camera_id` is a label chosen by the user (`--camera-id`, 1-32 characters of
+`A-Za-z0-9_-`), `group_id` is shared by every session started together (`--group-id`, 1-64
+characters of `A-Za-z0-9_-`; the launcher writes a UUIDv4). Both are `null` when not given. Each
+camera is its own session with its own clock; nothing links frames across cameras. The folder is
+`<camera_id>_<session_id>` when `camera_id` is set, else `<session_id>`; the folder name is
+never parsed, `session_id` inside the file is the identity.
 `registration` is filled from phase 6 and is `null` before that. `ended_at` is `null` while
 the session is running. `source.link` is how the source reaches the notebook, declared by
 the user with `--link` (the notebook cannot detect it, D-010); `null` when not given.
@@ -70,7 +82,7 @@ Event kinds: `source_open_failed`, `source_lost`, `source_recovered`,
 
 ```json
 {
-  "contract_version": "0.5.0",
+  "contract_version": "0.6.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "mode": "live | replay",

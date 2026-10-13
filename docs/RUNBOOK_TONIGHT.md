@@ -1,8 +1,8 @@
 # Runbook: recording tonight (v0)
 
-Goal: record sessions with one or more phones and several people, then check that the data
-is there. Everything runs in **Git Bash**. Details of the install are in `README.md`
-("Install on a new PC").
+Goal: record sessions with several phones at once (one launcher, one process per camera) and
+several people, then check that the data is there. Everything runs in **Git Bash**. Details of
+the install are in `README.md` ("Install on a new PC").
 
 ## 1. Setup (once per PC)
 
@@ -71,71 +71,146 @@ Not working? Section 7.
 
 ## 3. Connecting phones
 
-**DroidCam through the PC client (USB or Wi-Fi), first phone**
+**Default: every phone is read by its URL. No PC client.** Checked on real hardware with the
+DroidCam app over Wi-Fi: `--source http://10.10.8.158:4747/video` gave 1280x720, reported 25 fps,
+about 28 fps captured, and the session ended cleanly.
 
-1. Phone: open the DroidCam app. For USB, enable USB debugging and plug the cable in.
-2. PC client: choose USB or Wi-Fi (phone IP shown in the phone app). **Only ONE active source
-   in the client**: remove or hide the other, otherwise one can hide the other's failure.
-3. Press the client's **virtual camera hotkey**. Do it again **after every client restart**:
-   the virtual camera is off after a restart.
-4. A virtual camera that is off still opens but shows **solid green frames** (Pointr reports
-   FROZEN). Green = press the hotkey.
-5. The camera index is usually `1` (`0` is the laptop webcam). Try `--source 0`, `1`, `2`.
+For each phone:
 
-**Second phone (and more): phone URL source.** The DroidCam client serves one phone, so the
-other phones are read directly from their stream URL, no client:
+1. The phone and the PC are on the same Wi-Fi (or the PC joined the phone's hotspot).
+2. Open the DroidCam app on the phone. It shows an address such as `http://192.168.1.50:4747`:
+   that is the phone's IP and port. Write the IP down. Apps differ in port and path; for
+   DroidCam the video is `http://<ip>:4747/video`.
+3. Test it **once** in the PC browser: open `http://<ip>:4747/video`, see the live image,
+   then **CLOSE THE TAB**. A phone serves **ONE viewer only**. While a browser tab (or the
+   DroidCam PC client, or any other program) is reading it, Pointr's connection fails with
+   `source_open_failed` ("DroidCam is Busy or Unavailable" in the browser). Closing the tab
+   fixes it.
+4. Put the phone in `cams.json` (section 4). Never give two entries the same phone: the launcher
+   refuses to start.
 
-1. Phone app on the same network as the PC, showing an address such as `http://192.168.1.50:4747`.
-2. Optional: open `http://<ip>:<port>/video` in the PC browser to see that the address
-   works, then **close that tab**: a phone app usually serves one viewer at a time, and an
-   open tab can make Pointr's connection fail. Apps differ in port and path.
-3. **This path (a phone URL read by Pointr) has not been tested on real hardware.** Smoke
-   test it for 10 seconds before relying on it (the image must appear in the window):
+**Fallback for ONE phone: the DroidCam PC client (USB or Wi-Fi).** Use it only if the URL does
+not work on the day. The client holds the phone's single viewer slot, so that phone can no
+longer be read by URL while the client runs.
+
+1. Phone: open the DroidCam app (USB: enable USB debugging, plug the cable in).
+2. PC client: choose USB or Wi-Fi. **Only ONE active source in the client.**
+3. Press the client's **virtual camera hotkey**, again **after every client restart**. A virtual
+   camera that is off still opens but shows **solid green frames** (Pointr reports FROZEN).
+4. The camera index is usually `1` (`0` is the laptop webcam). In `cams.json` use
+   `"source": 1, "link": "usb"` (or `wifi`).
+
+## 4. Recording: the launcher
+
+One process per camera, no fusion across cameras: every camera is its own session (own folder,
+clock, files) and all cameras of one start share a `group_id`.
+
+**4.1 The config.** Copy the example (the real file is not committed):
 
 ```bash
-python -m services.edge.main --source http://<ip>:<port>/video --link wifi --preview --benchmark 10 --out C:/pointr_sessions
+cp docs/cameras.example.json cams.json      # then edit it
 ```
 
-4. Then record, as its own process in its own Git Bash window:
+```json
+[
+  {"camera_id": "cam1", "source": "http://192.168.1.50:4747/video", "link": "wifi"},
+  {"camera_id": "cam2", "source": "http://192.168.1.51:4747/video", "link": "wifi", "det_size": 320},
+  {"camera_id": "cam3", "source": 1, "link": "usb", "preview": false}
+]
+```
+
+`camera_id`: a short label (letters, digits, `_`, `-`, up to 32), it goes into the session folder
+name. `source`: a phone URL, or a camera index (`0` laptop webcam). `link`: `wifi`, `usb` or
+`builtin`. Optional: `det_size` (a multiple of 32, e.g. `320`: faster, less accurate) and
+`preview` (`true` or `false` for this camera only; without it the `--preview` flag decides).
+
+**4.2 Start.**
 
 ```bash
 source .venv/Scripts/activate
-python -m services.edge.main --source http://<ip>:<port>/video --link wifi --preview --out C:/pointr_sessions
+python scripts/run_cameras.py --config cams.json --out C:/pointr_sessions --preview
 ```
 
-Start the processes **one at a time**: wait for the first `session:` line before starting the
-second (the first start creates `C:/pointr_sessions/device_id`; two simultaneous first starts
-can race on it).
+Always `--out C:/pointr_sessions`: outside OneDrive (it locks files) and outside the repo. Drop
+`--preview` for the lowest load (no windows). `--device cpu` forces the CPU.
 
-## 4. Recording
+- Cameras start **one at a time**: the launcher waits for the `session:` line of one camera
+  before it starts the next (each loads its own model; the first run downloads about 370 MB).
+  Allow some seconds per camera. A camera that does not get a session within 180 s is marked
+  failed and the others go on.
+- Every output line is prefixed with its camera: `[cam1] ...`, and `[launcher] ...` for the
+  launcher itself. With `--preview` each camera has its own window, `Pointr cam1 (q to quit)`.
+- A camera that cannot open its source (`[cam2] error: cannot open source ...`) does **not**
+  stop the others. Fix it (section 7), then stop everything and start again: one launcher
+  start is one group.
+- Two entries with the same source (the same phone, the same camera index) are refused before
+  anything starts.
 
-Always `--out C:/pointr_sessions`: outside OneDrive (it locks files) and outside the repo.
+**4.3 Stop.**
+
+- **Ctrl+C once, in the launcher's Git Bash window.** (Checked on real hardware: it reaches
+  every camera and both sessions ended `interrupted`.) The launcher asks every camera to stop
+  the way Ctrl+C stops a single one, waits for each to save, then prints the result table. Wait
+  for it (a few seconds). A second Ctrl+C only prints a reminder.
+- **`q` in a camera's preview window stops only that camera** (its session ends `ended`); the
+  others keep recording. When every camera has stopped the launcher prints the table and exits.
+- **Never** PyCharm's Stop button, the console's X, or killing processes: sessions can stay at
+  status `running` and the final counts are missing. The rows already written stay readable.
+  (If the launcher itself is killed, the cameras notice the closed pipe and stop on their own
+  with status `interrupted`, but do not rely on it; closing a mintty window was not tested.)
+  If a camera does not stop within 45 s the launcher kills it and the table says `(killed)`.
+
+**4.4 The result table.**
+
+```
+camera_id  session folder                              final status              processed fps  failed reads  errors
+cam1       cam1_3f1c2a8e-5b7d-4e9a-8c21-6d4f0b9e7a13   interrupted               2.10           0             0
+cam2       -                                           failed to start (exit 2)  -              -             -
+cam3       -                                           not started               -              -             -
+```
+
+`final status` comes from each `session.json`: `ended` (q, or the source ended), `interrupted`
+(Ctrl+C), `error` (read `events` in its `session.json`), or `running (killed)`. `failed reads` is
+the capture's failed read count; the phone should show 0. `errors` counts the `error` events in
+`session.json` (for example a thread that did not stop in time: the counts may be short).
+`not started`: Ctrl+C came before that camera's turn. `processed fps` is processed frames over
+the time from the first processing start to the last end, from `frames.csv`. The launcher exits
+0 only if every camera ended or was interrupted with no error event.
+
+**4.5 Memory and CPU: measure on the PC you record with.** Every camera is a process with its
+own copy of the model. Measured on the dev notebook (CPU build, two processes, a 640x360 file
+source, 12 s into detection): about **610 MB resident per process (peak 862 MB), about 1.2 GB
+committed**, and the launcher itself about 4 MB. The two cameras shared one CPU: 2.10 and 1.56
+processed fps, against 2.84 for one camera alone on the same clip (one short run each, not a
+benchmark). A GPU PC was not measured; CUDA adds its own host memory. With N cameras expect
+about N GB of RAM and watch Task Manager during the first run.
+
+**CPU contention, measured on real hardware (laptop webcam + phone URL, i7-10510U, CPU
+build):** the laptop camera processed 1.5-1.7 fps and the phone URL camera 0.35-0.57 fps, against
+about 2-2.4 fps for one camera alone; the second camera's model load took 27-30 s. So: **on a
+CPU-only PC use at most 2 cameras, both with `"det_size": 320`**. **On a GPU PC, check that each
+camera's `[camN] device:` line says `cuda:0 (...)`**: a camera that says `cpu` is slowing the
+others. If the PC is short of RAM or slow, record fewer cameras per PC or drop `--preview`.
+
+**4.6 One camera, without the launcher (fallback).**
 
 ```bash
 source .venv/Scripts/activate
+python -m services.edge.main --source http://<ip>:4747/video --link wifi --camera-id cam1 --preview --out C:/pointr_sessions
 python -m services.edge.main --source 1 --link usb --preview --out C:/pointr_sessions
 ```
 
-Add `--device cpu` to force the CPU, `--det-size 320` for more speed, drop `--preview` for
-the lowest load (headless).
-
-**Stop ONLY with `q` or Ctrl+C.**
-
-- `q` works in the preview window while that window has focus.
-- Ctrl+C works in the Git Bash window (press it once and wait for the `session ...:` line).
-- Without `--preview` there is no window: stop with Ctrl+C only.
-- **Never** PyCharm's Stop button, the console's X or Ctrl+Break: the files stay at status
-  `running` and the final counts are missing. The rows already written are still readable.
-
-One run = one session folder `C:/pointr_sessions/<session_id>/`. Wait for the line
-`session ended:` (after `q`), `session interrupted:` (after Ctrl+C) or `session error:` before unplugging a phone or closing the window.
+One command per Git Bash window; `--camera-id` and `--group-id` are optional (a session
+without a camera id is a folder named `<session_id>`). `--det-size 320` for more speed.
+Stop with `q` (window focused) or Ctrl+C (once, wait for the `session ...:` line). Without
+`--preview` there is no window: Ctrl+C only.
 
 ## 5. Check a session afterwards
 
 ```bash
-ls -t C:/pointr_sessions | head -4            # newest first; copy a session id (`device_id` is not one)
-S=C:/pointr_sessions/<session_id>
-grep -E '"status"|"started_at"|"ended_at"' $S/session.json
+ls -t C:/pointr_sessions | head -6            # newest first: <camera_id>_<session_id> (`device_id` is not a session)
+S=C:/pointr_sessions/<folder>                 # one camera's folder
+grep -E '"camera_id"|"group_id"|"status"|"started_at"|"ended_at"' $S/session.json
 wc -l $S/runs/*/frames.csv; head -5 $S/runs/*/tracks.csv
 ```
 
@@ -144,7 +219,9 @@ processed frame), `tracks.csv` has rows when people were in view. Also look at
 `$S/runs/*/run.json`: `runtime.device` and `runtime.gpu` say what ran the detector.
 
 `"status": "running"` after you stopped = it was stopped the wrong way (section 4).
-`"interrupted"` = Ctrl+C, normal. `"error"` = read `events` in `session.json`.
+`"interrupted"` = Ctrl+C, normal. The cameras recorded together have the same `group_id` and
+different `camera_id`s; each has its own clock (`t0_wall` in its `run.json`), nothing aligns them
+for you. `"error"` = read `events` in `session.json`.
 
 ## 6. Reading the data
 
@@ -166,9 +243,15 @@ processed frame), `tracks.csv` has rows when people were in view. Also look at
 |---|---|
 | `python: command not found` (or `pip` not found) | The venv is not active. `source .venv/Scripts/activate` in this terminal; the prompt must show `(.venv)` |
 | `git`, `ls`, `grep` not found | `export PATH="/usr/bin:/bin:/mingw64/bin:/cmd:$PATH"` |
-| `cannot open source`, or the wrong camera | Wrong index. Try `--source 0`, `1`, `2`. Close other programs using the camera (Zoom, Teams) |
+| `cannot open source`, or the wrong camera | Wrong index. Try `0`, `1`, `2`. Close other programs using the camera (Zoom, Teams) |
+| `source_open_failed` on a phone URL that works in the browser | The phone serves ONE viewer and another one is on it: **close the browser tab** (or the DroidCam PC client, or another Pointr using the same phone), wait a few seconds, start again |
+| Launcher: `use the same source` and nothing starts | Two entries in `cams.json` point at the same phone or index. One entry per phone |
+| Launcher: `[cam2] ... failed to start (exit 2)` in the table | That camera's source did not open (see its `[cam2]` lines above); the other cameras recorded normally. Fix it, then stop and start the launcher again |
+| Launcher: `failed: no session after 180 s` | The model load or the source open is stuck. Look at that camera's `[camN]` lines; try `--device cpu`, or fewer cameras |
+| Table says `running (killed)` | A camera did not stop within 45 s and was killed: its files are readable up to the last second, the counts are missing |
+| One camera shows `source_lost` and the others do not | That phone lost its Wi-Fi or went to sleep (phone screen off, app in the background). Checked on real hardware: `source_lost` about 2 s after the Wi-Fi went off (the stream read times out after 2.1 s), `source_recovered` when it came back, the other camera unaffected |
 | Solid green image, `FROZEN` banner | DroidCam virtual camera is off: press the client hotkey (again after every client restart). Only one active source in the client |
-| Phone URL does not open | Open `http://<ip>:<port>/video` in the PC browser first. PC and phone on the same Wi-Fi? Some networks (campus, guest Wi-Fi, some routers) isolate devices: use a **phone hotspot** (turn it on on one phone; connect the PC and the other phones to it) |
+| Phone URL does not open | Open `http://<ip>:4747/video` in the PC browser first (then close the tab). PC and phone on the same Wi-Fi? Some networks (campus, guest Wi-Fi, some routers) isolate devices: use a **phone hotspot** (turn it on on one phone; connect the PC and the other phones to it) |
 | Low fps, laggy | Run with `--det-size 320`. Read the `device:` line: it must say `cuda:0 (...)` on a GPU PC; `cpu` means the CPU is detecting. Close the preview (`--preview` off) and other heavy programs |
 | `torch.cuda.is_available()` is `False` after a CUDA install | Wrong torch wheel: `python -c "import torch; print(torch.__version__)"` says `+cpu` or has no `+cu...` suffix. Reinstall: `pip uninstall -y torch torchvision`, then the CUDA command from section 1, then `pip install -e ".[dev]"` again. Still `False` with `+cu...`: update the NVIDIA driver; `nvidia-smi` must work |
 | `error: --device cuda but torch ... cannot use a CUDA GPU` | Same as the row above; or drop `--device cuda` (auto falls back to CPU) |

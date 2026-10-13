@@ -1,5 +1,5 @@
 """File SessionWriter (PHASE_03, D-020): session.json, runs/<run_id>/run.json, frames.csv and
-tracks.csv under <out>/<session_id>/ (DATA_CONTRACTS.md sections 1-5).
+tracks.csv under <out>/<folder>/ (DATA_CONTRACTS.md sections 1-5).
 
 One writer thread owns every file handle; the capture, processing and main threads only put
 on a bounded queue. At least once per second the CSVs are flushed and session.json is
@@ -23,6 +23,8 @@ from urllib.parse import urlsplit, urlunsplit
 from services.edge.capture.types import utc_now
 from services.edge.perception.types import TrackObs
 from services.edge.session.types import (
+    CAMERA_ID_RE,
+    GROUP_ID_RE,
     FrameRecord,
     RunCounts,
     RunMeta,
@@ -30,7 +32,7 @@ from services.edge.session.types import (
     SessionMeta,
 )
 
-CONTRACT_VERSION = "0.5.0"
+CONTRACT_VERSION = "0.6.0"
 FRAMES_COLUMNS = [
     "seq", "t_recv", "t_proc_start", "t_proc_end", "app_delay_ms",
     "n_detections", "n_tracks", "dropped_total",
@@ -49,18 +51,52 @@ def redact(ref: str) -> str:
     return urlunsplit(parts._replace(netloc=parts.netloc.rsplit("@", 1)[1]))
 
 
-def device_id(out_dir: Path) -> str:
-    """This device's UUIDv4, kept in <out>/device_id and created on first use."""
-    path = Path(out_dir) / "device_id"
+def _read_device_id(path: Path) -> str | None:
+    """The UUIDv4 in the file, or None if it is missing or not a UUIDv4. OSError (a lock held
+    by OneDrive or an antivirus) propagates: that is not a reason to change the id."""
     try:
         value = path.read_text(encoding="utf-8").strip()
-        if uuid.UUID(value).version == 4 and str(uuid.UUID(value)) == value:
-            return value
-    except (OSError, ValueError):
-        pass
-    value = str(uuid.uuid4())
+    except FileNotFoundError:
+        return None
+    try:
+        return value if uuid.UUID(value).version == 4 and str(uuid.UUID(value)) == value else None
+    except ValueError:
+        return None
+
+
+def device_id(out_dir: Path) -> str:
+    """This device's UUIDv4, kept in <out>/device_id and created on first use.
+
+    Several processes may start together on a fresh folder (one per camera): the file is
+    created exclusively, and the process that loses the race reads the winner's value. The
+    winner writes after creating, so a reader may see the file empty for a moment: it retries."""
+    path = Path(out_dir) / "device_id"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(value + "\n", encoding="utf-8")
+    locked: OSError | None = None
+    for _ in range(40):  # 2 s: the winner's write takes microseconds
+        try:
+            if (value := _read_device_id(path)) is not None:
+                return value
+            locked = None
+        except OSError as e:  # unreadable for now: wait, never overwrite what we cannot read
+            locked = e
+            time.sleep(0.05)
+            continue
+        try:
+            with open(path, "x", encoding="utf-8") as f:
+                value = str(uuid.uuid4())
+                f.write(value + "\n")
+            return value
+        except FileExistsError:
+            time.sleep(0.05)  # another process won: read its value on the next turn
+    if locked is not None:
+        raise locked
+    # present but never valid (corrupt, or its creator died mid-write): replace it, and say so
+    print(f"warning: {path} is not a valid device id; replacing it", file=sys.stderr)
+    value = str(uuid.uuid4())
+    tmp = path.with_name(f"device_id.{os.getpid()}.tmp")
+    tmp.write_text(value + "\n", encoding="utf-8")
+    os.replace(tmp, path)
     return value
 
 
@@ -114,7 +150,13 @@ class FileSessionWriter:
         """Create the folders, write session.json and run.json (status running), start the
         thread. Raises OSError when the folder cannot be created; FileExistsError if it
         exists: a run never writes into another run's folder (A5)."""
-        self.dir = self.out_dir / meta.session_id
+        # ids reach a folder name: refuse anything that is not a plain token (D-022)
+        if meta.camera_id is not None and not CAMERA_ID_RE.fullmatch(meta.camera_id):
+            raise ValueError(f"invalid camera_id {meta.camera_id!r}")
+        if meta.group_id is not None and not GROUP_ID_RE.fullmatch(meta.group_id):
+            raise ValueError(f"invalid group_id {meta.group_id!r}")
+        folder = f"{meta.camera_id}_{meta.session_id}" if meta.camera_id else meta.session_id
+        self.dir = self.out_dir / folder
         self._run_dir = self.dir / "runs" / run.run_id
         self._run_dir.mkdir(parents=True)
         src = meta.source
@@ -122,6 +164,8 @@ class FileSessionWriter:
             "contract_version": CONTRACT_VERSION,
             "session_id": meta.session_id,
             "device_id": meta.device_id,
+            "camera_id": meta.camera_id,
+            "group_id": meta.group_id,
             "started_at": meta.started_at,
             "ended_at": None,
             "status": "running",

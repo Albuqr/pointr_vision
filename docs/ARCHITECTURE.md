@@ -150,6 +150,12 @@ capture thread ──▶ proc_queue (maxsize=1, drop oldest, count drops) ──
 - **Shutdown.** q, Ctrl+C, source end or exception all go through one shutdown path: stop
   capture, drain queues with a timeout, close writer, write final `session.json` in a
   `finally` block.
+- **Several cameras (D-022).** One OS process per camera, each with its own capture, model,
+  writer, session and clock; no fusion across cameras. `scripts/run_cameras.py` is a supervisor,
+  not a layer: it starts the processes one at a time, prefixes their output and stops them
+  through a stop channel, the child's stdin (a `stop` line, or the pipe closing when the
+  launcher dies, becomes the Ctrl+C path of that process: the same shutdown as above). A
+  child's `session.json` carries `camera_id` and `group_id`.
 
 ## 6. Local storage
 
@@ -157,7 +163,7 @@ Two stores with different jobs:
 
 | Store | Holds | Why |
 |---|---|---|
-| `sessions/<session_id>/` files | `session.json`, `frames.csv`, `tracks.csv`, `video.mp4`, `report.json` | Append-only raw record of a run. Readable without the app, easy to replay and diff. |
+| `sessions/<folder>/` files (`<camera_id>_<session_id>`) | `session.json`, `frames.csv`, `tracks.csv`, `video.mp4`, `report.json` | Append-only raw record of a run. Readable without the app, easy to replay and diff. |
 | `pointr.db` (SQLite) | players, teams, session index, outbox, entitlement cache | Relational data edited by the user, and the durable send queue. |
 
 Files are the source of truth for frame and track data; SQLite indexes them. A replay

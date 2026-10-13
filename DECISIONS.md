@@ -513,3 +513,75 @@ GPU would have failed somewhere inside rfdetr.
 operating instructions for the v0 recording. The first real GPU run will show whether
 `cuda:0` works with rfdetr 1.11.2 end to end.
 **Status.** Accepted.
+
+## D-022 · 2026-10-13 · v0 multi-camera: one process per camera, contract 0.6.0
+**Context.** Tonight: one PC, several phones. Real hardware, verified today: a phone URL
+(`http://10.10.8.158:4747/video`, DroidCam app over Wi-Fi) opens, delivers 1280x720, reported
+25 fps, about 28 fps captured, and the session ended cleanly. A phone serves ONE viewer: with a
+browser tab open on the same URL, OpenCV failed with `source_open_failed` ("DroidCam is Busy or
+Unavailable" in the browser); closing the tab fixed it.
+**Decision.**
+- **One process per camera, no cross-camera fusion.** Each camera is a normal `services.edge.main`
+  process with its own session, run, clock (`t0`), model and writer. A launcher
+  (`scripts/run_cameras.py`) starts them from a JSON config and supervises them. Nothing links
+  frames across cameras; `group_id` only says which sessions were recorded together.
+- **Contract 0.6.0** (minor, additive): `session.json` `camera_id` (`--camera-id`, 1-32 of
+  `A-Za-z0-9_-`) and `group_id` (`--group-id`, 1-64 of `A-Za-z0-9_-`; the launcher writes a
+  UUIDv4), both nullable. The session folder is `<camera_id>_<session_id>` (or `<session_id>`
+  without a camera id): the id is a safe file-name token, checked in the CLI and again in the
+  writer, so a camera id cannot walk out of `--out`. The folder name is never parsed.
+- **Default input is the phone URL for every phone, no PC client.** The DroidCam client's virtual
+  webcam stays as the fallback for one phone. The launcher refuses two entries with the same
+  source (same host and port for URLs, same index for cameras): one viewer per phone.
+- **Stop reaches children through their stdin.** The launcher starts each child with
+  `--stop-on-stdin`; any input or the end of the pipe makes the child call
+  `_thread.interrupt_main()`, i.e. exactly the Ctrl+C path (status `interrupted`, final write).
+  The child **polls** stdin (`PeekNamedPipe` on Windows, `select` elsewhere) and never blocks
+  in a read: found on this notebook, a thread blocked reading stdin hung `import scipy` (the
+  model load) in the main thread, the child never printed its `session:` line, and the launcher
+  timed out. A test reproduces it without the model.
+  Chosen over `CREATE_NEW_PROCESS_GROUP` + `CTRL_BREAK_EVENT` because that needs a SIGBREAK
+  handler in the child, only works for console children, and the child still has to be told in
+  band; stdin works the same on every OS, is testable with fake children, and the end of the
+  pipe also stops children when the launcher itself dies. Children are started in their own process
+  group and, on Windows, without a console (`CREATE_NO_WINDOW`), POSIX: their own session, so
+  no console event (Ctrl+C, Ctrl+Break, closing the window) reaches them: they stop through
+  one path, and ignore SIGBREAK as well. A launcher that dies closes the pipes and the cameras
+  stop themselves (tested with a hard-killed launcher and real children). Killing is the last resort after
+  `--stop-timeout` and is shown in the final table (`killed`).
+- **`device_id` race fixed.** `<out>/device_id` is created with an exclusive create (`open(...,
+  "x")`); the process that loses the race re-reads the winner's value (retrying while the file is
+  still empty). A file that stays unreadable or invalid is replaced with a warning on stderr
+  instead of silently.
+- **`main.run`: starting the capture and processing threads moved inside the `try`**, so a stop
+  request that lands right after the `session:` line (the launcher makes this likelier) still
+  ends the session as `interrupted` (BACKLOG item from the phase 03 gate).
+- **Setup window.** A stop between the session folder and the main `try` is held back
+  (`hold_ctrl_c`) and raised inside the `try`, so the session ends `interrupted`, not
+  `running`. Console output that fails (`OSError`: the launcher is gone) never stops a session:
+  `print_event` swallows it and the event goes to the writer first. `Capture.stop` and
+  `Processor.stop` accept a thread that never started.
+- **Launcher output.** Lines are written with `errors=backslashreplace`; a reader thread
+  cannot die on an unencodable line (reproduced by reliability-reviewer: a child then blocks on
+  a full pipe and is killed). The table adds `errors` (count of `error` events) and rows for
+  cameras not started; the exit code is 0 only if every session ended or was interrupted with
+  no error event. Relative `--out` and file sources are resolved against the launcher's folder.
+  `device_id` is never overwritten when it is merely unreadable (OneDrive lock).
+**Gate (code-reviewer, contract-guardian, reliability-reviewer).** contract-guardian: no
+BLOCKER/MAJOR; nits fixed or in BACKLOG. code-reviewer: MAJOR Ctrl+Break kills children (fixed:
+no console, SIGBREAK ignored); MAJOR "Ctrl+C under mintty not proven": **open, it is the manual
+check** (keyboard Ctrl+C in Git Bash, two cameras). reliability-reviewer: MAJOR launcher stdout
+encoding kills a reader (fixed, test). MINORs fixed: setup window, broken pipe on exit, launcher
+cwd/relative paths, `taskkill` by full path, deadline restart on repeated Ctrl+C, credentials in
+launcher output, leading `-` in values, `not started` rows, `error` events; rest in BACKLOG.
+**Not decided / out of scope.** Camera fusion, calibration, movement report. Whether several
+processes on one GPU is fast enough is not measured here: the manual check records only that the
+sessions are valid. RAM per process is measured on the dev notebook (CPU) and written in the
+runbook.
+**Manual check (2026-10-13, real hardware, passed both runs).** Laptop webcam + phone URL: Ctrl+C
+from Git Bash reached all children, both sessions `interrupted` (this closes the open mintty
+finding). Wi-Fi off on the phone: `source_lost` about 2 s later (FFmpeg read timeout 2.1 s),
+`source_recovered` when it returned, the laptop camera unaffected. CPU contention on the
+i7-10510U: 1.5-1.7 fps (laptop) and 0.35-0.57 fps (phone URL) against about 2-2.4 fps alone;
+the second model load took 27-30 s. Runbook: CPU-only PC, at most 2 cameras with det_size 320.
+**Status.** Accepted; merged to main.

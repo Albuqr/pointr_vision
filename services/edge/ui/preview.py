@@ -81,15 +81,18 @@ def run_preview(
     hud: Callable[[], HudInfo],
     state: Callable[[], str],
     until: float | None,
+    title: str | None = None,
 ) -> None:
     """Show the latest processed frame until q, the window is closed, `done` is set
     (processing stopped), or the time.perf_counter() deadline `until`. Main thread only.
 
     The image changes at the processing rate; the window, banner and HUD refresh every
-    REFRESH_MS, so LOST is visible while no frames arrive."""
+    REFRESH_MS, so LOST is visible while no frames arrive. `title` names the window: one
+    window per camera needs its own (D-022)."""
+    window = title or WINDOW
     image = np.zeros((360, 640, 3), np.uint8)
     shown = None
-    cv2.namedWindow(WINDOW)
+    cv2.namedWindow(window)
     try:
         while not done.is_set():
             if until is not None and time.perf_counter() >= until:
@@ -97,10 +100,10 @@ def run_preview(
             current = latest()
             if current is not None and current is not shown:
                 image, shown = draw_tracks(current.frame.image, current.tracks), current
-            cv2.imshow(WINDOW, draw_hud(image, state(), hud()))
+            cv2.imshow(window, draw_hud(image, state(), hud()))
             if cv2.waitKey(REFRESH_MS) & 0xFF == ord("q"):
                 break
-            if cv2.getWindowProperty(WINDOW, cv2.WND_PROP_VISIBLE) < 1:
+            if cv2.getWindowProperty(window, cv2.WND_PROP_VISIBLE) < 1:
                 break
     finally:
         cv2.destroyAllWindows()
