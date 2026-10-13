@@ -1,6 +1,12 @@
 """Compatibility CLI for the importable multi-camera launcher."""
 
-from services.edge import launcher_impl as _impl
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from services.edge import launcher_impl as _impl  # noqa: E402
 
 
 def __getattr__(name):
@@ -12,6 +18,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    import sys
-
     sys.exit(main())
