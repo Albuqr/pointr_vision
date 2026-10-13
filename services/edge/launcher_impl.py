@@ -75,6 +75,7 @@ class Camera:
     track_min_frames: int | None = None
     http_preview_port: int | None = None
     calibration_path: str | None = None
+    calibration_problem: str | None = None  # why a saved calibration was not used (one line)
 
 
 def source_key(source: str) -> str:
@@ -223,6 +224,8 @@ def child_command(cam: Camera, opts: Options) -> list[str]:
         cmd.append(f"--http-preview={cam.http_preview_port}")
     if cam.calibration_path is not None:
         cmd.append(f"--calibration={cam.calibration_path}")
+    if cam.calibration_problem:
+        cmd.append(f"--calibration-problem={cam.calibration_problem}")
     if cam.preview if cam.preview is not None else opts.preview:
         cmd.append("--preview")
     if opts.device:

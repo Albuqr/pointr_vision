@@ -112,6 +112,10 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--http-preview", type=int, help="serve annotated loopback preview on this port")
     p.add_argument("--calibration", help="calibration JSON file for metre positions")
     p.add_argument(
+        "--calibration-problem",
+        help="why the launcher did not pass a saved calibration: recorded as an event",
+    )
+    p.add_argument(
         "--link",
         choices=["usb", "wifi", "builtin", "file"],
         help="how the source reaches the notebook (recorded, not detected; D-012)",
@@ -538,6 +542,10 @@ def run(args: argparse.Namespace) -> int:
     def log_event(ev: HealthEvent) -> None:
         writer.event(SessionEvent(ev.t_wall, rel(ev.t_mono), ev.kind, ev.detail))
         on_event(ev)
+
+    if args.calibration_problem:  # before any run, so no t0: t_mono is null
+        problem = args.calibration_problem
+        log_event(HealthEvent("error", utc_now(), None, f"calibration not used: {problem}"))
 
     size_state = {"first": True, "problem": None}
 

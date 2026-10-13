@@ -58,6 +58,7 @@ class Studio:
         self.final: dict[str, dict] = {}
         self.frame_cache = {}
         self.calibration_frames = {}
+        self.calibration_warnings: dict[str, str] = {}
         self.active_group_path = self.config.path.with_name("active_group.json")
         self.recover_interrupted_group()
 
@@ -110,9 +111,31 @@ class Studio:
             if not entries:
                 raise HTTPException(422, "add at least one camera")
             cameras = parse_config(entries)
+            # Load every calibration before any state changes. A camera whose calibration is
+            # missing records uncalibrated; one whose calibration is corrupt does too, but says
+            # so (a session event, and a warning in the status). One camera never blocks the rest.
+            calibration_paths: dict[str, str | None] = {}
+            warnings: dict[str, str] = {}
+            for camera in cameras:
+                calibration_paths[camera.camera_id] = None
+                try:
+                    saved = self.calibrations.load(camera.camera_id)
+                except ValueError as exc:
+                    warnings[camera.camera_id] = (
+                        " ".join(str(exc).split())
+                        + "; recording without calibration (positions in pixels)"
+                    )
+                    continue
+                if saved:
+                    calibration_paths[camera.camera_id] = str(
+                        self.calibrations.camera_dir(camera.camera_id)
+                        / saved["calibration_id"]
+                        / "calibration.json"
+                    )
             self.group_id = str(uuid.uuid4())
             self.final = {}
             self.preview_ports = {}
+            self.calibration_warnings = warnings
             for camera in cameras:
                 port = self.free_port()
                 while port in self.preview_ports.values():
@@ -120,17 +143,6 @@ class Studio:
                 self.preview_ports[camera.camera_id] = port
             configured = []
             for camera in cameras:
-                try:
-                    saved = self.calibrations.load(camera.camera_id)
-                except ValueError as exc:
-                    raise HTTPException(422, str(exc)) from exc
-                calibration_path = None
-                if saved:
-                    calibration_path = str(
-                        self.calibrations.camera_dir(camera.camera_id)
-                        / saved["calibration_id"]
-                        / "calibration.json"
-                    )
                 configured.append(
                     Camera(
                         camera.camera_id,
@@ -142,7 +154,8 @@ class Studio:
                         camera.track_activation,
                         camera.track_min_frames,
                         self.preview_ports[camera.camera_id],
-                        calibration_path,
+                        calibration_paths[camera.camera_id],
+                        warnings.get(camera.camera_id),
                     )
                 )
             cameras = configured
@@ -244,6 +257,7 @@ class Studio:
                     "session_folder": str(session_dir) if session_dir else None,
                     "preview_port": preview_port,
                     "error": getattr(child, "failure", None),
+                    "calibration_warning": self.calibration_warnings.get(child.cam.camera_id),
                     "calibration": (
                         {
                             "calibration_id": session.get("calibration", {}).get("calibration_id"),

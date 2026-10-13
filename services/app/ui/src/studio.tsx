@@ -28,6 +28,7 @@ type CameraStatus = {
   session_folder: string | null;
   preview_port: number | null;
   error?: string | null;
+  calibration_warning?: string | null;
   calibration?: { calibration_id: string; check_error_m: number } | null;
 };
 type Status = { running: boolean; cameras: CameraStatus[] };
@@ -752,6 +753,11 @@ export default function StudioApp() {
                         : "Not calibrated · positions in pixels"}
                     </span>
                   </div>
+                  {camera.calibration_warning && (
+                    <p className="feed-warning" role="alert">
+                      Calibration not used: {camera.calibration_warning}
+                    </p>
+                  )}
                   {camera.error && <p className="feed-error">{camera.error}</p>}
                   {camera.last_event && (
                     <small className="last-event">

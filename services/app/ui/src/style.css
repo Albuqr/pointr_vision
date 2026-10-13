@@ -1187,3 +1187,14 @@ button:focus-visible,
   color: #842f0b;
   background: var(--orange-wash);
 }
+
+.feed-warning {
+  margin: 8px 16px;
+  padding: 9px;
+  color: var(--orange-dark);
+  background: var(--orange-wash);
+  border-left: 3px solid var(--orange);
+  border-radius: 4px;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
