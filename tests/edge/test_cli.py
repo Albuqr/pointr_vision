@@ -80,6 +80,7 @@ def test_benchmark_prints_the_baseline_block(clips, out_dir):
     assert len(lines) == 3, result.stdout
     assert "frames 640x360" in lines[0]
     assert "det-size off" in lines[0]
+    assert "preview off" in lines[0]
     assert "captured 30, processed " in lines[1]
     assert "app delay ms p50 " in lines[2] and "p95 " in lines[2] and "max " in lines[2]
     assert "unprocessed 0" in lines[1]
