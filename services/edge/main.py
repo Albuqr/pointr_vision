@@ -31,7 +31,12 @@ import numpy as np
 
 from services.edge.capture.capture import Capture
 from services.edge.capture.health import HealthConfig, HealthMonitor
-from services.edge.capture.sources import CameraSource, SourceOpenError, open_source
+from services.edge.capture.sources import (
+    DEFAULT_CAPTURE_SIZE,
+    CameraSource,
+    SourceOpenError,
+    open_source,
+)
 from services.edge.capture.types import Frame, HealthEvent, utc_now
 from services.edge.perception.detector import DET_SIZE_MULTIPLE
 from services.edge.perception.loop import Processor, delay_stats, rates
@@ -111,8 +116,18 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         choices=["usb", "wifi", "builtin", "file"],
         help="how the source reaches the notebook (recorded, not detected; D-012)",
     )
-    p.add_argument("--width", type=positive(int), default=1280, help="requested camera width")
-    p.add_argument("--height", type=positive(int), default=720, help="requested camera height")
+    p.add_argument(
+        "--width",
+        type=positive(int),
+        default=DEFAULT_CAPTURE_SIZE[0],
+        help="requested camera width",
+    )
+    p.add_argument(
+        "--height",
+        type=positive(int),
+        default=DEFAULT_CAPTURE_SIZE[1],
+        help="requested camera height",
+    )
     p.add_argument("--threshold", type=confidence, default=0.5, help="person confidence")
     p.add_argument(
         "--track-lost-secs",
@@ -524,6 +539,32 @@ def run(args: argparse.Namespace) -> int:
         writer.event(SessionEvent(ev.t_wall, rel(ev.t_mono), ev.kind, ev.detail))
         on_event(ev)
 
+    size_state = {"first": True, "problem": None}
+
+    def frame_size_problem(p) -> str | None:
+        """Why the calibration does not apply to this frame (a different size), else None. The
+        first frame decides the run: a calibration made at another size would put every position
+        in the wrong place, so the camera fails loudly. A later change (a reconnect at another
+        resolution) stops the positions and is an event; the rows stay."""
+        size = calibration["image_size"]
+        height, width = p.frame.image.shape[:2]
+        if (width, height) == (size["width"], size["height"]):
+            problem = None
+        else:
+            problem = (
+                f"frame size {width}x{height} differs from the calibration image size "
+                f"{size['width']}x{size['height']}"
+            )
+        if size_state["first"]:
+            size_state["first"] = False
+            if problem:
+                print(f"error: calibration cannot be used: the first {problem}", file=sys.stderr)
+                raise RuntimeError(problem)
+        if problem != size_state["problem"] and problem:
+            log_event(HealthEvent("error", utc_now(), p.frame.t_recv, f"{problem}; no positions"))
+        size_state["problem"] = problem
+        return problem
+
     def log_frame(p) -> None:
         if writer.done.is_set():  # nothing is saved any more: end the run (status error)
             raise RuntimeError("session writer stopped")
@@ -540,8 +581,12 @@ def run(args: argparse.Namespace) -> int:
             p.dropped_total,
         )
         writer.frame(rec)
+        no_positions = frame_size_problem(p) if calibration is not None else None
         if p.tracks:
-            writer.tracks(p.frame.seq, p.tracks)
+            if no_positions:
+                writer.tracks(p.frame.seq, p.tracks, no_positions)
+            else:
+                writer.tracks(p.frame.seq, p.tracks)
 
     monitor = HealthMonitor(config)
     capture = Capture(source, monitor, log_event)

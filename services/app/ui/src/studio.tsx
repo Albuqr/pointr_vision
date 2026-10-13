@@ -235,7 +235,9 @@ export default function StudioApp() {
       setPendingImage(null);
       setFit(null);
       setComparison(null);
-      setNotice("Frame captured at the camera's full pipeline resolution.");
+      setNotice(
+        `Frame captured at ${response.headers.get("X-Frame-Width")} × ${response.headers.get("X-Frame-Height")}, the size the recorder will use for this camera. A recording refuses a calibration made at another size.`,
+      );
       setError("");
     } catch (reason) {
       setError(String(reason));

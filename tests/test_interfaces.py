@@ -35,7 +35,7 @@ EXPECTED = {
         "start": ["meta", "run", "positions"],
         "set_t0": ["t0", "t0_wall"],
         "frame": ["rec"],
-        "tracks": ["seq", "obs"],
+        "tracks": ["seq", "obs", "no_positions"],
         "event": ["ev"],
         "close": ["status", "counts"],
     },

@@ -239,8 +239,10 @@ class FileSessionWriter:
     def frame(self, rec: FrameRecord) -> None:
         self._put(("frame", rec))
 
-    def tracks(self, seq: int, obs: list[TrackObs]) -> None:
-        self._put(("tracks", seq, obs))
+    def tracks(self, seq: int, obs: list[TrackObs], no_positions: str | None = None) -> None:
+        """no_positions: why these rows get no metre position (the caller knows the frame, e.g.
+        its size no longer matches the calibration); the rows are written all the same."""
+        self._put(("tracks", seq, obs, no_positions))
 
     def event(self, ev: SessionEvent) -> None:
         self._put(("event", ev))
@@ -360,12 +362,12 @@ class FileSessionWriter:
                 ]
             )
         elif kind == "tracks":
-            _, seq, obs = item
+            _, seq, obs, no_positions = item
             changed = False
             for o in obs:
                 x1, y1, x2, y2 = o.xyxy
                 x_m, y_m, calibration_id, position_method, in_court, why = self._position(
-                    (x1 + x2) / 2, y2
+                    (x1 + x2) / 2, y2, no_positions
                 )
                 if why:
                     changed |= self._note_unprojected(why)
@@ -383,12 +385,14 @@ class FileSessionWriter:
             self._snapshot(self._run_dir / "run.json", self._run_doc)  # also in the final write
         return False
 
-    def _position(self, x: float, y: float) -> tuple:
+    def _position(self, x: float, y: float, no_positions: str | None = None) -> tuple:
         """The five position cells of one row and why the position is empty (or None). Nothing
         a projection does can stop the writer: an error leaves the position empty."""
         positions = self._positions
         if positions is None:
             return "", "", "", "", "", None
+        if no_positions:
+            return "", "", positions.calibration_id, METHOD, "", no_positions
         try:
             xy = positions(x, y)
             if xy is None:

@@ -13,6 +13,9 @@ from services.edge.capture.types import Frame, FrameSource, SourceEnded, SourceI
 
 FILE_SUFFIXES = (".mp4", ".mov")
 STREAM_SCHEMES = ("http://", "https://", "rtsp://")
+# What the recorder requests from a camera. Anything that must see the recorder's frames (the
+# Studio's calibration frame) opens the camera with this size too.
+DEFAULT_CAPTURE_SIZE = (1280, 720)
 
 
 class SourceOpenError(Exception):

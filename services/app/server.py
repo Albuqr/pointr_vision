@@ -25,7 +25,7 @@ from services.app.config import CameraConfig
 from services.edge.calibration.court import court_model
 from services.edge.calibration.homography import fit_calibration
 from services.edge.calibration.render import projected_court_lines
-from services.edge.capture.sources import SourceOpenError, open_source
+from services.edge.capture.sources import DEFAULT_CAPTURE_SIZE, SourceOpenError, open_source
 from services.edge.capture.types import SourceEnded
 from services.edge.launcher import Camera, ConfigError, Launcher, Options, parse_config
 from services.edge.reports.build import build_report, format_summary, run_dirs
@@ -356,7 +356,8 @@ class Studio:
                 if image is None:
                     raise ValueError("recording process returned an invalid JPEG")
             else:
-                source = open_source(str(entry["source"]), None)
+                # the recorder's own capture size, so the frame is the one it will record
+                source = open_source(str(entry["source"]), DEFAULT_CAPTURE_SIZE)
                 try:
                     source.open()
                     deadline = time.monotonic() + 3
