@@ -2,7 +2,8 @@
 
     python scripts/run_cameras.py --config cams.json --out C:/pointr_sessions [--preview]
 
-cams.json is a list of {"camera_id", "source", "link", "det_size"?, "preview"?}; see
+cams.json is a list of {"camera_id", "source", "link", "det_size"?, "preview"?,
+"track_lost_secs"?, "track_activation"?, "track_min_frames"?}; see
 docs/cameras.example.json. Every camera is its own session, started one at a time (each start
 waits for the child's "session:" line), and all share one group_id. There is no fusion across
 cameras. Every child output line is prefixed with [camera_id].
@@ -42,7 +43,16 @@ from services.edge.session.types import CAMERA_ID_RE  # noqa: E402
 from services.edge.session.writer import redact  # noqa: E402
 
 LINKS = ("usb", "wifi", "builtin", "file")
-KEYS = {"camera_id", "source", "link", "det_size", "preview"}
+KEYS = {
+    "camera_id",
+    "source",
+    "link",
+    "det_size",
+    "preview",
+    "track_lost_secs",
+    "track_activation",
+    "track_min_frames",
+}
 DEFAULT_PORTS = {"http": 80, "https": 443, "rtsp": 554}
 SESSION_PREFIX = "session: "  # printed by services.edge.main once the source has opened
 FAILED_READS = re.compile(r"\bfailed_reads=(\d+)")
@@ -60,6 +70,9 @@ class Camera:
     link: str
     det_size: int | None = None
     preview: bool | None = None  # None: follow --preview
+    track_lost_secs: float | None = None
+    track_activation: float | None = None
+    track_min_frames: int | None = None
 
 
 def source_key(source: str) -> str:
@@ -123,7 +136,39 @@ def parse_config(data: object) -> list[Camera]:
         preview = entry.get("preview")
         if preview is not None and not isinstance(preview, bool):
             raise ConfigError(f"{where}: preview must be true or false")
-        cameras.append(Camera(camera_id, absolute(source.strip()), entry["link"], size, preview))
+        track_lost_secs = entry.get("track_lost_secs")
+        if track_lost_secs is not None and (
+            isinstance(track_lost_secs, bool)
+            or not isinstance(track_lost_secs, (int, float))
+            or not 0 < track_lost_secs < float("inf")
+        ):
+            raise ConfigError(f"{where}: track_lost_secs must be a finite number greater than 0")
+        track_activation = entry.get("track_activation")
+        if track_activation is not None and (
+            isinstance(track_activation, bool)
+            or not isinstance(track_activation, (int, float))
+            or not 0 < track_activation <= 1
+        ):
+            raise ConfigError(f"{where}: track_activation must be a number in (0, 1]")
+        track_min_frames = entry.get("track_min_frames")
+        if track_min_frames is not None and (
+            not isinstance(track_min_frames, int)
+            or isinstance(track_min_frames, bool)
+            or track_min_frames < 1
+        ):
+            raise ConfigError(f"{where}: track_min_frames must be a positive integer")
+        cameras.append(
+            Camera(
+                camera_id,
+                absolute(source.strip()),
+                entry["link"],
+                size,
+                preview,
+                track_lost_secs,
+                track_activation,
+                track_min_frames,
+            )
+        )
     for a in range(len(cameras)):
         for b in range(a):
             if cameras[a].camera_id == cameras[b].camera_id:
@@ -166,6 +211,12 @@ def child_command(cam: Camera, opts: Options) -> list[str]:
     ]  # fmt: skip
     if cam.det_size:
         cmd.append(f"--det-size={cam.det_size}")
+    if cam.track_lost_secs is not None:
+        cmd.append(f"--track-lost-secs={cam.track_lost_secs}")
+    if cam.track_activation is not None:
+        cmd.append(f"--track-activation={cam.track_activation}")
+    if cam.track_min_frames is not None:
+        cmd.append(f"--track-min-frames={cam.track_min_frames}")
     if cam.preview if cam.preview is not None else opts.preview:
         cmd.append("--preview")
     if opts.device:

@@ -14,6 +14,7 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from services.edge import main as cli
+from services.edge.capture.health import HealthConfig
 from services.edge.capture.types import SourceInfo
 from services.edge.main import EXIT_CAPTURE_ERROR, EXIT_INTERRUPTED, EXIT_OPEN_FAILED
 from services.edge.perception.loop import NO_DETECTIONS
@@ -141,6 +142,40 @@ def test_fixture_clip_produces_valid_files(monkeypatch, tmp_path, clips):
     assert list(tracks[0]) == writer_mod.TRACKS_COLUMNS
     assert tracks[0]["x1"] == "10.00" and tracks[0]["confidence"] == "0.9000"
     assert tracks[0]["state"] == "" and tracks[0]["athlete_id"] == ""
+
+
+def test_run_metadata_records_effective_tracker_parameters():
+    class Detector:
+        threshold = 0.5
+        det_size = 384
+        device = "cpu"
+
+    class Tracker:
+        params = {
+            "lost_track_buffer": 120,
+            "frame_rate": 30.0,
+            "track_activation_threshold": 0.55,
+            "minimum_consecutive_frames": 3,
+            "minimum_iou_threshold": 0.1,
+            "high_conf_det_threshold": 0.6,
+        }
+
+    args = cli.parse_args(
+        [
+            "--source",
+            "0",
+            "--track-lost-secs",
+            "4",
+            "--track-activation",
+            "0.55",
+            "--track-min-frames",
+            "3",
+        ]
+    )
+    info = SourceInfo("camera", "0", 1280, 720, 30.0, "builtin")
+    run = cli.run_meta(args, info, HealthConfig(), Detector(), Tracker(), None)
+
+    assert run.tracker["params"] == Tracker.params
 
 
 def test_no_detect_leaves_detection_columns_empty(monkeypatch, tmp_path, clips):

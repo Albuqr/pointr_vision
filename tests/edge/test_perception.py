@@ -7,9 +7,11 @@ import numpy as np
 import pytest
 from fakes import FakeSource, image
 
+from services.edge import main as cli
 from services.edge.capture.capture import Capture
 from services.edge.capture.health import HealthConfig, HealthMonitor
 from services.edge.capture.types import Frame
+from services.edge.perception import tracker as tracker_module
 from services.edge.perception.detector import COCO_PERSON_ID, RFDETRDetector
 from services.edge.perception.loop import NO_DETECTIONS, Processor, delay_stats, rates
 from services.edge.perception.tracker import DEFAULT_PARAMS, ByteTrackTracker
@@ -159,6 +161,53 @@ def test_empty_frames_after_tracks_give_no_tracks():
     out = run_tracker(ByteTrackTracker(), frames)
     assert len(out[9]) == 1
     assert out[10:] == [[]] * 5
+
+
+def test_tracker_cli_settings_map_to_effective_tracker_parameters(monkeypatch):
+    captured = {}
+
+    class FakeByteTrackTracker:
+        def __init__(self, **params):
+            captured.update(params)
+
+    monkeypatch.setattr(tracker_module.trackers, "ByteTrackTracker", FakeByteTrackTracker)
+    args = cli.parse_args(
+        [
+            "--source",
+            "0",
+            "--track-lost-secs",
+            "4",
+            "--track-activation",
+            "0.55",
+            "--track-min-frames",
+            "3",
+        ]
+    )
+    tracker = cli.create_tracker(args)
+
+    assert captured == {
+        **DEFAULT_PARAMS,
+        "lost_track_buffer": 120,
+        "track_activation_threshold": 0.55,
+        "minimum_consecutive_frames": 3,
+    }
+    assert tracker.params == captured
+
+
+def test_tracker_defaults_preserve_one_second_and_activation_defaults(monkeypatch):
+    captured = {}
+
+    class FakeByteTrackTracker:
+        def __init__(self, **params):
+            captured.update(params)
+
+    monkeypatch.setattr(tracker_module.trackers, "ByteTrackTracker", FakeByteTrackTracker)
+    tracker = ByteTrackTracker()
+
+    assert tracker.params == DEFAULT_PARAMS
+    assert captured["lost_track_buffer"] == 30
+    assert captured["track_activation_threshold"] == 0.7
+    assert captured["minimum_consecutive_frames"] == 2
 
 
 # Processing loop ------------------------------------------------------------------------
