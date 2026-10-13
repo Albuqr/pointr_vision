@@ -5,6 +5,7 @@ phase it might belong to.
 
 | Item | Raised in | Possible phase |
 |---|---|---|
+| Add `detections.csv` with raw detections so offline tracking can be rerun with different tracker settings; current `tracks.csv` contains only tracked outputs, so the raw detections cannot be reconstructed | v0 tracker tuning | 04 / later |
 | Cloud recording analysis service: user uploads a recorded video, a cloud GPU runs the pipeline as a replay and returns runs and reports. No real time, no local hardware needed. Possible separate product offering. Not the focus. See D-005 | Architecture review, 2026-10-07 | After 09, optional |
 | ARCHITECTURE §3 lists `tests/edge/ sync_agent/ api/ e2e/`; not created (git does not track empty dirs). Create each when its first test lands | code-reviewer, phase 00 gate | 01+ |
 | Contract drift tests compare keys, enums and event kinds only, not types/nullability or `runtime.device` pattern; `RecordingInfo` fields are not checked against ARCH §4. Extend when phase 03 adds CSV schemas | contract-guardian / test-auditor, phase 00 gate | 03 |

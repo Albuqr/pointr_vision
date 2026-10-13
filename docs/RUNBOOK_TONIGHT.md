@@ -115,7 +115,8 @@ cp docs/cameras.example.json cams.json      # then edit it
 [
   {"camera_id": "cam1", "source": "http://192.168.1.50:4747/video", "link": "wifi"},
   {"camera_id": "cam2", "source": "http://192.168.1.51:4747/video", "link": "wifi", "det_size": 320},
-  {"camera_id": "cam3", "source": 1, "link": "usb", "preview": false}
+  {"camera_id": "cam3", "source": 1, "link": "usb", "preview": false,
+   "track_lost_secs": 4, "track_activation": 0.7, "track_min_frames": 2}
 ]
 ```
 
@@ -123,6 +124,8 @@ cp docs/cameras.example.json cams.json      # then edit it
 name. `source`: a phone URL, or a camera index (`0` laptop webcam). `link`: `wifi`, `usb` or
 `builtin`. Optional: `det_size` (a multiple of 32, e.g. `320`: faster, less accurate) and
 `preview` (`true` or `false` for this camera only; without it the `--preview` flag decides).
+Optional tracker settings are `track_lost_secs` (default 1.0), `track_activation` (default 0.7),
+and `track_min_frames` (default 2); each overrides that camera's CLI default.
 
 **4.2 Start.**
 
@@ -264,6 +267,8 @@ do not mean):
   compare cameras and sessions only when the camera stayed where it was.
 - **`short`** tracks (under 1 s, `report.json` `short`) are often fragments or false positives.
   Many of them in a session means the tracker is losing people.
+- If IDs fragment a lot (many short tracks in the report), raise `--track-lost-secs` to 3–5;
+  the trade-off is that two players crossing may swap IDs.
 - `report.json` has the same numbers with units (`{"value": ..., "unit": ...}`), and a null
   value always has a `reason`.
 

@@ -116,7 +116,10 @@ is off (`--no-detect`). `runtime.device` is `cpu` or `cuda:N`; `runtime.gpu` is 
 (`torch.cuda.get_device_name`), `null` on `cpu` and with `--no-detect`. `runtime.packages` holds
 installed versions, `null` when a package is not installed. `health` holds the source-health
 thresholds of the run (`--lost-reads` ... `--dark-secs`). The tracker is fed `Frame.t_recv`
-as its timestamp (D-016).
+as its timestamp (D-016). `tracker.params` records the effective installed tracker arguments.
+For ByteTrack timestamp mode, `lost_track_buffer` is a count of 30 FPS frames and the
+effective lost-track duration is `lost_track_buffer / 30` seconds, rounded to the nearest
+frame when configured with `--track-lost-secs`.
 
 ## 4. `frames.csv`
 

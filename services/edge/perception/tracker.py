@@ -23,8 +23,19 @@ class ByteTrackTracker:
     """Tracker over trackers.ByteTrackTracker, fed Frame.t_recv as the timestamp, so a lost
     track is kept lost_track_buffer / 30 seconds whatever the processing rate (D-016)."""
 
-    def __init__(self, params: dict | None = None):
+    def __init__(
+        self,
+        params: dict | None = None,
+        *,
+        track_lost_secs: float = 1.0,
+        track_activation: float = 0.7,
+        track_min_frames: int = 2,
+    ):
         self.params = dict(DEFAULT_PARAMS if params is None else params)
+        if params is None:
+            self.params["lost_track_buffer"] = max(1, round(track_lost_secs * 30))
+            self.params["track_activation_threshold"] = track_activation
+            self.params["minimum_consecutive_frames"] = track_min_frames
         self._bt = trackers.ByteTrackTracker(**self.params)
 
     def update(self, dets: Detections, frame: Frame) -> list[TrackObs]:

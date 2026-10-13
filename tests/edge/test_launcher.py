@@ -144,6 +144,9 @@ def test_different_sources_are_accepted():
         ([cam("a", "0", det_size=True)], "multiple of"),
         ([cam("a", "0", preview="yes")], "preview must be"),
         ([cam("a", "0", det_sizes=320)], "unknown keys"),
+        ([cam("a", "0", track_lost_secs=0)], "track_lost_secs"),
+        ([cam("a", "0", track_activation=1.1)], "track_activation"),
+        ([cam("a", "0", track_min_frames=0)], "track_min_frames"),
         (["a"], "must be an object"),
     ],
 )
@@ -166,6 +169,27 @@ def test_main_refuses_a_bad_config_before_starting_anything(tmp_path, capsys, mo
 def test_example_config_is_valid():
     cams = rc.load_config(ROOT / "docs" / "cameras.example.json")
     assert len(cams) == 3 and {c.link for c in cams} == {"wifi", "usb"}
+
+
+def test_tracker_config_is_preserved_and_passed_to_camera_process():
+    [camera] = rc.parse_config(
+        [cam("cam1", "0", track_lost_secs=4, track_activation=0.55, track_min_frames=3)]
+    )
+    command = rc.child_command(camera, rc.Options("C:/out", GROUP))
+
+    assert camera.track_lost_secs == 4
+    assert camera.track_activation == 0.55
+    assert camera.track_min_frames == 3
+    assert "--track-lost-secs=4" in command
+    assert "--track-activation=0.55" in command
+    assert "--track-min-frames=3" in command
+
+
+def test_tracker_config_defaults_are_omitted_from_child_command():
+    camera = rc.parse_config([cam("cam1", "0")])[0]
+    command = rc.child_command(camera, rc.Options("C:/out", GROUP))
+
+    assert not any(arg.startswith("--track-") for arg in command)
 
 
 def test_child_command_carries_the_identity():

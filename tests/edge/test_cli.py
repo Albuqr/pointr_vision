@@ -293,6 +293,7 @@ def test_defaults():
     assert (args.width, args.height) == (1280, 720)
     assert (args.threshold, args.device, args.det_size) == (0.5, "auto", None)
     assert (args.benchmark, args.no_detect) == (None, False)
+    assert (args.track_lost_secs, args.track_activation, args.track_min_frames) == (1.0, 0.7, 2)
 
 
 def test_valid_phase02_flags_are_accepted():
@@ -300,3 +301,19 @@ def test_valid_phase02_flags_are_accepted():
         ["--source", "0", "--det-size", "320", "--threshold", "1", "--benchmark", "0.5"]
     )
     assert (args.det_size, args.threshold, args.benchmark) == (320, 1.0, 0.5)
+
+
+def test_tracker_flags_are_accepted():
+    args = cli.parse_args(
+        [
+            "--source",
+            "0",
+            "--track-lost-secs",
+            "4",
+            "--track-activation",
+            "0.55",
+            "--track-min-frames",
+            "3",
+        ]
+    )
+    assert (args.track_lost_secs, args.track_activation, args.track_min_frames) == (4.0, 0.55, 3)

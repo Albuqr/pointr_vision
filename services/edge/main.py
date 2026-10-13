@@ -113,6 +113,25 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--height", type=positive(int), default=720, help="requested camera height")
     p.add_argument("--threshold", type=confidence, default=0.5, help="person confidence")
     p.add_argument(
+        "--track-lost-secs",
+        type=positive(float),
+        default=1.0,
+        metavar="SECONDS",
+        help="seconds to keep a lost track (default: 1.0)",
+    )
+    p.add_argument(
+        "--track-activation",
+        type=confidence,
+        default=0.7,
+        help="minimum detection confidence to start a track (default: 0.7)",
+    )
+    p.add_argument(
+        "--track-min-frames",
+        type=positive(int),
+        default=2,
+        help="consecutive detections required to confirm a track (default: 2)",
+    )
+    p.add_argument(
         "--device",
         choices=["auto", "cpu", "cuda"],
         default="auto",
@@ -178,6 +197,16 @@ def resolve_device(requested: str) -> tuple[str, str | None]:
     return "cuda:0", torch.cuda.get_device_name(0)
 
 
+def create_tracker(args: argparse.Namespace):
+    from services.edge.perception.tracker import ByteTrackTracker
+
+    return ByteTrackTracker(
+        track_lost_secs=args.track_lost_secs,
+        track_activation=args.track_activation,
+        track_min_frames=args.track_min_frames,
+    )
+
+
 def load_perception(args: argparse.Namespace, device: str):
     """Detector and tracker, warmed up with one inference so the first slow call is not
     counted in the run. Imported here: torch loads only when detection is on. Called before
@@ -185,7 +214,6 @@ def load_perception(args: argparse.Namespace, device: str):
     import torch
 
     from services.edge.perception.detector import RFDETRDetector
-    from services.edge.perception.tracker import ByteTrackTracker
 
     t = time.perf_counter()
     detector = RFDETRDetector.load(args.threshold, args.det_size, device)
@@ -194,7 +222,7 @@ def load_perception(args: argparse.Namespace, device: str):
     t = time.perf_counter()
     detector.detect(Frame(-1, t, utc_now(), blank, "warmup"))
     warmup = time.perf_counter() - t
-    tracker = ByteTrackTracker()
+    tracker = create_tracker(args)
     print(
         f"perception: rfdetr {version('rfdetr')} nano, device {detector.device}, "
         f"det-size {detector.det_size}, threshold {detector.threshold}, "
