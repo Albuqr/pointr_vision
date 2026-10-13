@@ -205,7 +205,7 @@ without a camera id is a folder named `<session_id>`). `--det-size 320` for more
 Stop with `q` (window focused) or Ctrl+C (once, wait for the `session ...:` line). Without
 `--preview` there is no window: Ctrl+C only.
 
-## 5. Check a session afterwards
+## 5. After recording: check the files, then read the report
 
 ```bash
 ls -t C:/pointr_sessions | head -6            # newest first: <camera_id>_<session_id> (`device_id` is not a session)
@@ -222,6 +222,50 @@ processed frame), `tracks.csv` has rows when people were in view. Also look at
 `"interrupted"` = Ctrl+C, normal. The cameras recorded together have the same `group_id` and
 different `camera_id`s; each has its own clock (`t0_wall` in its `run.json`), nothing aligns them
 for you. `"error"` = read `events` in `session.json`.
+
+**The report.** When a session ends, Pointr writes `runs/<run_id>/report.json` next to
+`run.json` and prints its summary. With the launcher every camera prints its own, and the
+launcher ends with one row per camera (duration, processed fps, coverage, tracks). A report
+failure is only a warning: the session is saved anyway. Run it again at any time, with other
+settings if you like, for one camera or for the whole recording:
+
+```bash
+source .venv/Scripts/activate
+python -m services.edge.report C:/pointr_sessions/<folder>                      # one camera
+python -m services.edge.report --group <group_id> --out C:/pointr_sessions      # one section per camera
+```
+
+The `group_id` is on the `[launcher] group ...` line at the start of a launcher run, and in each
+`session.json`. Options: `--max-gap 1.0` (seconds; longer gaps between samples are left out of
+speed), `--smooth 3` (moving-median window, in samples), `--stationary-below` and
+`--walking-below` (px/s thresholds), `--short-track 1.0`, `--run <run_id>`. The cameras are
+reported **separately**: nothing is fused or aligned across cameras.
+
+How to read it (the numbers come from this run's own files; the `caveats:` block says what they
+do not mean):
+
+- **Top lines.** `processed ... fps` and `frame interval` tell how dense the data is: at
+  about 0.5 s between samples a track is a rough sketch of the movement, at 2 s or more it
+  hardly is. `coverage` is the share of *processed* frames with at least one person; frames the
+  processor skipped (`dropped`) are not in it. `events` are the problems from `session.json`
+  (`source_lost`, `dark_frames`, ...) with the time since the start of that camera's run.
+- **One row per track** (a track is an ID, not a person: the same person who leaves and returns
+  gets a new one). `seen` is first to last sample, `n` the samples, `med dt` the median time
+  between them. `path` is the distance between consecutive samples, in **pixels**, and
+  `mean`/`max` are speeds in **px/s**, from the bottom-centre of the person's box. Pixels
+  are not metres: the same walk looks longer close to the camera.
+- **Gaps are left out.** Only intervals of at most `--max-gap` seconds between samples count.
+  `n_gaps_excluded` and `gap_time` in `report.json` say how much was left out; the path and the
+  speeds describe only the rest, so a track that is mostly gaps says little.
+- **`n/a` is not zero.** A track with one sample, or fewer than 2 usable intervals, has no
+  speed; the line below the table says why.
+- **`stat/walk/run %`** is the share of the usable time spent below 40 px/s, between 40 and
+  400, above 400. These limits are placeholders: they depend on how far the camera is, so
+  compare cameras and sessions only when the camera stayed where it was.
+- **`short`** tracks (under 1 s, `report.json` `short`) are often fragments or false positives.
+  Many of them in a session means the tracker is losing people.
+- `report.json` has the same numbers with units (`{"value": ..., "unit": ...}`), and a null
+  value always has a `reason`.
 
 ## 6. Reading the data
 
