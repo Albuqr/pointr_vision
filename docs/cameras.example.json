@@ -1,0 +1,5 @@
+[
+  {"camera_id": "cam1", "source": "http://192.168.1.50:4747/video", "link": "wifi"},
+  {"camera_id": "cam2", "source": "http://192.168.1.51:4747/video", "link": "wifi", "det_size": 320},
+  {"camera_id": "cam3", "source": 1, "link": "usb", "preview": false}
+]

@@ -69,6 +69,23 @@ def test_versions_agree(name):
     assert f"urn:pointr:contracts:{v}:" in schema(name)["$id"]
 
 
+@pytest.mark.parametrize(
+    "camera_id,group_id", [(None, None), ("cam1", str(uuid.uuid4())), ("a_B-9", "g1")]
+)
+def test_session_camera_and_group_ids_are_optional(camera_id, group_id):
+    """null when the session was not started as one camera of a group (D-022)."""
+    doc = mutate(example("session"), ("camera_id",), camera_id)
+    validator("session").validate(mutate(doc, ("group_id",), group_id))
+
+
+def test_id_patterns_in_code_and_schema_agree():
+    from services.edge.session.types import CAMERA_ID_RE, GROUP_ID_RE
+
+    props = schema("session")["properties"]
+    assert props["camera_id"]["pattern"] == f"^{CAMERA_ID_RE.pattern}$"
+    assert props["group_id"]["pattern"] == f"^{GROUP_ID_RE.pattern}$"
+
+
 def test_session_valid_while_running():
     """A running session has no end time yet: null, not absent and not 0."""
     doc = mutate(example("session"), ("status",), "running")
@@ -144,6 +161,14 @@ BROKEN = {
         (("status",), "finished"),
         (("session_id",), "not-a-uuid"),
         (("device_id",), UUID1),
+        (("camera_id",), DELETE),
+        (("camera_id",), "a b"),
+        (("camera_id",), "../x"),
+        (("camera_id",), ""),
+        (("camera_id",), "x" * 33),
+        (("group_id",), DELETE),
+        (("group_id",), "a/b"),
+        (("group_id",), "x" * 65),
         (("started_at",), "2026-10-07 18:00:00"),
         (("started_at",), "2026-10-07T18:00:00+03:00"),
         (("ended_at",), 0),

@@ -80,6 +80,8 @@ class Processor:
         ARCHITECTURE section 5), so every captured frame ends up processed or dropped. Past
         `timeout` it is told to stop; frames left in the queue then (also after a processing
         error) are counted in `unprocessed`. False if the thread is still running."""
+        if self._thread.ident is None:  # never started: a stop request came before start()
+            return True
         self._thread.join(timeout)
         if self._thread.is_alive():
             self._stop.set()

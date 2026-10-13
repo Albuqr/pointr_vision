@@ -1,18 +1,20 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:pointr:contracts:0.5.0:session",
+  "$id": "urn:pointr:contracts:0.6.0:session",
   "title": "session.json",
   "description": "DATA_CONTRACTS.md section 2. Missing values are null, never 0.",
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "contract_version", "session_id", "device_id", "started_at", "ended_at", "status",
+    "contract_version", "session_id", "device_id", "camera_id", "group_id", "started_at", "ended_at", "status",
     "source", "registration", "recording", "runs", "events"
   ],
   "properties": {
-    "contract_version": {"const": "0.5.0"},
+    "contract_version": {"const": "0.6.0"},
     "session_id": {"$ref": "#/$defs/uuid4"},
     "device_id": {"$ref": "#/$defs/uuid4"},
+    "camera_id": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9_-]{1,32}$"},
+    "group_id": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9_-]{1,64}$"},
     "started_at": {"$ref": "#/$defs/utc"},
     "ended_at": {"anyOf": [{"$ref": "#/$defs/utc"}, {"type": "null"}]},
     "status": {"enum": ["running", "ended", "interrupted", "error"]},

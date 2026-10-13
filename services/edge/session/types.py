@@ -4,11 +4,16 @@ Fields follow DATA_CONTRACTS.md sections 2-4. RunMeta and RunCounts carry what r
 needs (D-008, completed by D-020).
 """
 
+import re
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from services.edge.capture.types import SourceInfo
 from services.edge.perception.types import TrackObs
+
+# DATA_CONTRACTS.md section 2; the patterns are also in session.schema.json (a test compares)
+CAMERA_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,32}")
+GROUP_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
 @dataclass(frozen=True)
@@ -18,6 +23,8 @@ class SessionMeta:
     started_at: str  # UTC ISO-8601
     source: SourceInfo
     recording_enabled: bool
+    camera_id: str | None = None  # label of this camera in a multi-camera recording (D-022)
+    group_id: str | None = None  # shared by the sessions recorded together
 
 
 @dataclass(frozen=True)

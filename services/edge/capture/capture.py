@@ -54,6 +54,8 @@ class Capture:
         """Ask the thread to stop and join it. False if it is still running (e.g. stuck in
         a blocking read); the caller must then not close the source under it."""
         self._stop.set()
+        if self._thread.ident is None:  # never started: a stop request came before start()
+            return True
         self._thread.join(timeout)
         return not self._thread.is_alive()
 

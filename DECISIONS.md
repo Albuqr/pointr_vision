@@ -513,3 +513,45 @@ GPU would have failed somewhere inside rfdetr.
 operating instructions for the v0 recording. The first real GPU run will show whether
 `cuda:0` works with rfdetr 1.11.2 end to end.
 **Status.** Accepted.
+
+## D-022 · 2026-10-13 · v0 multi-camera: one process per camera, contract 0.6.0
+**Context.** Tonight: one PC, several phones. Real hardware, verified today: a phone URL
+(`http://10.10.8.158:4747/video`, DroidCam app over Wi-Fi) opens, delivers 1280x720, reported
+25 fps, about 28 fps captured, and the session ended cleanly. A phone serves ONE viewer: with a
+browser tab open on the same URL, OpenCV failed with `source_open_failed` ("DroidCam is Busy or
+Unavailable" in the browser); closing the tab fixed it.
+**Decision.**
+- **One process per camera, no cross-camera fusion.** Each camera is a normal `services.edge.main`
+  process with its own session, run, clock (`t0`), model and writer. A launcher
+  (`scripts/run_cameras.py`) starts them from a JSON config and supervises them. Nothing links
+  frames across cameras; `group_id` only says which sessions were recorded together.
+- **Contract 0.6.0** (minor, additive): `session.json` `camera_id` (`--camera-id`, 1-32 of
+  `A-Za-z0-9_-`) and `group_id` (`--group-id`, 1-64 of `A-Za-z0-9_-`; the launcher writes a
+  UUIDv4), both nullable. The session folder is `<camera_id>_<session_id>` (or `<session_id>`
+  without a camera id): the id is a safe file-name token, checked in the CLI and again in the
+  writer, so a camera id cannot walk out of `--out`. The folder name is never parsed.
+- **Default input is the phone URL for every phone, no PC client.** The DroidCam client's virtual
+  webcam stays as the fallback for one phone. The launcher refuses two entries with the same
+  source (same host and port for URLs, same index for cameras): one viewer per phone.
+- **Stop reaches children through their stdin.** The launcher starts each child with
+  `--stop-on-stdin`; a line `stop` or the end of the pipe makes the child call
+  `_thread.interrupt_main()`, i.e. exactly the Ctrl+C path (status `interrupted`, final write).
+  Chosen over `CREATE_NEW_PROCESS_GROUP` + `CTRL_BREAK_EVENT` because that needs a SIGBREAK
+  handler in the child, only works for console children, and the child still has to be told in
+  band; stdin works the same on every OS, is testable with fake children, and the end of the
+  pipe also stops children when the launcher itself dies. Children are still started in their own
+  process group (Windows) / session (POSIX) so the terminal's Ctrl+C reaches the launcher only
+  and each child is stopped through one path. Killing is the last resort after
+  `--stop-timeout` and is shown in the final table (`killed`).
+- **`device_id` race fixed.** `<out>/device_id` is created with an exclusive create (`open(...,
+  "x")`); the process that loses the race re-reads the winner's value (retrying while the file is
+  still empty). A file that stays unreadable or invalid is replaced with a warning on stderr
+  instead of silently.
+- **`main.run`: starting the capture and processing threads moved inside the `try`**, so a stop
+  request that lands right after the `session:` line (the launcher makes this likelier) still
+  ends the session as `interrupted` (BACKLOG item from the phase 03 gate).
+**Not decided / out of scope.** Camera fusion, calibration, movement report. Whether several
+processes on one GPU is fast enough is not measured here: the manual check records only that the
+sessions are valid. RAM per process is measured on the dev notebook (CPU) and written in the
+runbook.
+**Status.** Accepted; manual check pending.

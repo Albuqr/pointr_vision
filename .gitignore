@@ -7,6 +7,9 @@ __pycache__/
 .jupyter_runtime/
 .idea/
 
+# Real camera configs (phone addresses); docs/cameras.example.json is the committed example
+cams*.json
+
 # Session data, recordings and the local DB: never committed (CLAUDE.md rule 9)
 sessions/
 *.mp4

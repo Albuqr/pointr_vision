@@ -6,6 +6,7 @@ import json
 import threading
 import time
 import uuid
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -210,6 +211,60 @@ def test_link_contradicting_the_source_is_rejected(monkeypatch, tmp_path, clips,
     assert code == EXIT_OPEN_FAILED
     assert "--link usb contradicts a file source" in capsys.readouterr().err
     assert not out.exists()
+
+
+def test_camera_and_group_ids_reach_session_json_and_the_folder_name(monkeypatch, tmp_path, clips):
+    out = tmp_path / "sessions"
+    code = run_main(
+        monkeypatch, out, "--source", str(clips["moving"]), "--no-detect",
+        "--camera-id", "cam2", "--group-id", "g-2026_10_13",
+    )  # fmt: skip
+    assert code == 0
+    [folder] = [p for p in out.iterdir() if p.is_dir()]
+    session, _, _, _ = session_files(out)
+    validate("session", session)
+    assert session["camera_id"] == "cam2" and session["group_id"] == "g-2026_10_13"
+    assert folder.name == f"cam2_{session['session_id']}"
+
+
+def test_without_ids_the_folder_is_the_session_id_and_both_ids_are_null(
+    monkeypatch, tmp_path, clips
+):
+    out = tmp_path / "sessions"
+    assert run_main(monkeypatch, out, "--source", str(clips["moving"]), "--no-detect") == 0
+    [folder] = [p for p in out.iterdir() if p.is_dir()]
+    session, _, _, _ = session_files(out)
+    validate("session", session)
+    assert session["camera_id"] is None and session["group_id"] is None
+    assert folder.name == session["session_id"]
+
+
+@pytest.mark.parametrize("flag", ["--camera-id", "--group-id"])
+@pytest.mark.parametrize("bad", ["../evil", "a b", "a/b", "", "x" * 65])
+def test_unsafe_ids_are_rejected_by_the_cli(tmp_path, capsys, flag, bad):
+    """An id becomes part of a folder name: argparse refuses it before anything runs."""
+    with pytest.raises(SystemExit) as e:
+        cli.main(["--source", "0", "--out", str(tmp_path), flag, bad])
+    assert e.value.code == 2 and "must match" in capsys.readouterr().err
+    assert not any(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("bad", ["../evil", "a/b", "a b", "", "x" * 33])
+def test_writer_refuses_an_unsafe_camera_id(tmp_path, bad):
+    with pytest.raises(ValueError, match="camera_id"):
+        FileSessionWriter(tmp_path).start(replace(meta(), camera_id=bad), run_meta())
+    with pytest.raises(ValueError, match="group_id"):
+        FileSessionWriter(tmp_path).start(replace(meta(), group_id="a b"), run_meta())
+    assert not any(tmp_path.iterdir())  # nothing was created
+
+
+def test_preview_window_is_named_after_the_camera(monkeypatch, tmp_path, clips):
+    titles = []
+    monkeypatch.setattr(cli, "run_preview", lambda *a: titles.append(a[-1]))
+    for extra in (["--camera-id", "cam7"], []):
+        run_main(monkeypatch, tmp_path / "s", "--source", str(clips["moving"]), "--no-detect",
+                 "--preview", *extra)  # fmt: skip
+    assert titles == ["Pointr cam7 (q to quit)", None]  # None: the default title
 
 
 # -- the writer on its own -------------------------------------------------------------------
