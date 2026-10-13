@@ -1,16 +1,16 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:pointr:contracts:0.7.0:session",
+  "$id": "urn:pointr:contracts:0.8.0:session",
   "title": "session.json",
   "description": "DATA_CONTRACTS.md section 2. Missing values are null, never 0.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "contract_version", "session_id", "device_id", "camera_id", "group_id", "started_at", "ended_at", "status",
-    "source", "registration", "recording", "runs", "events"
+    "source", "registration", "recording", "runs", "events", "calibration"
   ],
   "properties": {
-    "contract_version": {"const": "0.7.0"},
+    "contract_version": {"const": "0.8.0"},
     "session_id": {"$ref": "#/$defs/uuid4"},
     "device_id": {"$ref": "#/$defs/uuid4"},
     "camera_id": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9_-]{1,32}$"},
@@ -74,6 +74,15 @@
       "items": {"$ref": "#/$defs/uuid4"},
       "uniqueItems": true
     },
+    "calibration": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["calibration_id", "check_error_m"],
+      "properties": {
+        "calibration_id": {"$ref": "#/$defs/uuid4"},
+        "check_error_m": {"type": "number", "minimum": 0}
+      }
+    },
     "events": {
       "type": "array",
       "items": {
@@ -103,6 +112,12 @@
       "type": "string",
       "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
     },
-    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "matrix3": {
+      "type": "array",
+      "items": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+      "minItems": 3,
+      "maxItems": 3
+    }
   }
 }

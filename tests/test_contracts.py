@@ -56,12 +56,12 @@ def doc_example(section: str) -> dict:
     return json.loads(m.group(1))
 
 
-@pytest.mark.parametrize("name", ["session", "run", "report"])
+@pytest.mark.parametrize("name", ["session", "run", "report", "calibration"])
 def test_example_validates(name):
     validator(name).validate(example(name))
 
 
-@pytest.mark.parametrize("name", ["session", "run", "report"])
+@pytest.mark.parametrize("name", ["session", "run", "report", "calibration"])
 def test_versions_agree(name):
     v = doc_version()
     assert schema(name)["properties"]["contract_version"]["const"] == v

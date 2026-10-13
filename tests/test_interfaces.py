@@ -145,7 +145,16 @@ def test_track_obs_matches_tracks_csv_columns():
     fields = field_names(TrackObs)
     i = fields.index("xyxy")
     fields[i : i + 1] = ["x1", "y1", "x2", "y2"]
-    assert ["seq", *fields, "athlete_id"] == csv_columns("tracks.csv")
+    assert [
+        "seq",
+        *fields,
+        "athlete_id",
+        "x_m",
+        "y_m",
+        "calibration_id",
+        "position_method",
+        "in_court",
+    ] == csv_columns("tracks.csv")
 
 
 def test_source_info_matches_session_source():

@@ -1,6 +1,6 @@
 # Data contracts
 
-Contract version: **0.7.0**. Any change bumps the version (minor for additive fields, major
+Contract version: **0.8.0**. Any change bumps the version (minor for additive fields, major
 for removals or meaning changes) and needs a `DECISIONS.md` entry. JSON Schemas in
 `contracts/` are written from this file and tests check them against it (D-009).
 
@@ -23,6 +23,8 @@ sessions/<folder>/         <camera_id>_<session_id>, or <session_id> without a c
     tracks.csv
     report.json          (section 8)
   video.mp4              (phase 4, raw, no annotations)
+%LOCALAPPDATA%/pointr/calibrations/<camera_id>/<calibration_id>/calibration.json
+%LOCALAPPDATA%/pointr/calibrations/<camera_id>/<calibration_id>/frame.jpg (audit frame)
 ```
 
 A live session produces one run. Each replay adds a run. Nothing is overwritten.
@@ -41,7 +43,7 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
 
 ```json
 {
-  "contract_version": "0.7.0",
+  "contract_version": "0.8.0",
   "session_id": "uuid",
   "device_id": "uuid",
   "camera_id": "cam1 | null",
@@ -54,7 +56,8 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
   "registration": {"date": "2026-10-07", "team_ids": ["uuid"]},
   "recording": {"enabled": true, "path": "video.mp4", "sha256": null, "locked": true},
   "runs": ["uuid"],
-  "events": [{"t_wall": "...", "t_mono": 12.3, "kind": "source_lost", "detail": "..."}]
+  "events": [{"t_wall": "...", "t_mono": 12.3, "kind": "source_lost", "detail": "..."}],
+  "calibration": {"calibration_id": "uuid", "check_error_m": 0.12}
 }
 ```
 
@@ -77,12 +80,14 @@ Event `t_mono` is `null` for events that precede the run's `t0`, such as
 `source_open_failed` (D-014).
 Event kinds: `source_open_failed`, `source_lost`, `source_recovered`,
 `frozen_frames`, `dark_frames`, `writer_backlog`, `recorder_backlog`, `interrupted`, `error`.
+`calibration` is `null` when no calibration was active; otherwise it identifies the immutable
+calibration used by this session and records its mean held-out check residual in metres.
 
 ## 3. `run.json`
 
 ```json
 {
-  "contract_version": "0.7.0",
+  "contract_version": "0.8.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "mode": "live | replay",
@@ -99,7 +104,11 @@ Event kinds: `source_open_failed`, `source_lost`, `source_recovered`,
               "packages": {"opencv": "x.y.z", "numpy": "x.y.z", "torch": "x.y.z",
                            "supervision": "x.y.z"}},
   "started_at": "...", "t0_wall": "...", "ended_at": "...",
-  "counts": {"captured": 0, "processed": 0, "dropped": 0, "unprocessed": 0, "rec_dropped": 0}
+  "counts": {"captured": 0, "processed": 0, "dropped": 0, "unprocessed": 0, "rec_dropped": 0},
+  "calibration": {"calibration_id": "uuid", "check_error_m": 0.12,
+                  "homography_image_to_court": [[0.01,0,0],[0,0.01,0],[0,0,1]],
+                  "court": {"length_m": 28.0, "width_m": 15.0},
+                  "image_size": {"width": 1280, "height": 720}}
 }
 ```
 
@@ -117,6 +126,11 @@ is off (`--no-detect`). `runtime.device` is `cpu` or `cuda:N`; `runtime.gpu` is 
 installed versions, `null` when a package is not installed. `health` holds the source-health
 thresholds of the run (`--lost-reads` ... `--dark-secs`). The tracker is fed `Frame.t_recv`
 as its timestamp (D-016). `tracker.params` records the effective installed tracker arguments.
+`calibration` is `null` when uncalibrated. Otherwise it records the calibration ID, mean held-out
+check residual, projection matrix, court bounds and image size used by this run. Keeping the
+projection in `run.json` permits offline report regeneration after later recalibration. The
+loaded calibration is rejected before processing if saved image dimensions differ from the opened
+capture dimensions.
 For ByteTrack timestamp mode, `lost_track_buffer` is a count of 30 FPS frames and the
 effective lost-track duration is `lost_track_buffer / 30` seconds, rounded to the nearest
 frame when configured with `--track-lost-secs`.
@@ -146,6 +160,14 @@ One row per **processed** frame, including frames with zero detections.
 | confidence | float/empty | detector confidence if the tracker exposes it |
 | state | str | `observed` or `predicted`, when the tracker exposes it, else empty |
 | athlete_id | uuid/empty | empty until the assignment phase |
+| x_m, y_m | float/empty | projected box bottom-centre in court metres; empty without calibration |
+| calibration_id | uuid/empty | calibration used for the projection; empty without calibration |
+| position_method | str/empty | `box_bottom_center` when calibrated; empty without calibration |
+| in_court | bool/empty | whether projected point is within court bounds; empty without calibration |
+
+Out-of-court points are retained, with `in_court=false`; they are not clamped to court bounds.
+The image point is `((x1 + x2) / 2, y2)`. The position method describes the box estimate,
+not a measured anatomical foot point.
 
 ## 6. SQLite (`pointr.db`), from phase 6
 
@@ -209,13 +231,14 @@ One report per run, one per camera: there is no fusion across cameras.
 
 ```json
 {
-  "contract_version": "0.7.0",
+  "contract_version": "0.8.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "camera_id": "cam1 | null",
   "group_id": "token | null",
   "generated_at": "2026-10-13T18:46:00Z",
-  "positions": {"unit": "px", "point": "bottom_centre", "calibrated": false},
+  "positions": {"unit": "px", "point": "bottom_centre", "calibrated": false,
+                 "calibration_id": null, "check_error_m": null},
   "params": {
     "max_gap": {"value": 1.0, "unit": "s"},
     "smooth_window": {"value": 3, "unit": "samples"},
@@ -301,5 +324,24 @@ Percentages are 0-100 with unit `percent`.
   counts (a run that did not end). `events` lists every `session.json` event, `t_since_t0`
   being its `t_mono`.
 - **`caveats`** (at least one) states what is uncalibrated or not validated; it always includes
-  that positions are pixels and that detections and tracks are not validated against ground
-  truth, plus the processing rate of this run when it is low.
+  that positions are pixels when uncalibrated and that detections and tracks are not validated
+  against ground truth, plus the processing rate of this run when it is low. Calibrated reports
+  include calibration ID and mean held-out check error in metres; text summaries print that
+  error beside each distance and speed as a quality indicator, not a per-measurement uncertainty.
+
+## 9. Camera calibration file
+
+Calibration JSON and its raw JPEG audit frame live under the user's local application data,
+never in the repository or session folder. The JPEG filename is `frame.jpg` next to the JSON.
+Coordinates use an origin at the near-left corner of the court diagram: court `x` runs
+along court length and `y` runs across court width. Custom courts specify
+their measured length and width; named or user-entered landmarks are stored as explicit metres.
+
+The calibration file records contract version, UUID calibration ID, camera ID and creation time;
+court kind/dimensions/landmarks; capture image width/height; the image-to-court 3x3 homography;
+all image/court points and their `calibration` or `check` role; each point's Euclidean residual in
+metres; separate calibration/check means and maximum check residual; the configured maximum
+check mean; and whether the user forced saving above that error. At least four fit points and two
+held-out check points are required. Check points never participate in fitting. Saving anyway can
+override the check-mean threshold only, not these minimums. The audit frame is the exact raw frame
+used to place the image points.
