@@ -503,7 +503,12 @@ GPU would have failed somewhere inside rfdetr.
 - **Startup noise filtered** in `RFDETRDetector.load` by message only: the `torch.jit.script`
   FutureWarning, rfdetr's `plus extras` ImportWarning, and two rfdetr log lines ("not
   loading DINOv2 backbone weights", "Model is not optimized for inference"). Other warnings
-  and our own messages are untouched. rfdetr's INFO line about the weights' md5 remains.
+  and our own messages are untouched. rfdetr's INFO line about the weights' md5 remains (printed twice per load).
+- **Review fixes (code-reviewer).** The CUDA check in the docs runs a real GPU calculation
+  (`is_available()` alone does not prove the GPU can run kernels; GTX 9xx/10xx may not be
+  supported by the CUDA 13 build). The phone-URL path for a second phone is documented as
+  untested on hardware (PHASE_01_REPORT: StreamSource not exercised on a real phone). A
+  failing device check of any kind exits 1 with `error: ...`.
 **Consequences.** `docs/RUNBOOK_TONIGHT.md` and README "Install on a new PC" are the
 operating instructions for the v0 recording. The first real GPU run will show whether
 `cuda:0` works with rfdetr 1.11.2 end to end.

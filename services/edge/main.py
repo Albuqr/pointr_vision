@@ -288,8 +288,9 @@ def run(args: argparse.Namespace) -> int:
     if not args.no_detect:
         try:
             device, gpu = resolve_device(args.device)
-        except RuntimeError as e:  # forced cuda without a GPU: stop before the slow model load
-            print(f"error: {e}", file=sys.stderr)
+        except Exception as e:  # forced cuda without a GPU, or a broken torch install
+            note = "" if isinstance(e, RuntimeError) else "device check failed: "
+            print(f"error: {note}{e}", file=sys.stderr)
             return EXIT_CAPTURE_ERROR
         print(f"device: {device}" + (f" ({gpu})" if gpu else " (no CUDA GPU in use)"))
         try:

@@ -196,6 +196,16 @@ def test_forced_cuda_without_a_gpu_exits_with_a_clear_error(monkeypatch, capsys)
     assert "error: --device cuda" in err and "Traceback" not in err
 
 
+def test_broken_torch_install_exits_cleanly(monkeypatch, capsys):
+    def broken(requested):
+        raise OSError("[WinError 126] DLL load failed")
+
+    monkeypatch.setattr(cli, "resolve_device", broken)
+    assert cli.main(["--source", "0"]) == EXIT_CAPTURE_ERROR
+    err = capsys.readouterr().err
+    assert "error: device check failed: " in err and "Traceback" not in err
+
+
 def test_no_detect_ignores_an_unusable_device(monkeypatch, clips, capsys):
     fake_gpu(monkeypatch, False)
     code = cli.main(["--source", str(clips["moving"]), "--device", "cuda", "--no-detect"])

@@ -6,8 +6,10 @@ is there. Everything runs in **Git Bash**. Details of the install are in `README
 
 ## 1. Setup (once per PC)
 
+This code must be merged to `main` first (the clone below fetches `main`).
+
 ```bash
-py -3.11 --version                                   # Python 3.11.x
+py -3.11 --version          # Python 3.11.x; missing: winget install Python.Python.3.11
 git clone https://github.com/Albuqr/pointr_vision.git && cd pointr_vision
 #   already cloned:  cd pointr_vision && git pull
 py -3.11 -m venv .venv
@@ -20,7 +22,7 @@ Install torch **first**, exactly one of the three (README has the table):
 ```bash
 # NVIDIA, CUDA Version 13.0 or higher
 pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cu130
-# NVIDIA, CUDA Version 12.6 to 12.9
+# NVIDIA, CUDA Version 12.x (12.6-12.9 is the safe range; older 12.x: try it, run the check)
 pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cu126
 # no NVIDIA GPU, or nvidia-smi not found
 pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cpu
@@ -30,11 +32,21 @@ Then:
 
 ```bash
 pip install -e ".[dev]"
-python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+python -c "import torch; print(torch.__version__, torch.cuda.is_available()); torch.cuda.is_available() and print(torch.cuda.get_device_name(0), (torch.ones(1, device='cuda') + 1).item())"
 ```
 
-Expect `2.14.1+cu130 True` / `2.14.1+cu126 True` on a GPU, `2.14.1+cpu False` on the CPU
-build. A GPU PC that prints `False` is a wrong install: see the symptom table (section 7).
+Expect `2.14.1+cu130 True` / `2.14.1+cu126 True`, then the GPU name and `2.0` (a real GPU
+calculation), on a GPU PC; `2.14.1+cpu False` on the CPU build. `False` on a GPU PC, or an
+error such as "no kernel image is available", is a wrong install or an unsupported GPU:
+see the symptom table (section 7).
+
+**Old GPUs (GTX 9xx/10xx, Volta):** the CUDA 13 builds may not support them even when
+`nvidia-smi` shows 13.x. Use the `cu126` command, or the CPU build. If the check above fails
+on `cu130`, reinstall with `cu126` (uninstall first, see below).
+
+If torch was already installed (for example a plain `pip install -e ".[dev]"` ran before
+this step), run `pip uninstall -y torch torchvision` first, otherwise pip says "already
+satisfied" and keeps the wrong build.
 If Git Bash says `command not found` for `git`, `ls`, `grep` (PyCharm terminal):
 `export PATH="/usr/bin:/bin:/mingw64/bin:/cmd:$PATH"`.
 
@@ -74,9 +86,17 @@ Not working? Section 7.
 other phones are read directly from their stream URL, no client:
 
 1. Phone app on the same network as the PC, showing an address such as `http://192.168.1.50:4747`.
-2. Open `http://<ip>:<port>/video` in the PC browser first. If you see the live image, Pointr
-   can read it. Apps differ in the port and path; use the one the browser shows working.
-3. Run it as its own process, in its own Git Bash window:
+2. Optional: open `http://<ip>:<port>/video` in the PC browser to see that the address
+   works, then **close that tab**: a phone app usually serves one viewer at a time, and an
+   open tab can make Pointr's connection fail. Apps differ in port and path.
+3. **This path (a phone URL read by Pointr) has not been tested on real hardware.** Smoke
+   test it for 10 seconds before relying on it (the image must appear in the window):
+
+```bash
+python -m services.edge.main --source http://<ip>:<port>/video --link wifi --preview --benchmark 10 --out C:/pointr_sessions
+```
+
+4. Then record, as its own process in its own Git Bash window:
 
 ```bash
 source .venv/Scripts/activate
@@ -102,17 +122,18 @@ the lowest load (headless).
 **Stop ONLY with `q` or Ctrl+C.**
 
 - `q` works in the preview window while that window has focus.
-- Ctrl+C works in the Git Bash window (press it once and wait for `session ended`).
+- Ctrl+C works in the Git Bash window (press it once and wait for the `session ...:` line).
+- Without `--preview` there is no window: stop with Ctrl+C only.
 - **Never** PyCharm's Stop button, the console's X or Ctrl+Break: the files stay at status
   `running` and the final counts are missing. The rows already written are still readable.
 
 One run = one session folder `C:/pointr_sessions/<session_id>/`. Wait for the line
-`session ended: ...` before unplugging a phone or closing the window.
+`session ended:` (after `q`), `session interrupted:` (after Ctrl+C) or `session error:` before unplugging a phone or closing the window.
 
 ## 5. Check a session afterwards
 
 ```bash
-ls -t C:/pointr_sessions | head -3            # newest session ids first; copy one
+ls -t C:/pointr_sessions | head -4            # newest first; copy a session id (`device_id` is not one)
 S=C:/pointr_sessions/<session_id>
 grep -E '"status"|"started_at"|"ended_at"' $S/session.json
 wc -l $S/runs/*/frames.csv; head -5 $S/runs/*/tracks.csv
@@ -130,8 +151,9 @@ processed frame), `tracks.csv` has rows when people were in view. Also look at
 - `frames.csv` has one row per **processed** frame, including frames with 0 detections.
   `seq` is the capture sequence number: **gaps in `seq` = frames that were dropped**
   (processing slower than the camera) or not processed. The totals are in `run.json` `counts`.
-- A person needs **2 consecutive detections** before they get a `track_id`. So
-  `n_detections` can be higher than `n_tracks`; that is expected, not a bug.
+- A person needs **2 consecutive detections** before they get a `track_id`, and a person
+  detected with a score between 0.5 and 0.7 never starts a track (tracker threshold 0.7,
+  detector threshold 0.5). So `n_detections` can be higher than `n_tracks`; that is expected.
 - **Track IDs are temporary.** They are valid only inside one run. A person who leaves the
   frame and returns gets a **new ID**; IDs do not identify people.
 - `tracks.csv` has only tracked people, one row per person per frame (box in pixels).
@@ -148,9 +170,10 @@ processed frame), `tracks.csv` has rows when people were in view. Also look at
 | Solid green image, `FROZEN` banner | DroidCam virtual camera is off: press the client hotkey (again after every client restart). Only one active source in the client |
 | Phone URL does not open | Open `http://<ip>:<port>/video` in the PC browser first. PC and phone on the same Wi-Fi? Some networks (campus, guest Wi-Fi, some routers) isolate devices: use a **phone hotspot** (turn it on on one phone; connect the PC and the other phones to it) |
 | Low fps, laggy | Run with `--det-size 320`. Read the `device:` line: it must say `cuda:0 (...)` on a GPU PC; `cpu` means the CPU is detecting. Close the preview (`--preview` off) and other heavy programs |
-| `torch.cuda.is_available()` is `False` after a CUDA install | Wrong torch wheel: `python -c "import torch; print(torch.__version__)"` says `+cpu`. Reinstall: `pip uninstall -y torch torchvision`, then the CUDA command from section 1, then `pip install -e ".[dev]"` again. Still `False` with `+cu...`: update the NVIDIA driver; `nvidia-smi` must work |
+| `torch.cuda.is_available()` is `False` after a CUDA install | Wrong torch wheel: `python -c "import torch; print(torch.__version__)"` says `+cpu` or has no `+cu...` suffix. Reinstall: `pip uninstall -y torch torchvision`, then the CUDA command from section 1, then `pip install -e ".[dev]"` again. Still `False` with `+cu...`: update the NVIDIA driver; `nvidia-smi` must work |
 | `error: --device cuda but torch ... cannot use a CUDA GPU` | Same as the row above; or drop `--device cuda` (auto falls back to CPU) |
-| `model load failed` (first run) | The weights download needs internet (about 370 MB). Connect, run again. Cached afterwards in `~/.roboflow/models` |
+| `model load failed: ...` | Read the rest of the line. A network or download error: the first run needs internet (about 370 MB); connect and run again (cached afterwards in `~/.roboflow/models`). Mentions CUDA, a kernel image or out of memory: run again with `--device cpu`, and see the CUDA rows above |
+| `error: device check failed` | torch does not import (often a missing Visual C++ runtime, or a broken install): reinstall torch as in section 1 |
 | `session.json` stays `running` | The program was killed (Stop button, X, power). Next time stop with `q` or Ctrl+C |
 
 ## 8. Privacy

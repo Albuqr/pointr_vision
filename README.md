@@ -10,7 +10,7 @@ Run everything in **Git Bash**, step by step.
 
 ```bash
 # 1. Python 3.11 must exist (3.12+ has not been tested with the pinned wheels)
-py -3.11 --version                       # expect: Python 3.11.x
+py -3.11 --version    # expect: Python 3.11.x (missing: winget install Python.Python.3.11)
 
 # 2. Get the code (first time: clone; afterwards: pull)
 git clone https://github.com/Albuqr/pointr_vision.git && cd pointr_vision
@@ -35,7 +35,8 @@ checked 2026-10-13):
 | `nvidia-smi` shows | Use |
 |---|---|
 | `CUDA Version: 13.0` or higher | (a1) CUDA 13.0 |
-| `CUDA Version: 12.6` to `12.9` | (a2) CUDA 12.6 |
+| `CUDA Version: 12.6` to `12.9` | (a2) CUDA 12.6 (older 12.x: try it, run the check below) |
+| GTX 9xx/10xx or Volta GPU, any version | (a2): the CUDA 13 build may not support them |
 | lower than 12.6, or no NVIDIA GPU | (b) CPU (for the lower case, updating the driver also works) |
 
 ```bash
@@ -58,18 +59,20 @@ pip install -e ".[dev]"
 # 7. One-line check
 python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 #   CPU build:  2.14.1+cpu False        CUDA build:  2.14.1+cu126 True  (or +cu130)
+# on a GPU also run a real GPU calculation (prints the GPU name and 2.0):
+python -c "import torch; print(torch.cuda.get_device_name(0), (torch.ones(1, device='cuda') + 1).item())"
 ```
 
-If a CUDA install prints `False`, see "CUDA False after install" in `docs/RUNBOOK_TONIGHT.md`.
+If a CUDA install prints `False`, see the symptom table in `docs/RUNBOOK_TONIGHT.md`.
 
-The RF-DETR Nano weights (`rf-detr-nano.pth`, 366 MB, about 370 MB) download on the first run
+The RF-DETR Nano weights (`rf-detr-nano.pth`, 366 MB) download on the first run
 that loads the model, to `~/.roboflow/models` (set `RF_HOME` to change it), and are checked
 against an md5. **The first run needs internet.** Loading the model takes several seconds
 before capture starts.
 
 `--device auto` (the default) uses CUDA when torch sees a CUDA GPU and the CPU otherwise;
-`--device cpu` and `--device cuda` force one (`cuda` exits with an error if there is no
-usable GPU). The chosen device and GPU name are printed at start and written to `run.json`.
+`--device cpu` and `--device cuda` force one (`cuda` exits with an error if torch sees no
+CUDA GPU). The chosen device and GPU name are printed at start and written to `run.json`.
 
 ## Run
 
