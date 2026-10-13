@@ -1,0 +1,11 @@
+:root { font-family: system-ui, sans-serif; color: #17212b; background: #f3f5f7; }
+body { margin: 0; }
+main { max-width: 1120px; margin: auto; padding: 24px; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+button, input, select { padding: 9px 12px; margin: 4px; }
+button { cursor: pointer; }
+section, article { background: white; border: 1px solid #dbe1e6; border-radius: 8px; padding: 16px; margin: 12px 0; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 12px; }
+img { width: 100%; background: #111; min-height: 120px; object-fit: contain; }
+.error, .LOST, .FROZEN, .DARK { color: #a21d1d; }
+.OK { color: #16763c; }
