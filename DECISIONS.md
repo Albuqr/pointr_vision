@@ -432,7 +432,14 @@ written.
   when the frame was taken for processing (snapshotted in the processing loop). `source.link`
   must be `file` exactly when `kind` is `file` (or `null`): the CLI rejects a contradiction
   before the model load and the schema enforces it. `user:password@` is stripped from stream
-  refs before writing. `sessions/device_id` holds the device's UUIDv4.
+  refs before writing. `sessions/device_id` holds the device's UUIDv4 (one identity per
+  `--out` folder). Minor bump although some fields became nullable and `dropped_total`
+  was redefined: no file was ever written under 0.3.0 (the writer is new here).
+- **Run clock is `time.perf_counter()` (amends D-011).** contract-guardian measured
+  `time.monotonic()` on this Windows notebook: `GetTickCount64`, 15.6 ms resolution, so
+  `app_delay_ms` took only the values 0 and 16 on the fixture clip. `perf_counter` is
+  QueryPerformanceCounter (100 ns, monotonic). Every run time (capture, health, sources,
+  processing, writer) switched together so they stay on one clock.
 - **Protocol change (D-008 completed).** `SessionWriter.start(meta, run: RunMeta)`,
   `set_t0(t0, t0_wall)`, `close(status, counts: RunCounts)`.
 - **Session starts when the source opens.** Failures before that (bad ref, model load,
@@ -452,7 +459,17 @@ written.
   a capture/processing error, a thread that did not stop in time (also logged as an `error`
   event, so the shortfall is in the data), or a failed writer. `close()` waits on an Event,
   not `Thread.join()` (an interrupted join can make `is_alive()` report a running thread as
-  stopped, seen in the test), and swallows a second Ctrl+C; `main` retries it until written.
+  stopped, seen in the test). Once shutdown starts, `main` replaces the Ctrl+C handler with
+  a "please wait" message until the session is saved; every wait in the shutdown is
+  bounded (capture 8 s, processing 10+1 s, writer 15 s).
+- **Gate fixes (reduced gate: code-reviewer, contract-guardian, reliability-reviewer).**
+  A failed mid-run JSON rewrite (file held by OneDrive or an editor longer than the
+  retries) killed the writer thread and lost every later row (reliability BLOCKER, also
+  MAJOR in the other two): it is now printed and retried on the next tick; only CSV and
+  final writes are fatal. A dead writer now ends the run with status `error` instead of
+  running on unsaved (MAJOR). A third Ctrl+C could escape the shutdown before the final
+  write (MAJOR): fixed by the handler above. The coarse clock (MAJOR): fixed above.
+  MINOR and NIT findings are in BACKLOG.
 **Consequences.** Phase 03 is not closed: test-auditor, A6 (offline) and A7 (10-minute soak)
 and `PHASE_03_REPORT.md` are pending, so no `phase-03` tag. 02b stays open. Remaining phase 03
 items are in BACKLOG.

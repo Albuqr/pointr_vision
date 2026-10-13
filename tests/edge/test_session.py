@@ -229,7 +229,7 @@ def started(out: Path, **kw) -> tuple[FileSessionWriter, Path]:
     w = FileSessionWriter(out, **kw)
     m, r = meta(), run_meta()
     w.start(m, r)
-    w.set_t0(time.monotonic(), "2026-10-13T12:00:01Z")
+    w.set_t0(time.perf_counter(), "2026-10-13T12:00:01Z")
     return w, w.dir / "runs" / r.run_id
 
 
@@ -354,3 +354,75 @@ def test_device_id_is_kept_and_repaired(tmp_path):
     assert device_id(tmp_path) == first and uuid.UUID(first).version == 4
     (tmp_path / "device_id").write_text("garbage")
     assert device_id(tmp_path) != first
+
+
+def test_a_failed_session_json_rewrite_does_not_stop_the_rows(tmp_path, monkeypatch):
+    """session.json held by another program for a moment: rows keep coming, retried later."""
+    w, run_dir = started(tmp_path)
+    real, fails = writer_mod.write_json, []
+
+    def locked_once(path, doc):
+        if path.name == "session.json" and not fails:
+            fails.append(path)
+            raise PermissionError(13, "held by another process")
+        real(path, doc)
+
+    monkeypatch.setattr(writer_mod, "write_json", locked_once)
+    w.event(SessionEvent("2026-10-13T12:00:02Z", 1.0, "source_lost", "test"))
+    time.sleep(0.8)  # first rewrite attempt fails
+    for seq in range(3):
+        w.frame(rec(seq))
+    time.sleep(0.8)  # retried
+    assert fails and w.error is None
+    assert len(rows(run_dir / "frames.csv")) == 3
+    assert load(w.dir / "session.json")["events"][0]["kind"] == "source_lost"
+    w.close("ended", COUNTS)
+    assert w.status == "ended"
+
+
+def test_a_dead_writer_ends_the_run(monkeypatch, tmp_path, clips):
+    """Nothing is saved any more: the run stops with status error instead of running on."""
+    out = tmp_path / "sessions"
+    real = FileSessionWriter._handle
+
+    def disk_full(self, item):
+        if item[0] == "frame" and item[1].seq >= 3:
+            raise OSError(28, "No space left on device")
+        return real(self, item)
+
+    monkeypatch.setattr(FileSessionWriter, "_handle", disk_full)
+    t = time.perf_counter()
+    code = run_main(monkeypatch, out, "--source", str(clips["moving"]), "--no-detect")
+    assert code == EXIT_CAPTURE_ERROR
+    assert time.perf_counter() - t < 1.8  # the clip plays 2 s: the run ended early
+    session, run, frames, _ = session_files(out)
+    validate("session", session)
+    assert session["status"] == "error"
+    assert "No space left" in session["events"][-1]["detail"]
+    assert len(frames) == 3
+
+
+def test_ctrl_c_pressed_again_during_shutdown_still_saves(monkeypatch, tmp_path, clips):
+    """Ctrl+C, then more presses while capture is stopping: the session is still saved."""
+    out = tmp_path / "sessions"
+    from services.edge.capture.capture import Capture
+
+    real_stop = Capture.stop
+
+    def slow_stop(self, timeout=8.0):
+        for _ in range(3):  # three more presses while shutting down
+            _thread.interrupt_main()
+            time.sleep(0.05)
+        return real_stop(self, timeout)
+
+    monkeypatch.setattr(Capture, "stop", slow_stop)
+    timer = threading.Timer(0.5, _thread.interrupt_main)
+    timer.start()
+    code = run_main(monkeypatch, out, "--source", str(clips["moving"]), "--no-detect")
+    timer.join()
+    assert code == EXIT_INTERRUPTED
+    session, run, frames, _ = session_files(out)
+    validate("session", session)
+    validate("run", run)
+    assert session["status"] == "interrupted" and session["ended_at"]
+    assert len(frames) == run["counts"]["processed"]

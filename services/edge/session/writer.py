@@ -76,9 +76,10 @@ def write_json(path: Path, doc: dict) -> None:
     """Write via a temp file and replace, so readers never see a half-written file. Windows
     refuses the replace while another program (OneDrive, an editor) holds the file: retry."""
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+    text = json.dumps(doc, indent=2) + "\n"
     for attempt in range(20):
         try:
+            tmp.write_text(text, encoding="utf-8")
             os.replace(tmp, path)
             return
         except PermissionError:
@@ -102,8 +103,9 @@ class FileSessionWriter:
         self._q: queue.Queue = queue.Queue(maxsize)
         self._backlog = False  # inside a writer_backlog episode (ends when the queue empties)
         self._lock = threading.Lock()  # JSON writes: writer thread or close() fallback
-        # set when the thread ends; waited on instead of join(), which a Ctrl+C can corrupt
-        self._done = threading.Event()
+        # set when the thread ends, normally or not; waited on instead of join(), which a
+        # Ctrl+C can corrupt
+        self.done = threading.Event()
         self._thread = threading.Thread(target=self._run, name="writer", daemon=True)
 
     # -- producers (any thread) --------------------------------------------------------------
@@ -189,10 +191,10 @@ class FileSessionWriter:
         ended_at = utc_now()
         if self._running():
             self._put(("close", status, counts, ended_at))
-        deadline = time.monotonic() + self.join_timeout
-        while self._running() and time.monotonic() < deadline:
+        deadline = time.perf_counter() + self.join_timeout
+        while self._running() and time.perf_counter() < deadline:
             try:
-                self._done.wait(0.1)
+                self.done.wait(0.1)
             except KeyboardInterrupt:  # a second Ctrl+C must not cut the final write short
                 pass
         if self.error is None and not self._running() and self._session["ended_at"]:
@@ -209,7 +211,7 @@ class FileSessionWriter:
         self.status = "error"
 
     def _running(self) -> bool:
-        return self._thread.is_alive() and not self._done.is_set()
+        return self._thread.is_alive() and not self.done.is_set()
 
     def _put(self, item) -> None:
         if not self._running():
@@ -241,12 +243,12 @@ class FileSessionWriter:
                     return False
 
     def _rel(self) -> float | None:
-        return None if self._t0 is None else time.monotonic() - self._t0
+        return None if self._t0 is None else time.perf_counter() - self._t0
 
     # -- writer thread -----------------------------------------------------------------------
 
     def _run(self) -> None:
-        last = time.monotonic()
+        last = time.perf_counter()
         dirty = False  # session.json has events not on disk yet
         try:
             while True:
@@ -261,13 +263,11 @@ class FileSessionWriter:
                     dirty |= self._handle(item)
                 if self._q.empty():
                     self._backlog = False
-                if time.monotonic() - last >= FLUSH_SECS:
+                if time.perf_counter() - last >= FLUSH_SECS:
                     self._flush()
                     if dirty:
-                        with self._lock:
-                            write_json(self.dir / "session.json", self._session)
-                        dirty = False
-                    last = time.monotonic()
+                        dirty = not self._snapshot(self.dir / "session.json", self._session)
+                    last = time.perf_counter()
         except BaseException as e:  # disk full, permissions: recorded by close()
             self.error = e
             print(f"error: session writer stopped, data is no longer saved: {e!r}", file=sys.stderr)
@@ -277,7 +277,7 @@ class FileSessionWriter:
                     f.close()
                 except OSError:
                     pass
-            self._done.set()
+            self.done.set()
 
     def _handle(self, item) -> bool:
         """Write one item; True when session.json changed."""
@@ -309,9 +309,19 @@ class FileSessionWriter:
             return True
         elif kind == "t0":
             self._run_doc["t0_wall"] = item[1]
-            with self._lock:
-                write_json(self._run_dir / "run.json", self._run_doc)
+            self._snapshot(self._run_dir / "run.json", self._run_doc)  # also in the final write
         return False
+
+    def _snapshot(self, path: Path, doc: dict) -> bool:
+        """A mid-run JSON write. A failure (file held by OneDrive or an editor) is printed and
+        retried on the next tick; it must not stop the CSV rows. True when written."""
+        try:
+            with self._lock:
+                write_json(path, doc)
+            return True
+        except OSError as e:
+            print(f"warning: {path.name} not updated yet, will retry: {e!r}", file=sys.stderr)
+            return False
 
     def _flush(self) -> None:
         # ponytail: flush, no fsync: survives a process crash, not a power cut

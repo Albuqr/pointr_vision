@@ -78,7 +78,7 @@ needs a `DECISIONS.md` entry.
 @dataclass(frozen=True)
 class Frame:
     seq: int  # monotonically increasing per source, gaps = capture failures
-    t_recv: float  # time.monotonic() when the frame was read
+    t_recv: float  # time.perf_counter() when the frame was read
     t_wall: str  # UTC ISO-8601 wall clock at read time
     image: np.ndarray  # BGR, HxWx3
     source_id: str

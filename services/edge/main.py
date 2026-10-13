@@ -14,6 +14,7 @@ import argparse
 import dataclasses
 import math
 import platform
+import signal
 import sys
 import threading
 import time
@@ -121,13 +122,13 @@ def load_perception(args: argparse.Namespace):
     from services.edge.perception.detector import RFDETRDetector
     from services.edge.perception.tracker import ByteTrackTracker
 
-    t = time.monotonic()
+    t = time.perf_counter()
     detector = RFDETRDetector.load(args.threshold, args.det_size, args.device)
-    loaded = time.monotonic() - t
+    loaded = time.perf_counter() - t
     blank = np.zeros((args.height, args.width, 3), np.uint8)
-    t = time.monotonic()
+    t = time.perf_counter()
     detector.detect(Frame(-1, t, utc_now(), blank, "warmup"))
-    warmup = time.monotonic() - t
+    warmup = time.perf_counter() - t
     tracker = ByteTrackTracker()
     print(
         f"perception: rfdetr {version('rfdetr')} nano, device {detector.device}, "
@@ -204,6 +205,19 @@ def run_meta(args, info, config: HealthConfig, detector, tracker) -> RunMeta:
         },
         started_at=utc_now(),
     )
+
+
+def ignore_ctrl_c():
+    """Replace the Ctrl+C handler with a message for the rest of the shutdown. Returns the
+    previous handler, or None off the main thread (handlers cannot be set there)."""
+
+    def wait(signum, frame):
+        print("stopping, please wait: saving the session", file=sys.stderr, flush=True)
+
+    try:
+        return signal.signal(signal.SIGINT, wait)
+    except ValueError:
+        return None
 
 
 def link_conflict(kind: str, link: str | None) -> str | None:
@@ -283,7 +297,7 @@ def run(args: argparse.Namespace) -> int:
     print(f"session: {writer.dir}")
 
     def rel(t: float | None) -> float | None:
-        """time.monotonic() to s since the run's t0; None before t0 (D-011, D-014)."""
+        """time.perf_counter() to s since the run's t0; None before t0 (D-011, D-014)."""
         t0 = capture.t0 if capture else None
         return None if t is None or t0 is None or t < t0 else t - t0
 
@@ -292,6 +306,8 @@ def run(args: argparse.Namespace) -> int:
         writer.event(SessionEvent(ev.t_wall, rel(ev.t_mono), ev.kind, ev.detail))
 
     def log_frame(p) -> None:
+        if writer.done.is_set():  # nothing is saved any more: end the run (status error)
+            raise RuntimeError("session writer stopped")
         t0 = capture.t0
         n_dets = None if detector is None else len(p.dets.xyxy)
         n_tracks = None if detector is None else len(p.tracks)
@@ -335,7 +351,7 @@ def run(args: argparse.Namespace) -> int:
     session_status = "ended"
     capture.start()
     processor.start()
-    until = time.monotonic() + args.benchmark if args.benchmark else None
+    until = time.perf_counter() + args.benchmark if args.benchmark else None
     try:
         while capture.t0_wall is None:  # set first thing by the capture thread
             time.sleep(0.001)
@@ -344,34 +360,26 @@ def run(args: argparse.Namespace) -> int:
             run_preview(lambda: processor.latest, processor.done, hud, lambda: monitor.state, until)
         else:
             while not processor.done.wait(0.1):
-                if until is not None and time.monotonic() >= until:
+                if until is not None and time.perf_counter() >= until:
                     break
     except KeyboardInterrupt:
         session_status = "interrupted"
         status = EXIT_INTERRUPTED
-        log_event(HealthEvent("interrupted", utc_now(), time.monotonic(), "Ctrl+C"))
+        log_event(HealthEvent("interrupted", utc_now(), time.perf_counter(), "Ctrl+C"))
     except Exception as e:  # one shutdown path; the failure is an event, not a traceback
         session_status = "error"
         status = EXIT_CAPTURE_ERROR
-        log_event(HealthEvent("error", utc_now(), time.monotonic(), f"main loop: {e!r}"))
+        log_event(HealthEvent("error", utc_now(), time.perf_counter(), f"main loop: {e!r}"))
     finally:
         # capture first, then processing drains the last frame (ARCHITECTURE section 5).
-        # A second Ctrl+C must not skip a step or the summary.
-        cap_ok = proc_ok = False
-        try:
-            cap_ok = capture.stop()
-        except KeyboardInterrupt:  # _stop is already set: the thread ends within one read
-            cap_ok = capture.done.wait(1.0)
-        try:
-            # without a stopped capture there is no last frame to drain: do not wait for it
-            proc_ok = processor.stop(10.0 if cap_ok else 0.0)
-        except KeyboardInterrupt:
-            pass
-        try:
-            if cap_ok:
-                source.close()
-        except KeyboardInterrupt:
-            pass
+        # More Ctrl+C presses must not skip a step or the final write: every wait below is
+        # bounded, so they are ignored until the session is saved.
+        previous = ignore_ctrl_c()
+        cap_ok = capture.stop()
+        # without a stopped capture there is no last frame to drain: do not wait for it
+        proc_ok = processor.stop(10.0 if cap_ok else 0.0)
+        if cap_ok:
+            source.close()
         if not cap_ok:
             print(
                 "warning: capture thread did not stop in time; source left open; "
@@ -389,18 +397,17 @@ def run(args: argparse.Namespace) -> int:
                 n for n, ok in (("capture", cap_ok), ("processing", proc_ok)) if not ok
             )
             detail = f"{which} did not stop in time; counts may be short"
-            log_event(HealthEvent("error", utc_now(), time.monotonic(), detail))
+            log_event(HealthEvent("error", utc_now(), time.perf_counter(), detail))
         counts = RunCounts(
             capture.captured, processor.processed, capture.dropped, processor.unprocessed
         )
-        while writer.status is None:  # a second Ctrl+C must not skip the final write
-            try:
-                writer.close(session_status, counts)
-            except KeyboardInterrupt:
-                pass
-            except Exception as e:  # cannot write at all: say so, keep shutting down
-                print(f"error: final session files not written: {e!r}", file=sys.stderr)
-                break
+        try:
+            writer.close(session_status, counts)
+        except Exception as e:  # cannot write at all: say so, keep shutting down
+            print(f"error: final session files not written: {e!r}", file=sys.stderr)
+        finally:
+            if previous is not None:
+                signal.signal(signal.SIGINT, previous)
         try:
             print(f"session {writer.status}: {writer.dir}")
             print(
@@ -429,7 +436,7 @@ def print_benchmark(
 ) -> None:
     """The A7 baseline block. Every figure comes from this run. The run time is t0 to now,
     so it includes the shutdown (about one inference)."""
-    elapsed = time.monotonic() - capture.t0 if capture.t0 else 0.0
+    elapsed = time.perf_counter() - capture.t0 if capture.t0 else 0.0
     latest = processor.latest
     frame = f"{latest.frame.image.shape[1]}x{latest.frame.image.shape[0]}" if latest else "-"
     proc_fps, drop_rate = rates(

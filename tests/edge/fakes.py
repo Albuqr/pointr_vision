@@ -36,7 +36,7 @@ class FakeSource:
         seq, self._seq = self._seq, self._seq + 1
         if item is None:
             return None
-        return Frame(seq, time.monotonic(), "2026-10-08T12:00:00Z", item, "fake")
+        return Frame(seq, time.perf_counter(), "2026-10-08T12:00:00Z", item, "fake")
 
     def close(self) -> None:
         self.closed = True

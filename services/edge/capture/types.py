@@ -10,7 +10,7 @@ import numpy as np
 @dataclass(frozen=True, eq=False)  # ndarray field: no value equality or hash
 class Frame:
     seq: int  # monotonically increasing per source, gaps = capture failures
-    t_recv: float  # time.monotonic() when the frame was read
+    t_recv: float  # time.perf_counter() when the frame was read
     t_wall: str  # UTC ISO-8601 wall clock at read time
     image: np.ndarray  # BGR, HxWx3
     source_id: str
@@ -30,7 +30,7 @@ class SourceInfo:
 class HealthEvent:
     kind: str  # an event kind from DATA_CONTRACTS.md section 2, e.g. source_lost
     t_wall: str  # UTC ISO-8601
-    t_mono: float | None  # time.monotonic(); None if the event precedes the run's t0 (D-014)
+    t_mono: float | None  # time.perf_counter(); None if the event precedes the run's t0 (D-014)
     detail: str | None = None
 
 

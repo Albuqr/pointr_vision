@@ -27,7 +27,7 @@ class Processed:
     frame: Frame
     dets: Detections
     tracks: list[TrackObs]
-    t_proc_start: float  # time.monotonic()
+    t_proc_start: float  # time.perf_counter()
     t_proc_end: float
     dropped_total: int = 0  # capture's drop count when this frame was taken (frames.csv)
 
@@ -94,13 +94,13 @@ class Processor:
             self.unprocessed += 1
 
     def _process(self, frame: Frame, dropped_total: int) -> Processed:
-        t_start = time.monotonic()
+        t_start = time.perf_counter()
         if self.detector is None:
             dets, tracks = NO_DETECTIONS, []
         else:
             dets = self.detector.detect(frame)
             tracks = self.tracker.update(dets, frame)
-        return Processed(frame, dets, tracks, t_start, time.monotonic(), dropped_total)
+        return Processed(frame, dets, tracks, t_start, time.perf_counter(), dropped_total)
 
     def _run(self) -> None:
         try:
@@ -131,7 +131,7 @@ class Processor:
         except Exception as e:  # a failure ends processing as an event, never silently
             self.error = e
             self.on_event(
-                HealthEvent("error", utc_now(), time.monotonic(), f"processing stopped: {e!r}")
+                HealthEvent("error", utc_now(), time.perf_counter(), f"processing stopped: {e!r}")
             )
         finally:
             self.done.set()

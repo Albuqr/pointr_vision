@@ -6,8 +6,9 @@ for removals or meaning changes) and needs a `DECISIONS.md` entry. JSON Schemas 
 
 Conventions: UUIDv4 for every ID generated on the device. Wall times are UTC ISO-8601.
 Durations and offsets in seconds as floats. Monotonic times are seconds relative to the
-run's `t0`, the `time.monotonic()` value taken when the run's capture thread starts (D-011),
-and only comparable within one run. Missing values are empty in CSV and
+run's `t0`, the `time.perf_counter()` value taken when the run's capture thread starts (D-011;
+the clock is `perf_counter` since D-020, as `time.monotonic()` ticks every 15.6 ms on
+Windows), and only comparable within one run. Missing values are empty in CSV and
 `null` in JSON, never `0`.
 
 ## 1. Session folder
@@ -29,7 +30,7 @@ The session folder is created once the source has opened (D-020). Failures befor
 ref, model load, `source_open_failed`) are printed and exit non-zero; they leave no folder.
 
 **Durability (D-020).** One writer thread owns every file. CSV rows are flushed and
-`session.json` is rewritten (write to a temp file, then replace) at least once per second, so
+`session.json` is rewritten (temp file, then replace) within a second of each new event, so
 after a crash the CSVs are readable up to the last flush and `session.json` stays valid with
 status `running`. The final status, `ended_at` and counts are written in a `finally` block.
 
