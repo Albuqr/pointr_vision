@@ -37,6 +37,10 @@ Prompt to start a review in Claude Code:
 > Use the `<reviewer>` subagent to review phase XX. Scope: the diff since tag `phase-<XX-1>`,
 > `docs/phases/PHASE_XX.md`, and the docs it references. Return PASS or CHANGES REQUIRED.
 
+**Codex:** Run each listed review by opening a NEW Codex session and pasting: “Follow
+`docs/reviews/<name>.md`. Scope: `<branch>` vs `main`.” Fix BLOCKER and MAJOR findings in
+the working session, then re-run that review in a fresh session.
+
 Each reviewer returns findings tagged **BLOCKER**, **MAJOR** or **MINOR**:
 - BLOCKER and MAJOR must be fixed, then the same reviewer runs again on the fix.
 - MINOR goes to `docs/BACKLOG.md` or is fixed, the developer decides.
