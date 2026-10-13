@@ -1,6 +1,6 @@
 # Phases
 
-**Current phase: 02b (detector performance spike)**
+**Current phase: 03 (session and logging): v0 core built ahead of 02b (D-020); gate, A6, A7 and report pending. 02b stays open.**
 
 Each phase adds one layer behind an interface and ends with a gate (`GATES.md`). Phases
 00-05 are the first delivery from scope v2: the live pipeline working before the first
