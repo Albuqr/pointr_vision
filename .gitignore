@@ -6,6 +6,8 @@ __pycache__/
 *.egg-info/
 .jupyter_runtime/
 .idea/
+services/app/ui/node_modules/
+services/app/ui/tsconfig.tsbuildinfo
 
 # Real camera configs (phone addresses); docs/cameras.example.json is the committed example
 cams*.json

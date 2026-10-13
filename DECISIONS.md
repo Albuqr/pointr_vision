@@ -586,6 +586,27 @@ i7-10510U: 1.5-1.7 fps (laptop) and 0.35-0.57 fps (phone URL) against about 2-2.
 the second model load took 27-30 s. Runbook: CPU-only PC, at most 2 cameras with det_size 320.
 **Status.** Accepted; merged to main.
 
+## D-024 · 2026-10-13 · Pointr Studio local UI stack
+**Context.** Phase 06's local recording UI is pulled forward for v0; camera registration and
+identity features remain out of scope.
+**Decision.** Close Q-03 with FastAPI/Uvicorn serving a React + Vite + TypeScript frontend.
+Commit the built frontend so a Windows PC can run the app without Node; Node is needed only
+to develop/build/lint the UI. Bind the app and child preview servers to `127.0.0.1`. Persist
+camera configuration under `%LOCALAPPDATA%/pointr`, not in the repository. Camera recording
+continues in the backend if the browser tab closes; app shutdown requests the launcher's
+clean-stop path. Child previews use an allocated loopback port with fallback to another free
+port; the effective port is app status, not session metadata. Keep annotation and JPEG encode
+off the detector/processing path, with a bounded drop-oldest preview handoff.
+**Consequences.** FastAPI and Uvicorn are runtime dependencies. The UI distribution is
+committed; no session data contract changes are intended. `--benchmark` reports preview on/off
+alongside processed FPS and app-delay percentiles. Matched 15 s synthetic-clip CPU runs measured
+2.61 fps off (41 processed, 186 dropped, p50 app delay 417.9 ms) and 2.57 fps on
+(41 processed, 188 dropped, p50 413.2 ms); both used the same 640x360 clip and cached model. This is a pipeline-only
+measurement, not a webcam result; one short run each is not enough to attribute the 0.04 fps
+difference to preview. The laptop webcam was unavailable in the dev environment, so repeat the
+comparison on hardware before accepting the app part.
+**Status.** Accepted for v0-app; review and hardware checks pending.
+
 ## D-023 · 2026-10-13 · v0 movement report per person, contract 0.7.0
 **Context.** Tonight's recordings need a readable result per camera. The processing rate on
 the dev CPU is low and uneven (0.35 to about 2.4 fps), so a track has few, unevenly spaced

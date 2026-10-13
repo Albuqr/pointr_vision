@@ -53,3 +53,5 @@ phase it might belong to.
 | `report.json` copies every `session.json` event with `t_mono` relative to the live run's t0; once replay adds runs, events of other runs must be filtered/re-based | contract-guardian, v0 report gate | 04 |
 | Console summary activity shares are rounded to whole percents and can add to 99 or 101; `report.json` has the exact values | code-reviewer, v0 report gate | 05 |
 | `PHASES.md` still says phase 03 is current while v0 report/multicam work (D-022, D-023) is PHASE_05/06 material; update the phase index when 03 closes | code-reviewer, v0 report gate | 03 |
+| Redact URL userinfo in camera CRUD responses/UI, and redact or genericize camera-test diagnostics so stream credentials never reach a browser | security-reviewer, v0-app | 06 |
+| Implement local TeamRepo, PlayerRepo and SessionRepo CRUD with phase-06 registration rules; explicitly excluded from the pulled-forward Pointr Studio v0 scope | code-reviewer, v0-app scope review | 06 |

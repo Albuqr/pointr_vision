@@ -104,6 +104,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="python -m services.edge.main", description=__doc__)
     p.add_argument("--source", required=True, help="webcam index, stream URL or .mp4/.mov path")
     p.add_argument("--preview", action="store_true", help="show the preview window")
+    p.add_argument("--http-preview", type=int, help="serve annotated loopback preview on this port")
     p.add_argument(
         "--link",
         choices=["usb", "wifi", "builtin", "file"],
@@ -523,6 +524,8 @@ def run(args: argparse.Namespace) -> int:
             tracks=None if detector is None else (len(latest.tracks) if latest else 0),
         )
 
+    http_preview = None
+
     release_ctrl_c(held)
     status = 0
     session_status = "ended"
@@ -531,6 +534,25 @@ def run(args: argparse.Namespace) -> int:
         # inside the try: a stop request right after "session:" must still end the session
         if stop_early.is_set():
             raise KeyboardInterrupt
+        if args.http_preview is not None:
+            from services.edge.ui.http_preview import HttpPreview
+
+            http_preview = HttpPreview(
+                args.http_preview,
+                lambda: monitor.state,
+                hud,
+                lambda error: log_event(
+                    HealthEvent(
+                        "error",
+                        utc_now(),
+                        time.perf_counter(),
+                        f"preview encoding failed: {error!r}",
+                    )
+                ),
+            )
+            http_preview.start()
+            processor.on_preview = http_preview.publish
+            print(f"preview_port: {http_preview.port}", flush=True)
         capture.start()
         processor.start()
         while capture.t0_wall is None:  # set first thing by the capture thread
@@ -554,6 +576,8 @@ def run(args: argparse.Namespace) -> int:
         status = EXIT_CAPTURE_ERROR
         log_event(HealthEvent("error", utc_now(), time.perf_counter(), f"main loop: {e!r}"))
     finally:
+        if http_preview is not None:
+            http_preview.close()
         # capture first, then processing drains the last frame (ARCHITECTURE section 5).
         # More Ctrl+C presses must not skip a step or the final write: every wait below is
         # bounded, so they are ignored until the session is saved.
@@ -601,7 +625,15 @@ def run(args: argparse.Namespace) -> int:
             if args.benchmark:
                 det = "off" if detector is None else detector.det_size
                 device = "-" if detector is None else detector.device
-                print_benchmark(args.benchmark, info.link, det, device, capture, processor)
+                print_benchmark(
+                    args.benchmark,
+                    info.link,
+                    det,
+                    device,
+                    capture,
+                    processor,
+                    preview=args.http_preview is not None or args.preview,
+                )
             print_report(writer.run_dir)
         except KeyboardInterrupt:
             status = EXIT_INTERRUPTED
@@ -630,6 +662,7 @@ def print_benchmark(
     device: str,
     capture: Capture,
     processor: Processor,
+    preview: bool = False,
 ) -> None:
     """The A7 baseline block. Every figure comes from this run. The run time is t0 to now,
     so it includes the shutdown (about one inference)."""
@@ -651,7 +684,8 @@ def print_benchmark(
     )
     print(
         f"benchmark: {elapsed:.1f} s run ({seconds:g} s requested), link {link}, "
-        f"frames {frame}, det-size {det}, device {device}, cpu {platform.processor() or '-'}\n"
+        f"frames {frame}, det-size {det}, device {device}, preview {'on' if preview else 'off'}, "
+        f"cpu {platform.processor() or '-'}\n"
         f"benchmark: captured {capture.captured}, processed {processor.processed} "
         f"({fps} fps), dropped {capture.dropped} ({rate} of captured), "
         f"failed reads {capture.failed_reads}, unprocessed {processor.unprocessed}\n"

@@ -1,0 +1,1 @@
+"""Pointr Studio local application."""

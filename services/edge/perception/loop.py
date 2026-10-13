@@ -49,6 +49,7 @@ class Processor:
         on_event: Callable[[HealthEvent], None],
         on_processed: Callable[[Processed], None] | None = None,
         dropped: Callable[[], int] = lambda: 0,
+        on_preview: Callable[[Processed], None] | None = None,
     ):
         self.proc_queue = proc_queue
         self.source_done = source_done  # set when capture has stopped: drain, then finish
@@ -57,6 +58,7 @@ class Processor:
         self.on_event = on_event  # called on the processing thread
         self.on_processed = on_processed  # called on the processing thread, once per frame
         self.dropped = dropped  # capture's running drop count
+        self.on_preview = on_preview
         # written by the processing thread only; other threads read them for display
         self.latest: Processed | None = None
         self.processed = 0
@@ -128,6 +130,8 @@ class Processor:
                 span = self._ends[-1] - self._ends[0]
                 self.fps = (len(self._ends) - 1) / span if span > 0 else None
                 self.latest = result
+                if self.on_preview is not None:
+                    self.on_preview(result)
                 if self.on_processed is not None:
                     self.on_processed(result)
         except Exception as e:  # a failure ends processing as an event, never silently
