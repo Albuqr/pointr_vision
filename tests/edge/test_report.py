@@ -163,7 +163,9 @@ def test_one_valid_interval_gives_a_path_but_no_speed(tmp_path):
     assert value(t["path_length"]) == pytest.approx(50)  # 3-4-5
     assert t["mean_speed"]["value"] is None
     assert t["mean_speed"]["reason"] == "1 valid interval(s), fewer than 2"
-    assert value(t["activity"]["walking"]) == 100  # 100 px/s still has a class
+    # one interval is not a share: no activity either, with the same reason
+    assert t["activity"]["walking"]["value"] is None
+    assert t["activity"]["walking"]["reason"] == t["mean_speed"]["reason"]
 
 
 def test_all_gaps_means_no_numbers_not_zeros(tmp_path):
@@ -264,7 +266,9 @@ def test_session_numbers(tmp_path):
     assert s["n_tracks"] == 2 and s["n_short_tracks"] == 1  # 2 s is not short; a single sample is
     assert [e["kind"] for e in s["events"]] == ["source_lost", "source_open_failed"]
     assert s["events"][0]["t_since_t0"] == {"value": 10.0, "unit": "s"}
-    assert s["events"][1]["t_since_t0"] is None  # before t0
+    assert s["events"][1]["t_since_t0"] == {  # before t0
+        "value": None, "unit": "s", "reason": "event precedes t0",
+    }  # fmt: skip
     schema("report").validate(d)
 
 
@@ -430,3 +434,92 @@ def test_report_example_validates_and_matches_a_built_report(tmp_path):
     assert set(ex["session"]) == set(built["session"])
     assert set(ex["tracks"][0]) == set(built["tracks"][0])
     assert set(ex["params"]) == set(built["params"])
+
+
+# -- robustness and CLI guards (gate fixes) ------------------------------------------------------
+
+
+def test_malformed_csv_rows_are_skipped_and_said(tmp_path):
+    run_dir = make_run(tmp_path, dense(6), [(i, 1, 100 * i, 500) for i in range(4)])
+    with open(run_dir / "tracks.csv", "a", encoding="utf-8") as f:
+        f.write("4,1,1\n")  # a truncated last line
+    with open(run_dir / "frames.csv", "a", encoding="utf-8") as f:
+        f.write("99,1.0\n")
+    d = build_report(run_dir).to_dict()
+    assert d["tracks"][0]["n_samples"] == 4 and d["session"]["n_processed"] == 6
+    assert any("2 malformed CSV row(s)" in c for c in d["caveats"])
+    schema("report").validate(d)
+
+
+def test_the_same_track_twice_in_one_frame_is_one_sample(tmp_path):
+    rows = [(0, 1, 0, 0), (1, 1, 100, 0), (1, 1, 100, 0), (2, 1, 200, 0)]
+    t = track_of(build_report(make_run(tmp_path, dense(4), rows)), 1)
+    assert t["n_samples"] == 3 and t["n_gaps_excluded"] == 0
+
+
+def test_one_processed_frame_has_no_rate_and_no_interval(tmp_path):
+    s = build_report(make_run(tmp_path, dense(1), [])).to_dict()["session"]
+    for key in ("processed_fps", "frame_interval_median", "frame_interval_max"):
+        assert s[key]["value"] is None and "fewer than 2" in s[key]["reason"], key
+
+
+def test_a_run_that_captured_nothing_does_not_say_it_did_not_end(tmp_path):
+    run_dir = make_run(tmp_path, [], [])
+    run = json.loads((run_dir / "run.json").read_text())
+    run["counts"] = {"captured": 0, "processed": 0, "dropped": 0, "unprocessed": 0,
+                     "rec_dropped": None}  # fmt: skip
+    (run_dir / "run.json").write_text(json.dumps(run))
+    reason = build_report(run_dir).to_dict()["session"]["drop_rate"]["reason"]
+    assert reason == "no frames captured"
+
+
+def test_the_console_summary_lists_the_longest_tracks_only(tmp_path):
+    from services.edge.reports.build import MAX_TRACK_ROWS
+
+    n = MAX_TRACK_ROWS + 5
+    tracks = [(0, i, 0, 0) for i in range(n)] + [(1, 0, 50, 0)]  # track 0 is the only visible one
+    report = build_report(make_run(tmp_path, dense(3), tracks))
+    text = format_summary(report)
+    assert f"... {n - MAX_TRACK_ROWS} shorter track(s) not shown" in text
+    assert len(report.to_dict()["tracks"]) == n  # report.json keeps every track
+
+
+def test_a_run_id_outside_the_session_is_refused(tmp_path, capsys):
+    run_dir = make_run(tmp_path, dense(3), [])
+    other = make_run(tmp_path, dense(3), [], camera_id="cam2")
+    session_dir = run_dir.parent.parent
+    outside = f"../../../{other.parent.parent.name}/runs/{other.name}"
+    assert cli.main([str(session_dir), "--run", outside]) == 2
+    assert "is not in" in capsys.readouterr().err
+    assert not (other / "report.json").exists()
+
+
+def test_group_mode_goes_on_after_a_broken_session(tmp_path, capsys):
+    good = make_run(tmp_path, dense(4), [], camera_id="b_good")
+    bad = make_run(tmp_path, dense(4), [], camera_id="a_bad")
+    (bad / "frames.csv").unlink()
+    assert cli.main(["--group", GROUP, "--out", str(tmp_path)]) == 2  # one camera failed
+    captured = capsys.readouterr()
+    assert "a_bad" in captured.err and "report b_good" in captured.out
+    assert (good / "report.json").exists()
+
+
+@pytest.mark.parametrize(
+    "args",
+    [["--walking-below", "30"], ["--stationary-below", "500"],
+     ["--stationary-below", "100", "--walking-below", "100"], ["--min-intervals", "0"]],
+)  # fmt: skip
+def test_nonsense_thresholds_are_refused(tmp_path, args):
+    with pytest.raises(SystemExit):
+        cli.main([str(tmp_path), *args])
+
+
+def test_a_report_interrupted_by_ctrl_c_keeps_the_session_exit_code(monkeypatch, capsys):
+    from services.edge import main as app
+
+    def interrupted(run_dir):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(app, "write_report", interrupted)
+    app.print_report("x")  # must not raise
+    assert "report interrupted" in capsys.readouterr().err

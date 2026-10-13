@@ -279,9 +279,16 @@ Percentages are 0-100 with unit `percent`.
   `mean_speed` is `path_length / valid_time`; `max_speed` is the largest interval speed. Both are
   `null` with a reason when there are fewer than `min_valid_intervals` (default 2) valid intervals.
 - **Activity** is the share of `valid_time` spent below `stationary_below` (stationary), below
-  `walking_below` (walking) or above (running), by interval speed. The thresholds are in the
+  `walking_below` (walking) or at or above it (running), by interval speed. The thresholds are in the
   position unit per second; the defaults for pixels are placeholders that depend on camera
-  distance and angle, hence the caveat. `null` with a reason when there is no valid interval.
+  distance and angle, hence the caveat. `null` with a reason when there are fewer than `min_valid_intervals` valid intervals (a share
+  of one interval is not a share).
+- **Other definitions.** `median_sample_interval` is the median time between all consecutive
+  samples of the track, gaps included (`null`: single sample). `frame_interval_median` and
+  `frame_interval_max` are the time between consecutive processed frames' `t_recv`. A track is
+  `short` when `visible` (first to last sample) is below `short_track`. The caveat about a low
+  processing rate is added when `processed_fps` is below 5. An event's `t_since_t0` is its `t_mono`;
+  an event that precedes the run's `t0` has `null` with the reason `event precedes t0`.
 - **Session level.** `duration` is `run.json` `t0_wall` to `ended_at` (else the last processed
   frame's time). `processed_fps` and the app delay use the benchmark's definitions (D-019,
   D-020); `drop_rate = n_dropped / n_captured`; `coverage` is the share of processed frames with

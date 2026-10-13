@@ -26,6 +26,8 @@ from services.edge.reports.movement import (
 from services.edge.session.writer import CONTRACT_VERSION, write_json
 
 LOW_FPS = 5.0  # processed fps below this: say that samples are sparse
+MAX_TRACK_ROWS = 20  # tracks printed in the console summary (report.json has them all)
+FRAME_NUMBERS = ("t_recv", "t_proc_start", "t_proc_end", "app_delay_ms")
 
 
 @dataclass(frozen=True)
@@ -186,21 +188,46 @@ def build_report(
     )
     run = load_json(run_dir / "run.json")
     session = load_json(run_dir.parent.parent / "session.json")
-    frames = sorted(read_csv(run_dir / "frames.csv"), key=lambda r: int(r["seq"]))
+    bad = 0  # rows that do not parse (a truncated last line): skipped and said
+    frames = []
+    for r in read_csv(run_dir / "frames.csv"):
+        try:
+            int(r["seq"])
+            [float(r[k]) for k in FRAME_NUMBERS]
+        except (TypeError, ValueError, KeyError):
+            bad += 1
+        else:
+            frames.append(r)
+    frames.sort(key=lambda r: int(r["seq"]))
     time_of = {int(r["seq"]): float(r["t_recv"]) for r in frames}
 
-    samples: dict[int, list[Sample]] = defaultdict(list)
+    by_track: dict[int, dict[int, Sample]] = defaultdict(dict)  # per seq: one sample each
     no_time = 0
     for r in read_csv(run_dir / "tracks.csv"):
-        seq = int(r["seq"])
+        try:
+            seq, tid = int(r["seq"]), int(r["track_id"])
+            x, y = positions((float(r["x1"]) + float(r["x2"])) / 2, float(r["y2"]))
+        except (TypeError, ValueError, KeyError):
+            bad += 1
+            continue
         if seq not in time_of:
             no_time += 1
             continue
-        x, y = positions((float(r["x1"]) + float(r["x2"])) / 2, float(r["y2"]))
-        samples[int(r["track_id"])].append(Sample(time_of[seq], x, y))
-    tracks = [track_metrics(i, s, params, positions) for i, s in sorted(samples.items())]
+        by_track[tid][seq] = Sample(time_of[seq], x, y)
+    tracks = [
+        track_metrics(i, list(s.values()), params, positions) for i, s in sorted(by_track.items())
+    ]
 
     stats = session_stats(run, session, frames, tracks, params)
+    notes = []
+    if bad:
+        notes.append(f"{bad} malformed CSV row(s) were skipped")
+    if no_time:
+        notes.append(f"{no_time} track row(s) had no matching processed frame and were skipped")
+    if seconds_between(run.get("t0_wall"), run.get("ended_at")) is None:
+        notes.append(
+            "The run has no end time: duration is the last processed frame's time, a lower bound"
+        )
     return Report(
         run["run_id"],
         run["session_id"],
@@ -212,7 +239,7 @@ def build_report(
         params,
         stats,
         tracks,
-        caveats(positions, params, stats, no_time),
+        caveats(positions, params, stats, notes),
     )
 
 
@@ -250,6 +277,7 @@ def session_stats(
     else:
         coverage = Q(100 * sum(int(n or 0) >= 1 for n in seen) / len(frames), "percent")
     none_frames = "no processed frames"
+    few_frames = "fewer than 2 processed frames"
     return SessionStats(
         status=session["status"],
         detection=detection,
@@ -258,15 +286,21 @@ def session_stats(
         n_processed=len(frames),
         n_dropped=counts["dropped"] if counts else None,
         n_unprocessed=counts["unprocessed"] if counts else None,
-        processed_fps=Q(fps, "frames/s", "fewer than 2 processed frames"),
-        drop_rate=Q(100 * drop if drop is not None else None, "percent", no_counts),
+        processed_fps=Q(
+            fps if len(frames) >= 2 else None, "frames/s", "fewer than 2 processed frames"
+        ),
+        drop_rate=Q(
+            100 * drop if drop is not None else None,
+            "percent",
+            no_counts if counts is None else "no frames captured",
+        ),
         coverage=coverage,
         n_tracks=len(tracks),
         n_short_tracks=sum(t.visible < params.short_track for t in tracks),
         frame_interval_median=Q(
-            statistics.median(intervals) if intervals else None, "s", none_frames
+            statistics.median(intervals) if intervals else None, "s", few_frames
         ),
-        frame_interval_max=Q(max(intervals) if intervals else None, "s", none_frames),
+        frame_interval_max=Q(max(intervals) if intervals else None, "s", few_frames),
         app_delay_p50=Q(delays["p50"] if delays else None, "ms", none_frames),
         app_delay_p95=Q(delays["p95"] if delays else None, "ms", none_frames),
         app_delay_max=Q(delays["max"] if delays else None, "ms", none_frames),
@@ -274,7 +308,7 @@ def session_stats(
             {
                 "kind": e["kind"],
                 "t_wall": e["t_wall"],
-                "t_since_t0": None if e["t_mono"] is None else Q(e["t_mono"], "s").as_dict(),
+                "t_since_t0": Q(e["t_mono"], "s", "event precedes t0").as_dict(),
                 "detail": e["detail"],
             }
             for e in session["events"]
@@ -282,7 +316,7 @@ def session_stats(
     )
 
 
-def caveats(positions: PositionMap, params: Params, s: SessionStats, no_time: int) -> list[str]:
+def caveats(positions: PositionMap, params: Params, s: SessionStats, notes: list[str]) -> list[str]:
     out = [
         f"Positions are the bottom-centre of the box in {positions.unit}"
         + (
@@ -311,12 +345,16 @@ def caveats(positions: PositionMap, params: Params, s: SessionStats, no_time: in
             + "): samples per track are sparse and uneven"
         )
     if s.n_tracks == 0 and s.coverage.value:
+        slow = (
+            ", which a low processing rate rarely gives"
+            if fps is not None and fps < LOW_FPS
+            else ""
+        )
         out.append(
             "People were detected but no track formed: a track needs 2 consecutive detections"
-            " and a score of at least 0.7, which a low processing rate rarely gives"
+            " and a score of at least 0.7" + slow
         )
-    if no_time:
-        out.append(f"{no_time} track row(s) had no matching processed frame and were skipped")
+    out += notes
     if s.status == "running":
         out.append("The session did not end (status running): counts and end time are missing")
     return out
@@ -337,8 +375,8 @@ def n(value: float | None, digits: int = 1) -> str:
 
 
 def event_text(e: dict) -> str:
-    t = e["t_since_t0"]
-    return f"{e['kind']} {'-' if t is None else format(t['value'], '+.1f') + ' s'}"
+    v = e["t_since_t0"]["value"]
+    return f"{e['kind']} {'-' if v is None else format(v, '+.1f') + ' s'}"
 
 
 def format_summary(r: Report) -> str:
@@ -368,7 +406,9 @@ def format_summary(r: Report) -> str:
             f"    {'id':>4} {'first':>7} {'last':>7} {'seen':>6} {'n':>4} {'med dt':>7}"
             f" {'path':>9} {'mean':>8} {'max':>8}  stat/walk/run %"
         )
-        for t in r.tracks:
+        top = sorted(r.tracks, key=lambda t: -t.visible)[:MAX_TRACK_ROWS]
+        shown = sorted(top, key=lambda t: t.track_id)
+        for t in shown:
             a = t.activity
             share = "n/a" if a is None else "/".join(f"{a[k]:.0f}" for k in a)
             lines.append(
@@ -376,7 +416,12 @@ def format_summary(r: Report) -> str:
                 f" {t.n_samples:>4} {n(t.median_interval, 2):>7} {n(t.path_length):>9}"
                 f" {n(t.mean_speed):>8} {n(t.max_speed):>8}  {share}"
             )
-        for t in r.tracks:
+        if len(shown) < len(r.tracks):
+            lines.append(
+                f"    ... {len(r.tracks) - len(shown)} shorter track(s) not shown"
+                " (report.json has all)"
+            )
+        for t in shown:
             if t.speed_reason:
                 lines.append(f"    track {t.track_id}: speed n/a ({t.speed_reason})")
     lines.append("  caveats:")

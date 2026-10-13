@@ -132,7 +132,7 @@ def track_metrics(
         mean = path / valid_time
         max_ = max(d / dt for dt, d in distances)
     activity = None
-    if distances:
+    if len(distances) >= params.min_valid_intervals:  # one interval is not a share
         share = dict.fromkeys(("stationary", "walking", "running"), 0.0)
         for dt, d in distances:
             v = d / dt

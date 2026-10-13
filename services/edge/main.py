@@ -591,6 +591,8 @@ def print_report(run_dir) -> None:
         print(format_summary(write_report(run_dir)))
     except Exception as e:
         print(f"warning: report not written: {e!r}", file=sys.stderr)
+    except KeyboardInterrupt:  # Ctrl+C now would turn a saved "ended" session into exit 130
+        print("warning: report interrupted; run python -m services.edge.report", file=sys.stderr)
 
 
 def print_benchmark(

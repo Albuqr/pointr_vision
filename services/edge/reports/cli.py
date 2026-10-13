@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 from services.edge.reports.build import format_summary, run_dirs, write_report
-from services.edge.reports.movement import Params
+from services.edge.reports.movement import Params, PixelPositions
 
 
 def positive(text: str) -> float:
@@ -31,6 +31,13 @@ def odd(text: str) -> int:
     return value
 
 
+def at_least_one(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be >= 1, got {text}")
+    return value
+
+
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     d = Params()
     p = argparse.ArgumentParser(prog="python -m services.edge.report", description=__doc__)
@@ -43,34 +50,38 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         type=positive,
         default=d.max_gap,
         help="seconds; longer intervals are excluded from speed (default 1.0)",
-    )  # noqa: E501
+    )
     p.add_argument(
         "--smooth",
         type=odd,
         default=d.smooth_window,
         help="moving-median window in samples (default 3)",
-    )  # noqa: E501
+    )
     p.add_argument(
         "--min-intervals",
-        type=int,
+        type=at_least_one,
         default=d.min_valid_intervals,
         help="valid intervals needed for a speed (default 2)",
-    )  # noqa: E501
+    )
     p.add_argument(
         "--short-track",
         type=positive,
         default=d.short_track,
         help="seconds: shorter tracks are flagged (default 1.0)",
-    )  # noqa: E501
+    )
     p.add_argument("--stationary-below", type=positive, help="px/s: below this is stationary")
     p.add_argument(
         "--walking-below", type=positive, help="px/s: below this is walking, above running"
-    )  # noqa: E501
+    )
     args = p.parse_args(argv)
     if bool(args.session_dir) == bool(args.group):
         p.error("give a session folder, or --group GROUP_ID")
     if args.group and args.run:
         p.error("--run applies to one session, not --group")
+    defaults = PixelPositions()
+    stationary = args.stationary_below or defaults.stationary_below
+    if (args.walking_below or defaults.walking_below) <= stationary:
+        p.error("--walking-below must be greater than --stationary-below")
     return args
 
 
@@ -101,31 +112,38 @@ def group_sessions(out: Path, group_id: str) -> list[Path]:
 def report_session(session_dir: Path, run_id: str | None, params: Params) -> str:
     """Write and format the report of one session's run (default: its last run)."""
     runs = run_dirs(session_dir)
+    if run_id and run_id not in [r.name for r in runs]:  # also keeps --run inside this session
+        raise ValueError(f"run {run_id!r} is not in {session_dir.name}")
     run_dir = session_dir / "runs" / run_id if run_id else runs[-1]
     return format_summary(write_report(run_dir, params=params))
+
+
+ERRORS = (OSError, ValueError, KeyError, IndexError)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     params = params_of(args)
-    try:
-        if args.group:
-            sessions = group_sessions(args.out, args.group)
-            if not sessions:
-                print(
-                    f"error: no session with group_id {args.group} under {args.out}",
-                    file=sys.stderr,
-                )
-                return 2
-            print(f"group {args.group}: {len(sessions)} camera(s), reported one by one")
-            for folder in sessions:
-                print(f"\n{folder.name}\n{report_session(folder, None, params)}")
-        else:
+    if not args.group:
+        try:
             print(report_session(args.session_dir, args.run, params))
-    except (OSError, ValueError, KeyError, IndexError) as e:
-        print(f"error: cannot report: {e!r}", file=sys.stderr)
+        except ERRORS as e:
+            print(f"error: cannot report: {e!r}", file=sys.stderr)
+            return 2
+        return 0
+    sessions = group_sessions(args.out, args.group)
+    if not sessions:
+        print(f"error: no session with group_id {args.group} under {args.out}", file=sys.stderr)
         return 2
-    return 0
+    print(f"group {args.group}: {len(sessions)} camera(s), reported one by one")
+    failed = 0
+    for folder in sessions:  # one bad camera must not hide the others
+        try:
+            print(f"\n{folder.name}\n{report_session(folder, None, params)}")
+        except ERRORS as e:
+            failed += 1
+            print(f"\n{folder.name}\nerror: cannot report: {e!r}", file=sys.stderr)
+    return 2 if failed else 0
 
 
 if __name__ == "__main__":

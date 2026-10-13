@@ -78,7 +78,7 @@
             "properties": {
               "kind": {"type": "string", "minLength": 1},
               "t_wall": {"$ref": "#/$defs/utc"},
-              "t_since_t0": {"anyOf": [{"$ref": "#/$defs/quantity"}, {"type": "null"}]},
+              "t_since_t0": {"$ref": "#/$defs/quantity"},
               "detail": {"type": ["string", "null"]}
             }
           }

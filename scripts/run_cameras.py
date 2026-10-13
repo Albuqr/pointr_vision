@@ -375,7 +375,8 @@ class Launcher:
                 continue
             try:
                 rows.append(table_row(build_report(run_dirs(child.session_dir)[-1])))
-            except (OSError, ValueError, KeyError, IndexError):
+            except Exception as e:  # shown, never silent (CLAUDE.md rule 6)
+                self.say(f"[launcher] {child.cam.camera_id}: report failed: {e!r}")
                 rows.append((child.cam.camera_id, *["n/a"] * (len(REPORT_HEADER) - 1)))
         return rows
 

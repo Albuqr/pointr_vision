@@ -242,6 +242,7 @@ def test_a_child_that_fails_to_start_does_not_stop_the_others(tmp_path, capsys):
     assert rows["cam1"][3] == "10.48"  # 11 frames over 1.05 s, as the benchmark computes it
     assert rows["cam1"][4] == "0"  # failed reads, from the child's last line
     result = out[out.index("result:") :].split("report (per camera")[0].splitlines()[1:-1]
+    result = [line for line in result if "report failed" not in line]  # fake sessions: no files
     assert [line.split()[1] for line in result] == ["camera_id", "cam1", "bad", "cam3"]
 
 
