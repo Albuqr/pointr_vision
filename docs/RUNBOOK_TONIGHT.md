@@ -35,6 +35,9 @@ pip install -e ".[dev]"
 python -c "import torch; print(torch.__version__, torch.cuda.is_available()); torch.cuda.is_available() and print(torch.cuda.get_device_name(0), (torch.ones(1, device='cuda') + 1).item())"
 ```
 
+This installs the FastAPI/Uvicorn app backend too. Node is not required to run Pointr Studio;
+the built frontend is committed. Node is only needed to edit, build, or lint the UI.
+
 Expect `2.14.1+cu130 True` / `2.14.1+cu126 True`, then the GPU name and `2.0` (a real GPU
 calculation), on a GPU PC; `2.14.1+cpu False` on the CPU build. `False` on a GPU PC, or an
 error such as "no kernel image is available", is a wrong install or an unsupported GPU:
@@ -51,6 +54,17 @@ If Git Bash says `command not found` for `git`, `ls`, `grep` (PyCharm terminal):
 `export PATH="/usr/bin:/bin:/mingw64/bin:/cmd:$PATH"`.
 
 ## 2. Smoke test (10 seconds, one camera)
+
+After installation, use Pointr Studio as the main path:
+
+```bash
+python -m services.app --out C:/pointr_sessions
+```
+
+It opens a local browser at `127.0.0.1:8765`; Node is not needed to run it. Add and test
+the cameras in **Cameras**, then start/stop the group in **Record**. Closing the browser tab
+does not stop a recording. Ctrl+C in the app terminal stops all cameras cleanly. The CLI
+commands below remain the fallback when the UI is unavailable.
 
 Use the laptop webcam first if no phone is connected yet (`--source 0 --link builtin`).
 

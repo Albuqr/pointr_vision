@@ -65,6 +65,10 @@ python -c "import torch; print(torch.cuda.get_device_name(0), (torch.ones(1, dev
 
 If a CUDA install prints `False`, see the symptom table in `docs/RUNBOOK_TONIGHT.md`.
 
+The editable install also installs the local app's FastAPI/Uvicorn backend. Node is not
+needed to run Pointr Studio; its built frontend is included. Node is only needed to develop
+the UI under `services/app/ui`.
+
 The RF-DETR Nano weights (`rf-detr-nano.pth`, 366 MB) download on the first run
 that loads the model, to `~/.roboflow/models` (set `RF_HOME` to change it), and are checked
 against an md5. **The first run needs internet.** Loading the model takes several seconds
@@ -75,6 +79,18 @@ before capture starts.
 CUDA GPU). The chosen device and GPU name are printed at start and written to `run.json`.
 
 ## Run
+
+Start Pointr Studio (the local recording UI):
+
+```bash
+python -m services.app --out C:/pointr_sessions
+```
+
+The app binds to `127.0.0.1:8765` and opens the browser. The command-line camera modes
+remain available as a fallback:
+
+To develop the frontend, install Node 22.12+ and run `npm ci`, `npm run build`, and
+`npm run lint` from `services/app/ui`. Node is not a runtime prerequisite.
 
 ```bash
 python -m services.edge.main --source 1 --link usb --preview         # detect + track

@@ -7,7 +7,7 @@ needs the answer.
 |---|---|---|---|
 | Q-01 | What replaces "10 a 12 MP" in RNF01? | 01 (recorded), team text | MP measures photo resolution. Video needs resolution + fps (e.g. 720p/1080p at X fps), validated in the baseline |
 | Q-02 | Numeric real-time criterion for RNF02 | after phase 02 baseline and phase 02b | Scope v2: rate is a measurement result, no target in advance. **Input, phase 02 CPU baseline (D-019):** RF-DETR Nano on i7-10510U, 1280x720 capture, headless: 1.89 fps, app delay p50/p95 547/641 ms at det-size 384 (USB); 2.42 fps, 437/484 ms at 320; Wi-Fi the same within noise; ~94% of frames dropped, delay bounded. About 4x is needed for ~10 fps. Phase 02b adds other runtimes/models and ID survival through short exits |
-| Q-03 | Local UI frontend stack | 06 | Options: plain HTML + HTMX, or React (already known). Keep it small |
+| Q-03 | ~~Local UI frontend stack~~ | 06 | **Closed: D-024.** FastAPI + React/Vite/TypeScript; built frontend committed, Node only for UI development |
 | Q-04 | Video retention period after downgrade (RN12) | 09 | Configurable value either way |
 | Q-05 | Locked-video mechanism (RNF11) | 09 | Proposed: per-file key wrapped by the server. Alternative: no local lock, only UI hiding (weaker, does not meet RNF11) |
 | Q-06 | Object storage | 09 | MinIO on the VPS vs hosted S3-compatible bucket; VPS disk size limits MinIO |
