@@ -261,7 +261,7 @@ def test_a_child_that_fails_to_start_does_not_stop_the_others(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "[bad] error: cannot open source" in out  # its own message, prefixed
     rows = {r[0]: r for r in (lau.summary(c) for c in lau.children)}
-    assert rows["bad"][1:3] == ("-", "failed to start (exit 2)")
+    assert rows["bad"][1:3] == ("-", "cannot open source 'fake'")
     assert rows["cam1"][2] == rows["cam3"][2] == "interrupted"
     assert rows["cam1"][3] == "10.48"  # 11 frames over 1.05 s, as the benchmark computes it
     assert rows["cam1"][4] == "0"  # failed reads, from the child's last line

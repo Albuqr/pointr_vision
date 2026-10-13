@@ -105,6 +105,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--source", required=True, help="webcam index, stream URL or .mp4/.mov path")
     p.add_argument("--preview", action="store_true", help="show the preview window")
     p.add_argument("--http-preview", type=int, help="serve annotated loopback preview on this port")
+    p.add_argument("--calibration", help="calibration JSON file for metre positions")
     p.add_argument(
         "--link",
         choices=["usb", "wifi", "builtin", "file"],
@@ -448,6 +449,29 @@ def run(args: argparse.Namespace) -> int:
         return open_failed(args.source, e)
 
     info = dataclasses.replace(info, link=args.link)
+    calibration = None
+    if args.calibration:
+        from services.edge.calibration.document import load_calibration, run_calibration
+
+        try:
+            calibration = load_calibration(args.calibration)
+            if args.camera_id is None:
+                raise ValueError("--camera-id is required when --calibration is used")
+            if calibration["camera_id"] != args.camera_id:
+                raise ValueError(
+                    f"calibration is for camera {calibration['camera_id']!r}, "
+                    f"not {args.camera_id!r}"
+                )
+            size = calibration["image_size"]
+            if (size["width"], size["height"]) != (info.width, info.height):
+                raise ValueError(
+                    f"calibration image size {size['width']}x{size['height']} differs from "
+                    f"capture size {info.width}x{info.height}"
+                )
+        except (ValueError, OSError) as e:
+            source.close()
+            print(f"error: calibration cannot be used: {e}", file=sys.stderr)
+            return EXIT_CAPTURE_ERROR
     print(f"source: {info}")
     if isinstance(source, CameraSource):  # streams and files deliver their own size
         print(f"requested {args.width}x{args.height}, camera delivers {info.width}x{info.height}")
@@ -463,9 +487,24 @@ def run(args: argparse.Namespace) -> int:
     try:
         session_id = str(uuid.uuid4())
         meta = SessionMeta(
-            session_id, device_id(args.out), utc_now(), info, False, args.camera_id, args.group_id
+            session_id,
+            device_id(args.out),
+            utc_now(),
+            info,
+            False,
+            args.camera_id,
+            args.group_id,
+            None
+            if calibration is None
+            else {
+                "calibration_id": calibration["calibration_id"],
+                "check_error_m": calibration["errors"]["check_mean_m"],
+            },
         )
-        writer.start(meta, run_meta(args, info, config, detector, tracker, gpu))
+        run = run_meta(args, info, config, detector, tracker, gpu)
+        if calibration is not None:
+            run = dataclasses.replace(run, calibration=run_calibration(calibration))
+        writer.start(meta, run)
     except OSError as e:
         release_ctrl_c(held)
         source.close()
@@ -549,6 +588,8 @@ def run(args: argparse.Namespace) -> int:
                         f"preview encoding failed: {error!r}",
                     )
                 ),
+                raw_snapshot=capture.raw_snapshot,
+                calibration=calibration,
             )
             http_preview.start()
             processor.on_preview = http_preview.publish

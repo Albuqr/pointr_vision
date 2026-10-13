@@ -25,6 +25,7 @@ class SessionMeta:
     recording_enabled: bool
     camera_id: str | None = None  # label of this camera in a multi-camera recording (D-022)
     group_id: str | None = None  # shared by the sessions recorded together
+    calibration: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,7 @@ class RunMeta:
     health: dict  # source-health thresholds
     runtime: dict  # python, platform, device, packages
     started_at: str  # UTC ISO-8601
+    calibration: dict | None = None
 
 
 @dataclass(frozen=True)

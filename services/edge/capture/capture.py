@@ -44,10 +44,18 @@ class Capture:
         self.done = threading.Event()  # set when the thread has stopped for any reason
         self._stop = threading.Event()
         self._times: deque[float] = deque(maxlen=30)
+        self._latest_lock = threading.Lock()
+        self._latest_frame: Frame | None = None
         self._thread = threading.Thread(target=self._run, name="capture", daemon=True)
 
     def start(self) -> None:
         self._thread.start()
+
+    def raw_snapshot(self):
+        """Copy the latest unannotated capture frame only when a client requests one."""
+        with self._latest_lock:
+            frame = self._latest_frame
+        return None if frame is None else frame.image.copy()
 
     # longer than the slowest blocking read: a stream reopen (5 s) after a read timeout (2 s)
     def stop(self, timeout: float = 8.0) -> bool:
@@ -88,6 +96,8 @@ class Capture:
                     self._times.clear()
                     self._stop.wait(self.fail_backoff)
                     continue
+                with self._latest_lock:
+                    self._latest_frame = frame
                 self.captured += 1
                 self._times.append(frame.t_recv)
                 span = self._times[-1] - self._times[0]

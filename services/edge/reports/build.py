@@ -13,6 +13,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 
+from services.edge.calibration.homography import CalibrationPositions
 from services.edge.capture.types import utc_now
 from services.edge.perception.loop import delay_stats, rates
 from services.edge.reports.movement import (
@@ -75,6 +76,8 @@ class Report:
     generated_at: str
     unit: str
     calibrated: bool
+    calibration_id: str | None
+    check_error_m: float | None
     params: Params  # thresholds resolved: never None here
     session: SessionStats
     tracks: list[TrackMetrics]
@@ -90,7 +93,13 @@ class Report:
             "camera_id": self.camera_id,
             "group_id": self.group_id,
             "generated_at": self.generated_at,
-            "positions": {"unit": u, "point": "bottom_centre", "calibrated": self.calibrated},
+            "positions": {
+                "unit": u,
+                "point": "bottom_centre",
+                "calibrated": self.calibrated,
+                "calibration_id": self.calibration_id,
+                "check_error_m": self.check_error_m,
+            },
             "params": {
                 "max_gap": Q(p.max_gap, "s").as_dict(),
                 "smooth_window": Q(p.smooth_window, "samples").as_dict(),
@@ -176,7 +185,11 @@ def build_report(
     unreadable; a run that never finished (no counts, no end time) still reports."""
     run_dir = Path(run_dir)
     params = params or Params()
-    positions = positions or PixelPositions()
+    run = load_json(run_dir / "run.json")
+    calibration = run.get("calibration")
+    positions = positions or (
+        CalibrationPositions(calibration) if calibration else PixelPositions()
+    )
     params = replace(
         params,
         stationary_below=positions.stationary_below
@@ -186,7 +199,8 @@ def build_report(
         if params.walking_below is None
         else params.walking_below,
     )
-    run = load_json(run_dir / "run.json")
+    if params.walking_below <= params.stationary_below:
+        raise ValueError("walking threshold must be greater than stationary threshold")
     session = load_json(run_dir.parent.parent / "session.json")
     bad = 0  # rows that do not parse (a truncated last line): skipped and said
     frames = []
@@ -236,6 +250,8 @@ def build_report(
         utc_now(),
         positions.unit,
         positions.calibrated,
+        getattr(positions, "calibration_id", None),
+        getattr(positions, "check_error_m", None),
         params,
         stats,
         tracks,
@@ -329,9 +345,15 @@ def caveats(positions: PositionMap, params: Params, s: SessionStats, notes: list
         f" after a {params.smooth_window}-sample moving median; path length excludes the gaps and"
         " underestimates a curved path (and box jitter adds path even to a person standing still);"
         " max speed is the fastest single interval and is noisy",
-        f"Activity thresholds ({params.stationary_below:g} and {params.walking_below:g}"
-        f" {positions.unit}/s) are placeholders: uncalibrated pixels, thresholds depend on camera"
-        " distance",
+        (
+            f"Activity thresholds ({params.stationary_below:g} and {params.walking_below:g} m/s) "
+            "are configurable; check-point residual is a quality indicator, not a guarantee of "
+            "ground-truth accuracy"
+            if positions.calibrated
+            else f"Activity thresholds ({params.stationary_below:g} and "
+            f"{params.walking_below:g} {positions.unit}/s) are placeholders: uncalibrated pixels, "
+            "thresholds depend on camera distance"
+        ),
         "Track IDs are temporary and not people: a person who leaves the frame or is occluded"
         " gets a new ID, and short tracks may be false positives",
         "Detections and tracks are not validated against ground truth",
@@ -383,9 +405,12 @@ def format_summary(r: Report) -> str:
     """Console text of one report: session lines, one row per track, caveats."""
     s, u = r.session, r.unit
     name = r.camera_id or r.session_id[:8]
+    calibration_note = (
+        f", check error {r.check_error_m:.3f} m" if r.check_error_m is not None else ""
+    )
     lines = [
         f"report {name} (run {r.run_id[:8]}, session {s.status}, positions in {u},"
-        f" {'calibrated' if r.calibrated else 'uncalibrated'})",
+        f" {'calibrated' if r.calibrated else 'uncalibrated'}{calibration_note})",
         f"  duration {n(s.duration.value)} s | processed {s.n_processed} frames at"
         f" {n(s.processed_fps.value, 2)} fps | dropped {n(s.drop_rate.value)}% |"
         f" app delay p50 {n(s.app_delay_p50.value, 0)} / p95 {n(s.app_delay_p95.value, 0)} ms",
@@ -413,8 +438,9 @@ def format_summary(r: Report) -> str:
             share = "n/a" if a is None else "/".join(f"{a[k]:.0f}" for k in a)
             lines.append(
                 f"    {t.track_id:>4} {t.first_seen:>7.1f} {t.last_seen:>7.1f} {t.visible:>6.1f}"
-                f" {t.n_samples:>4} {n(t.median_interval, 2):>7} {n(t.path_length):>9}"
-                f" {n(t.mean_speed):>8} {n(t.max_speed):>8}  {share}"
+                f" {t.n_samples:>4} {n(t.median_interval, 2):>7} "
+                f"{n(t.path_length):>9} {n(t.mean_speed):>8}"
+                f" {n(t.max_speed):>8}  {share}"
             )
         if len(shown) < len(r.tracks):
             lines.append(

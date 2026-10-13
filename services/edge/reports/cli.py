@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 from services.edge.reports.build import format_summary, run_dirs, write_report
-from services.edge.reports.movement import Params, PixelPositions
+from services.edge.reports.movement import Params
 
 
 def positive(text: str) -> float:
@@ -78,9 +78,11 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         p.error("give a session folder, or --group GROUP_ID")
     if args.group and args.run:
         p.error("--run applies to one session, not --group")
-    defaults = PixelPositions()
-    stationary = args.stationary_below or defaults.stationary_below
-    if (args.walking_below or defaults.walking_below) <= stationary:
+    if (
+        args.stationary_below is not None
+        and args.walking_below is not None
+        and args.walking_below <= args.stationary_below
+    ):
         p.error("--walking-below must be greater than --stationary-below")
     return args
 

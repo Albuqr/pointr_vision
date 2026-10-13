@@ -20,6 +20,7 @@ from dataclasses import asdict
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
+from services.edge.calibration.homography import CalibrationPositions
 from services.edge.capture.types import utc_now
 from services.edge.perception.types import TrackObs
 from services.edge.session.types import (
@@ -32,13 +33,14 @@ from services.edge.session.types import (
     SessionMeta,
 )
 
-CONTRACT_VERSION = "0.7.0"
+CONTRACT_VERSION = "0.8.0"
 FRAMES_COLUMNS = [
     "seq", "t_recv", "t_proc_start", "t_proc_end", "app_delay_ms",
     "n_detections", "n_tracks", "dropped_total",
 ]  # fmt: skip
 TRACKS_COLUMNS = [
     "seq", "track_id", "x1", "y1", "x2", "y2", "confidence", "state", "athlete_id",
+    "x_m", "y_m", "calibration_id", "position_method", "in_court",
 ]  # fmt: skip
 FLUSH_SECS = 0.5  # flush period; under the contract's "at least once per second"
 
@@ -101,7 +103,7 @@ def device_id(out_dir: Path) -> str:
 
 
 def _num(x: float | None, digits: int = 6) -> str:
-    return "" if x is None else f"{x:.{digits}f}"
+    return "" if x is None or x == "" else f"{x:.{digits}f}"
 
 
 def _opt(x) -> str:
@@ -186,6 +188,7 @@ class FileSessionWriter:
             },
             "runs": [run.run_id],
             "events": [],
+            "calibration": meta.calibration,
         }
         self._run_doc = {
             "contract_version": CONTRACT_VERSION,
@@ -201,6 +204,7 @@ class FileSessionWriter:
             "t0_wall": None,
             "ended_at": None,
             "counts": None,
+            "calibration": run.calibration,
         }
         self._frames_f = open(self._run_dir / "frames.csv", "w", newline="", encoding="utf-8")
         self._tracks_f = open(self._run_dir / "tracks.csv", "w", newline="", encoding="utf-8")
@@ -347,11 +351,22 @@ class FileSessionWriter:
             )
         elif kind == "tracks":
             _, seq, obs = item
+            calibration = self._run_doc["calibration"]
+            positions = CalibrationPositions(calibration) if calibration else None
             for o in obs:
                 x1, y1, x2, y2 = o.xyxy
+                if positions:
+                    x_m, y_m = positions((x1 + x2) / 2, y2)
+                    calibration_id = positions.calibration_id
+                    position_method = "box_bottom_center"
+                    in_court = positions.in_court(x_m, y_m)
+                else:
+                    x_m = y_m = calibration_id = position_method = in_court = ""
                 self._tracks.writerow(
                     [seq, o.track_id, _num(x1, 2), _num(y1, 2), _num(x2, 2), _num(y2, 2),
-                     _num(o.confidence, 4), _opt(o.state), ""]
+                     _num(o.confidence, 4), _opt(o.state), "", _num(x_m, 4), _num(y_m, 4),
+                     calibration_id, position_method,
+                     str(in_court).lower() if positions else ""]
                 )  # fmt: skip
         elif kind == "event":
             self._session["events"].append(asdict(item[1]))

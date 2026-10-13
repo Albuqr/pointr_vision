@@ -8,16 +8,34 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import cv2
 
+from services.edge.calibration.court import court_model
+from services.edge.calibration.render import draw_projected_court
 from services.edge.perception.loop import Processed
 from services.edge.ui.preview import draw_hud, draw_tracks
 
 
 class HttpPreview:
-    def __init__(self, port: int, state, hud, on_error=lambda error: None):
+    def __init__(
+        self,
+        port: int,
+        state,
+        hud,
+        on_error=lambda error: None,
+        raw_snapshot=lambda: None,
+        calibration=None,
+    ):
         self.port = port
         self.state = state
         self.hud = hud
         self.on_error = on_error
+        self.raw_snapshot = raw_snapshot
+        self.calibration = calibration
+        self.court = None
+        if calibration:
+            court = calibration["court"]
+            self.court = court_model(
+                court["kind"], court["length_m"], court["width_m"], court["landmarks"]
+            )
         self._failure_active = False
         self.pending: queue.Queue[Processed] = queue.Queue(maxsize=1)
         self.preview_dropped = 0
@@ -29,6 +47,23 @@ class HttpPreview:
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
+                if self.path == "/raw-snapshot.jpg":
+                    image = owner.raw_snapshot()
+                    if image is None:
+                        self.send_error(503, "raw capture frame not ready")
+                        return
+                    ok, encoded = cv2.imencode(".jpg", image)
+                    if not ok:
+                        self.send_error(503, "raw snapshot encoding failed")
+                        return
+                    payload = encoded.tobytes()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/jpeg")
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    self.wfile.write(payload)
+                    return
                 if self.path == "/status.json":
                     hud = owner.hud()
                     payload = json.dumps(
@@ -122,6 +157,10 @@ class HttpPreview:
                 time.sleep(delay)
             try:
                 image = draw_tracks(item.frame.image, item.tracks)
+                if self.calibration:
+                    image = draw_projected_court(
+                        image, self.calibration["homography_image_to_court"], self.court
+                    )
                 image = draw_hud(image, self.state(), self.hud())
                 width = image.shape[1]
                 if width > 640:

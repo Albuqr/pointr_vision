@@ -142,6 +142,106 @@ def test_fixture_clip_produces_valid_files(monkeypatch, tmp_path, clips):
     assert list(tracks[0]) == writer_mod.TRACKS_COLUMNS
     assert tracks[0]["x1"] == "10.00" and tracks[0]["confidence"] == "0.9000"
     assert tracks[0]["state"] == "" and tracks[0]["athlete_id"] == ""
+    assert tracks[0]["x_m"] == tracks[0]["y_m"] == ""
+    assert tracks[0]["position_method"] == tracks[0]["in_court"] == ""
+
+
+def test_calibrated_run_writes_metre_positions_and_provenance(monkeypatch, tmp_path, clips):
+    class TwoPersonDetector(EvenFrameDetector):
+        def detect(self, frame):
+            if frame.seq % 2:
+                return NO_DETECTIONS
+            boxes = np.array([[10.0, 20.0, 110.0, 220.0], [10.0, 20.0, 110.0, 100.0]], np.float32)
+            return Detections(boxes, np.array([0.9, 0.9], np.float32), np.array([1, 2]))
+
+    calibration = load(ROOT / "tests/fixtures/contracts/calibration.example.json")
+    calibration["camera_id"] = "cam1"
+    calibration["image_size"] = {"width": 640, "height": 360}
+    path = tmp_path / "calibration.json"
+    path.write_text(json.dumps(calibration), encoding="utf-8")
+    out = tmp_path / "sessions"
+    code = run_main(
+        monkeypatch,
+        out,
+        "--source",
+        str(clips["moving"]),
+        "--link",
+        "file",
+        "--camera-id",
+        "cam1",
+        "--calibration",
+        str(path),
+        detector=TwoPersonDetector(),
+    )
+    assert code == 0
+    session, run, _, tracks = session_files(out)
+    validate("session", session)
+    validate("run", run)
+    assert session["calibration"]["calibration_id"] == calibration["calibration_id"]
+    assert run["calibration"]["check_error_m"] == calibration["errors"]["check_mean_m"]
+    assert tracks[0]["x_m"] == "0.6000" and tracks[0]["y_m"] == "2.2000"
+    assert tracks[0]["calibration_id"] == calibration["calibration_id"]
+    assert tracks[0]["position_method"] == "box_bottom_center"
+    assert tracks[0]["in_court"] == "false"
+    assert tracks[1]["in_court"] == "true"
+
+
+def test_calibration_image_size_mismatch_is_refused_before_session(
+    monkeypatch, tmp_path, clips, capsys
+):
+    calibration = load(ROOT / "tests/fixtures/contracts/calibration.example.json")
+    calibration["camera_id"] = "cam1"
+    path = tmp_path / "calibration.json"
+    path.write_text(json.dumps(calibration), encoding="utf-8")
+    out = tmp_path / "sessions"
+    result = run_main(
+        monkeypatch,
+        out,
+        "--source",
+        str(clips["moving"]),
+        "--link",
+        "file",
+        "--camera-id",
+        "cam1",
+        "--calibration",
+        str(path),
+        "--no-detect",
+    )
+    assert result == EXIT_CAPTURE_ERROR
+    assert (
+        "calibration image size 640x480 differs from capture size 640x360"
+        in capsys.readouterr().err
+    )
+    assert not out.exists()
+
+
+def test_calibration_requires_matching_camera_id(monkeypatch, tmp_path, clips, capsys):
+    calibration = load(ROOT / "tests/fixtures/contracts/calibration.example.json")
+    calibration["camera_id"] = "cam1"
+    calibration["image_size"] = {"width": 640, "height": 360}
+    path = tmp_path / "calibration.json"
+    path.write_text(json.dumps(calibration), encoding="utf-8")
+
+    for camera_args, message in [
+        ([], "--camera-id is required"),
+        (["--camera-id", "cam2"], "calibration is for camera 'cam1', not 'cam2'"),
+    ]:
+        out = tmp_path / ("sessions_" + str(len(camera_args)))
+        result = run_main(
+            monkeypatch,
+            out,
+            "--source",
+            str(clips["moving"]),
+            "--link",
+            "file",
+            *camera_args,
+            "--calibration",
+            str(path),
+            "--no-detect",
+        )
+        assert result == EXIT_CAPTURE_ERROR
+        assert message in capsys.readouterr().err
+        assert not out.exists()
 
 
 def test_run_metadata_records_effective_tracker_parameters():

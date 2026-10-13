@@ -74,6 +74,7 @@ class Camera:
     track_activation: float | None = None
     track_min_frames: int | None = None
     http_preview_port: int | None = None
+    calibration_path: str | None = None
 
 
 def source_key(source: str) -> str:
@@ -220,6 +221,8 @@ def child_command(cam: Camera, opts: Options) -> list[str]:
         cmd.append(f"--track-min-frames={cam.track_min_frames}")
     if cam.http_preview_port is not None:
         cmd.append(f"--http-preview={cam.http_preview_port}")
+    if cam.calibration_path is not None:
+        cmd.append(f"--calibration={cam.calibration_path}")
     if cam.preview if cam.preview is not None else opts.preview:
         cmd.append("--preview")
     if opts.device:
@@ -317,6 +320,8 @@ class Launcher:
                     child.preview_port = int(line.split(":", 1)[1].strip())
                 except ValueError:
                     child.failure = "invalid preview port reported"
+            elif line.startswith("error: ") and child.failure is None:
+                child.failure = line.removeprefix("error: ").strip()
             self.say(f"[{child.cam.camera_id}] {line}")  # never raises: the pipe must be drained
 
     def start_one(self, cam: Camera) -> None:
@@ -342,7 +347,8 @@ class Launcher:
                 return
             child.opened.wait(0.2)
         if not child.opened.is_set():
-            child.failure = f"failed to start (exit {child.proc.returncode})"
+            if child.failure is None:
+                child.failure = f"failed to start (exit {child.proc.returncode})"
             self.say(f"[launcher] {cam.camera_id}: {child.failure}, the others go on")
 
     # -- stop ----------------------------------------------------------------------------------

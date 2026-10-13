@@ -41,6 +41,7 @@ def make_run(
     status: str = "ended",
     detection: bool = True,
     finished: bool = True,
+    calibration: dict | None = None,
 ) -> Path:
     """Write a session folder with one run; returns the run folder.
 
@@ -57,6 +58,15 @@ def make_run(
     )  # fmt: skip
     run = copy.deepcopy(example("run"))
     run.update(run_id=run_id, session_id=session_id)
+    run["calibration"] = calibration
+    session["calibration"] = (
+        {
+            "calibration_id": calibration["calibration_id"],
+            "check_error_m": calibration["check_error_m"],
+        }
+        if calibration
+        else None
+    )
     if not detection:
         run.update(detector=None, tracker=None)
         run["runtime"].update(device=None, gpu=None)
@@ -80,7 +90,24 @@ def make_run(
                         0 if detection else "", 0])  # fmt: skip
     with open(run_dir / "tracks.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["seq", "track_id", "x1", "y1", "x2", "y2", "confidence", "state", "athlete_id"])
+        w.writerow(
+            [
+                "seq",
+                "track_id",
+                "x1",
+                "y1",
+                "x2",
+                "y2",
+                "confidence",
+                "state",
+                "athlete_id",
+                "x_m",
+                "y_m",
+                "calibration_id",
+                "position_method",
+                "in_court",
+            ]
+        )
         for seq, tid, x, y in tracks:
             w.writerow([seq, tid, x - 10, y - 100, x + 10, y, 0.9, "", ""])
     return run_dir
@@ -216,7 +243,13 @@ def test_positions_go_through_the_position_function(tmp_path):
     run_dir = make_run(tmp_path, dense(8), [(i, 1, 100 * i, 500) for i in range(6)])
     report = build_report(run_dir, positions=Metres())
     d = report.to_dict()
-    assert d["positions"] == {"unit": "m", "point": "bottom_centre", "calibrated": True}
+    assert d["positions"] == {
+        "unit": "m",
+        "point": "bottom_centre",
+        "calibrated": True,
+        "calibration_id": None,
+        "check_error_m": None,
+    }
     t = track_of(report, 1)
     assert t["path_length"] == {"value": pytest.approx(5.0), "unit": "m"}
     assert t["mean_speed"] == {"value": pytest.approx(2.0), "unit": "m/s"}
@@ -224,6 +257,28 @@ def test_positions_go_through_the_position_function(tmp_path):
     assert d["params"]["walking_below"] == {"value": 4.0, "unit": "m/s"}
     assert not any("uncalibrated pixels" in c for c in d["caveats"][:1])
     schema("report").validate(d)
+
+
+def test_hand_built_calibration_reports_metres_and_provenance(tmp_path):
+    calibration = {
+        "calibration_id": str(uuid.uuid4()),
+        "check_error_m": 0.12,
+        "homography_image_to_court": [[0.01, 0, 0], [0, 0.01, 0], [0, 0, 1]],
+        "court": {"length_m": 28, "width_m": 15},
+        "image_size": {"width": 1920, "height": 1080},
+    }
+    run_dir = make_run(
+        tmp_path, dense(8), [(i, 12, i * 100, 500) for i in range(6)], calibration=calibration
+    )
+    report = build_report(run_dir)
+    data = report.to_dict()
+    assert data["positions"]["unit"] == "m"
+    assert data["positions"]["calibration_id"] == calibration["calibration_id"]
+    assert data["positions"]["check_error_m"] == 0.12
+    assert value(track_of(report, 12)["path_length"]) == pytest.approx(5)
+    assert "check error 0.120 m" in format_summary(report)
+    assert format_summary(report).count("check error") == 1
+    schema("report").validate(data)
 
 
 def test_activity_thresholds_are_configurable(tmp_path):
@@ -347,7 +402,7 @@ def test_write_report_replaces_report_json_and_matches_the_schema(tmp_path):
     write_report(run_dir)
     first = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
     schema("report").validate(first)
-    assert first["contract_version"] == "0.7.0"
+    assert first["contract_version"] == "0.8.0"
     write_report(run_dir, params=Params(max_gap=0.2))  # every interval is a gap
     second = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
     assert (
@@ -506,7 +561,7 @@ def test_group_mode_goes_on_after_a_broken_session(tmp_path, capsys):
 
 @pytest.mark.parametrize(
     "args",
-    [["--walking-below", "30"], ["--stationary-below", "500"],
+    [["--stationary-below", "40", "--walking-below", "30"],
      ["--stationary-below", "100", "--walking-below", "100"], ["--min-intervals", "0"]],
 )  # fmt: skip
 def test_nonsense_thresholds_are_refused(tmp_path, args):
