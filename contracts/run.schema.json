@@ -1,43 +1,48 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:pointr:contracts:0.3.0:run",
+  "$id": "urn:pointr:contracts:0.4.0:run",
   "title": "run.json",
   "description": "DATA_CONTRACTS.md section 3. Missing values are null, never 0.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "contract_version", "run_id", "session_id", "mode", "input", "detector", "tracker",
-    "runtime", "started_at", "ended_at", "counts"
+    "health", "runtime", "started_at", "t0_wall", "ended_at", "counts"
   ],
   "properties": {
-    "contract_version": {"const": "0.3.0"},
+    "contract_version": {"const": "0.4.0"},
     "run_id": {"$ref": "#/$defs/uuid4"},
     "session_id": {"$ref": "#/$defs/uuid4"},
     "mode": {"enum": ["live", "replay"]},
     "input": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "ref", "sha256"],
+      "required": ["kind", "ref", "sha256", "requested_width", "requested_height"],
       "properties": {
         "kind": {"enum": ["camera", "stream", "file"]},
         "ref": {"type": "string", "minLength": 1},
-        "sha256": {"anyOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]}
+        "sha256": {"anyOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},
+        "requested_width": {"type": ["integer", "null"], "minimum": 1},
+        "requested_height": {"type": ["integer", "null"], "minimum": 1}
       }
     },
     "detector": {
-      "type": "object",
+      "type": ["object", "null"],
+      "description": "null when detection is off (--no-detect)",
       "additionalProperties": false,
-      "required": ["name", "variant", "weights", "package_version", "threshold"],
+      "required": ["name", "variant", "weights", "package_version", "threshold", "det_size"],
       "properties": {
         "name": {"type": "string", "minLength": 1},
         "variant": {"type": "string", "minLength": 1},
         "weights": {"type": "string", "minLength": 1},
         "package_version": {"type": "string", "minLength": 1},
-        "threshold": {"type": "number", "minimum": 0, "maximum": 1}
+        "threshold": {"type": "number", "minimum": 0, "maximum": 1},
+        "det_size": {"type": "integer", "minimum": 1}
       }
     },
     "tracker": {
-      "type": "object",
+      "type": ["object", "null"],
+      "description": "null when detection is off (--no-detect)",
       "additionalProperties": false,
       "required": ["name", "package", "package_version", "params"],
       "properties": {
@@ -47,26 +52,59 @@
         "params": {"type": "object"}
       }
     },
+    "health": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lost_reads", "lost_secs", "frozen_diff", "frozen_secs", "dark_level", "dark_secs"
+      ],
+      "properties": {
+        "lost_reads": {"type": "integer", "minimum": 1},
+        "lost_secs": {"type": "number", "exclusiveMinimum": 0},
+        "frozen_diff": {"type": "number", "exclusiveMinimum": 0},
+        "frozen_secs": {"type": "number", "exclusiveMinimum": 0},
+        "dark_level": {"type": "number", "exclusiveMinimum": 0},
+        "dark_secs": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
     "runtime": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["python", "platform", "device"],
+      "required": ["python", "platform", "device", "packages"],
       "properties": {
         "python": {"type": "string", "pattern": "^3\\.\\d+\\.\\d+"},
         "platform": {"type": "string", "minLength": 1},
-        "device": {"type": "string", "pattern": "^(cpu|cuda:\\d+)$"}
+        "device": {
+          "type": ["string", "null"],
+          "pattern": "^(cpu|cuda:\\d+)$",
+          "description": "null when detection is off (--no-detect)"
+        },
+        "packages": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["opencv", "numpy", "torch", "supervision"],
+          "properties": {
+            "opencv": {"type": ["string", "null"], "minLength": 1},
+            "numpy": {"type": ["string", "null"], "minLength": 1},
+            "torch": {"type": ["string", "null"], "minLength": 1},
+            "supervision": {"type": ["string", "null"], "minLength": 1}
+          }
+        }
       }
     },
     "started_at": {"$ref": "#/$defs/utc"},
+    "t0_wall": {"anyOf": [{"$ref": "#/$defs/utc"}, {"type": "null"}]},
     "ended_at": {"anyOf": [{"$ref": "#/$defs/utc"}, {"type": "null"}]},
     "counts": {
-      "type": "object",
+      "type": ["object", "null"],
+      "description": "null until the run ends",
       "additionalProperties": false,
-      "required": ["captured", "processed", "dropped", "rec_dropped"],
+      "required": ["captured", "processed", "dropped", "unprocessed", "rec_dropped"],
       "properties": {
         "captured": {"type": "integer", "minimum": 0},
         "processed": {"type": "integer", "minimum": 0},
         "dropped": {"type": "integer", "minimum": 0},
+        "unprocessed": {"type": "integer", "minimum": 0},
         "rec_dropped": {
           "type": ["integer", "null"],
           "minimum": 0,
