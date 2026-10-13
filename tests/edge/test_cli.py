@@ -146,7 +146,7 @@ def test_model_load_failure_is_an_error_event(monkeypatch):
         def open(self):
             raise AssertionError("the source must not open before the model loads")
 
-    def no_network(args):
+    def no_network(args, device):
         raise RuntimeError("weights download failed")
 
     printed = []
@@ -158,6 +158,49 @@ def test_model_load_failure_is_an_error_event(monkeypatch):
     assert ev.kind == "error"
     assert ev.t_mono is None  # before any run's t0 (D-014)
     assert "model load failed" in ev.detail and "weights download failed" in ev.detail
+
+
+def fake_gpu(monkeypatch, available: bool) -> None:
+    import torch
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: available)
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda index: "Fake RTX 9000")
+
+
+@pytest.mark.parametrize(
+    "requested,available,expected",
+    [
+        ("auto", True, ("cuda:0", "Fake RTX 9000")),
+        ("auto", False, ("cpu", None)),
+        ("cpu", True, ("cpu", None)),
+        ("cpu", False, ("cpu", None)),
+        ("cuda", True, ("cuda:0", "Fake RTX 9000")),
+    ],
+)
+def test_resolve_device(monkeypatch, requested, available, expected):
+    fake_gpu(monkeypatch, available)
+    assert cli.resolve_device(requested) == expected
+
+
+def test_forced_cuda_without_a_gpu_exits_with_a_clear_error(monkeypatch, capsys):
+    fake_gpu(monkeypatch, False)
+    with pytest.raises(RuntimeError, match="--device cuda but torch .* cannot use a CUDA GPU"):
+        cli.resolve_device("cuda")
+
+    def never(*args):
+        raise AssertionError("must stop before the model load")
+
+    monkeypatch.setattr(cli, "load_perception", never)
+    assert cli.main(["--source", "0", "--device", "cuda"]) == EXIT_CAPTURE_ERROR != 0
+    err = capsys.readouterr().err
+    assert "error: --device cuda" in err and "Traceback" not in err
+
+
+def test_no_detect_ignores_an_unusable_device(monkeypatch, clips, capsys):
+    fake_gpu(monkeypatch, False)
+    code = cli.main(["--source", str(clips["moving"]), "--device", "cuda", "--no-detect"])
+    assert code == 0
+    assert "device:" not in capsys.readouterr().out
 
 
 def test_cli_prints_the_size_the_camera_delivers(monkeypatch, capsys):

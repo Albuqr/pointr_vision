@@ -200,6 +200,8 @@ BROKEN = {
         (("health", "lost_reads"), 0),
         (("health", "extra"), 1),
         (("runtime", "device"), "cuda"),
+        (("runtime", "gpu"), DELETE),
+        (("runtime", "gpu"), ""),
         (("runtime", "packages"), DELETE),
         (("runtime", "packages", "torch"), ""),
         (("runtime", "packages", "extra"), "1"),

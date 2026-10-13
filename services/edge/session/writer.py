@@ -30,7 +30,7 @@ from services.edge.session.types import (
     SessionMeta,
 )
 
-CONTRACT_VERSION = "0.4.0"
+CONTRACT_VERSION = "0.5.0"
 FRAMES_COLUMNS = [
     "seq", "t_recv", "t_proc_start", "t_proc_end", "app_delay_ms",
     "n_detections", "n_tracks", "dropped_total",

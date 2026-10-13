@@ -82,8 +82,26 @@ class OneTrackPerDetection:
 
 def run_main(monkeypatch, out: Path, *args: str, detector=None) -> int:
     if detector is not None:
-        monkeypatch.setattr(cli, "load_perception", lambda a: (detector, OneTrackPerDetection()))
+        monkeypatch.setattr(cli, "load_perception", lambda a, d: (detector, OneTrackPerDetection()))
     return cli.main([*args, "--out", str(out)])
+
+
+def test_gpu_name_is_printed_and_recorded(monkeypatch, tmp_path, clips, capsys):
+    """--device auto on a CUDA machine: the GPU name is on the console and in run.json."""
+    import torch
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda index: "Fake RTX 9000")
+    out = tmp_path / "sessions"
+    code = run_main(
+        monkeypatch, out, "--source", str(clips["moving"]), "--link", "file",
+        detector=EvenFrameDetector(),
+    )  # fmt: skip
+    assert code == 0
+    assert "device: cuda:0 (Fake RTX 9000)" in capsys.readouterr().out
+    _, run, _, _ = session_files(out)
+    validate("run", run)
+    assert run["runtime"]["device"] == "cuda:0" and run["runtime"]["gpu"] == "Fake RTX 9000"
 
 
 def test_fixture_clip_produces_valid_files(monkeypatch, tmp_path, clips):
@@ -213,7 +231,8 @@ def run_meta(ref: str = "fake", kind: str = "file") -> RunMeta:
         None,
         {"lost_reads": 30, "lost_secs": 2.0, "frozen_diff": 0.5, "frozen_secs": 2.0,
          "dark_level": 20.0, "dark_secs": 1.0},
-        {"python": "3.11.9", "platform": "test", "device": None, "packages": packages},
+        {"python": "3.11.9", "platform": "test", "device": None, "gpu": None,
+         "packages": packages},
         "2026-10-13T12:00:00Z",
     )  # fmt: skip
 
