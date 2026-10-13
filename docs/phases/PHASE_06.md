@@ -35,5 +35,13 @@ Q-03 (frontend stack) and Q-07 (which personal fields are kept).
 | A5 | API endpoints return the right status codes for valid and invalid input | integration |
 | A6 | Register a team and two players in the UI, run a session, see it in the list with its report | manual |
 
+## Pulled-forward Studio/calibration acceptance
+For the v0 Studio and part 5b calibration scope approved in D-025, calibration point
+selection, fit review, and save remain a manual browser acceptance check. The current UI
+toolchain has build and lint only; pytest intentionally needs neither Node nor a browser.
+There is no browser automation framework in the repo. Adding one would add and maintain
+new development dependencies and a browser runtime, so browser-flow automation is deferred
+until explicitly approved. API and backend tests do not claim to cover UI interactions.
+
 ## Gate reviewers
 `code-reviewer`, `test-auditor`, `contract-guardian`.

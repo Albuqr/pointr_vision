@@ -607,6 +607,35 @@ difference to preview. The laptop webcam was unavailable in the dev environment,
 comparison on hardware before accepting the app part.
 **Status.** Accepted for v0-app; review and hardware checks pending.
 
+## D-025 · 2026-10-13 · Visual court calibration and contract 0.8.0
+**Context.** Part 5b brings phase 10 visual calibration forward into Pointr Studio. The current
+report already accepts a `PositionMap`, so calibrated movement can preserve its report algorithm
+while changing coordinate units.
+**Decision.** Fit an image-to-court homography from at least four calibration points only; at
+least two separate check points measure held-out residuals and never participate in fitting.
+Coordinates use an origin at a court corner, x follows court length, and y follows court width.
+The default model is a 28 x 15 m FIBA court; measured custom dimensions and explicit custom
+landmarks are supported. Use installed OpenCV `cv2.findHomography` with RANSAC. Per-point errors
+are Euclidean metres; report calibration mean and check mean/max separately. The default allowed
+check mean is 0.5 m. “Save anyway” records a forced calibration only when minimum point counts
+are met. Calibration JSON and its exact raw audit JPEG are user data outside the repository.
+
+Contract **0.8.0** adds calibration references/check errors to session and run metadata, calibrated
+position fields and an `in_court` flag to tracks.csv, provenance to report positions, and a schema
+for calibration files. Calibrated reports use metres and m/s, with default activity thresholds
+0.5 and 2.5 m/s; uncalibrated reports stay in pixels. The live preview overlays projected court
+lines. A capture-size mismatch refuses recording with a clear camera-specific error.
+
+The Calibration screen is redesigned with the feature: clear recording/camera state, a guided
+step sequence, a side-by-side image/court workspace, and readable inline errors. A restrained
+court-green palette with warm amber actions fits use beside a live camera in a bright gym. No new
+UI dependencies.
+**Status.** Implementation and automated gates complete on `v0-calibration`; independent reviews
+and the hardware acceptance check are pending. D-025 explicitly approves one bounded scope
+exception: phase 06 local Studio and phase 10 visual calibration are pulled forward together as
+the v0 Studio/calibration deliverable; this does not formally close phase 03 or any intervening
+phase.
+
 ## D-023 · 2026-10-13 · v0 movement report per person, contract 0.7.0
 **Context.** Tonight's recordings need a readable result per camera. The processing rate on
 the dev CPU is low and uneven (0.35 to about 2.4 fps), so a track has few, unevenly spaced

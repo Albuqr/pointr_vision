@@ -89,6 +89,11 @@ python -m services.app --out C:/pointr_sessions
 The app binds to `127.0.0.1:8765` and opens the browser. The command-line camera modes
 remain available as a fallback:
 
+Calibrate each fixed camera in Studio before using metre-based positions and speeds. For the
+CLI fallback, pass its saved calibration JSON with `--calibration FILE`; the capture resolution
+must match the saved image size. See `docs/RUNBOOK_TONIGHT.md` for point roles and measurement
+guidance.
+
 To develop the frontend, install Node 22.12+ and run `npm ci`, `npm run build`, and
 `npm run lint` from `services/app/ui`. Node is not a runtime prerequisite.
 
@@ -96,6 +101,7 @@ To develop the frontend, install Node 22.12+ and run `npm ci`, `npm run build`, 
 python -m services.edge.main --source 1 --link usb --preview         # detect + track
 python -m services.edge.main --source 1 --link usb --benchmark 120   # 2-minute baseline
 python -m services.edge.main --source 1 --link usb --preview --no-detect   # capture only
+python -m services.edge.main --source 1 --link usb --calibration C:/path/camera.json
 python -m services.edge.main --help
 ```
 

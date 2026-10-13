@@ -55,3 +55,5 @@ phase it might belong to.
 | `PHASES.md` still says phase 03 is current while v0 report/multicam work (D-022, D-023) is PHASE_05/06 material; update the phase index when 03 closes | code-reviewer, v0 report gate | 03 |
 | Redact URL userinfo in camera CRUD responses/UI, and redact or genericize camera-test diagnostics so stream credentials never reach a browser | security-reviewer, v0-app | 06 |
 | Implement local TeamRepo, PlayerRepo and SessionRepo CRUD with phase-06 registration rules; explicitly excluded from the pulled-forward Pointr Studio v0 scope | code-reviewer, v0-app scope review | 06 |
+| Add lens-distortion correction only if calibration check residuals show distortion dominates the error across the visible floor | part 5b calibration evidence | 05b |
+| Add browser-level automation for Studio calibration point selection, fit review, and save when a browser test framework and its dependency/runtime cost are approved | test-auditor, v0-calibration | 10 |

@@ -66,6 +66,31 @@ the cameras in **Cameras**, then start/stop the group in **Record**. Closing the
 does not stop a recording. Ctrl+C in the app terminal stops all cameras cleanly. The CLI
 commands below remain the fallback when the UI is unavailable.
 
+Before collecting distances or speeds, calibrate each camera in **Calibration**. Mount each
+phone first and do not move it afterward. Choose the camera and court size, capture a frame,
+then pair floor landmarks spread across the visible area. Use at least four fit points and two
+separate held-out check points; confirm a known distance with a tape measure. Check error is
+reported in metres, and saving above the configured limit requires **Save anyway**. Recalibrate
+if the camera moved. Positions are invalid while a player is in the air because the box
+bottom-centre is not on the floor. A saved calibration is applied automatically on recording;
+the session report states whether positions are in metres or pixels.
+
+To use the CLI instead, pass the saved JSON explicitly with `--calibration FILE`. The saved
+image dimensions must match the capture resolution.
+
+To measure HTTP-preview overhead on the same PC and source, run two matched 60-second CLI
+benchmarks, one without preview and one with the off-thread preview encoder:
+
+```bash
+python -m services.edge.main --source 0 --link builtin --benchmark 60 --out C:/pointr_sessions
+python -m services.edge.main --source 0 --link builtin --benchmark 60 --http-preview 0 --out C:/pointr_sessions
+```
+
+Compare the `benchmark:` processed FPS, app delay, and drops printed for each run; the second
+line explicitly says `preview on`. Repeat both runs if their capture conditions differ. The
+session reports preserve the resulting measured rates and units; do not claim a preview cost
+without the matched measurements.
+
 Use the laptop webcam first if no phone is connected yet (`--source 0 --link builtin`).
 
 ```bash

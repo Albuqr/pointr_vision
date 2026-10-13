@@ -2,6 +2,12 @@
 
 **Current phase: 03 (session and logging): v0 core built ahead of 02b (D-020); gate, A6, A7 and report pending. 02b stays open.**
 
+**Approved scope exception (D-025):** Part 5a pulls the local Studio shell from phase 06
+forward, and part 5b pulls visual calibration from phase 10 forward into that app. This is
+one approved, bounded v0 deliverable, not a claim that intervening phases are complete or
+that phase 03 is formally closed. Keep work within Studio and per-camera calibration; the
+explicitly excluded phase work remains deferred.
+
 Each phase adds one layer behind an interface and ends with a gate (`GATES.md`). Phases
 00-05 are the first delivery from scope v2: the live pipeline working before the first
 structured test with one person. Later phases follow the scope's progression.
