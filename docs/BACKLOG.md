@@ -5,6 +5,7 @@ phase it might belong to.
 
 | Item | Raised in | Possible phase |
 |---|---|---|
+| Part 4b test: two 60 s laptop-webcam runs at ~2.2 fps with the same walking script produced 3 tracks each at 1 s and 4 s lost-track settings; even a 1.0 s exit at 4 s produced a new ID because low-fps returning boxes miss IoU predictions. Keep 1 s for tonight; investigate appearance-based re-identification (BoT-SORT/DeepSORT with ReID) and retest the lost-track setting at GPU frame rates | Part 4b hardware comparison | 02b / 11 |
 | Add `detections.csv` with raw detections so offline tracking can be rerun with different tracker settings; current `tracks.csv` contains only tracked outputs, so the raw detections cannot be reconstructed | v0 tracker tuning | 04 / later |
 | Cloud recording analysis service: user uploads a recorded video, a cloud GPU runs the pipeline as a replay and returns runs and reports. No real time, no local hardware needed. Possible separate product offering. Not the focus. See D-005 | Architecture review, 2026-10-07 | After 09, optional |
 | ARCHITECTURE §3 lists `tests/edge/ sync_agent/ api/ e2e/`; not created (git does not track empty dirs). Create each when its first test lands | code-reviewer, phase 00 gate | 01+ |
