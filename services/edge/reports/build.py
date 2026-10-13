@@ -368,6 +368,15 @@ def caveats(positions: PositionMap, params: Params, s: SessionStats, notes: list
         " gets a new ID, and short tracks may be false positives",
         "Detections and tracks are not validated against ground truth",
     ]
+    if positions.calibrated:
+        error = getattr(positions, "check_error_m", None)
+        out.insert(
+            1,
+            f"Calibration {getattr(positions, 'calibration_id', None) or 'unknown'}: mean error "
+            f"on held-out check points "
+            f"{f'{error:.3f} m' if error is not None else 'not recorded'}; points on or beyond "
+            "the camera's horizon have no position and are excluded",
+        )
     fps = s.processed_fps.value
     if fps is not None and fps < LOW_FPS:
         median = s.frame_interval_median.value
