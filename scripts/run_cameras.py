@@ -32,6 +32,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))  # run as a script, `services` must import without an install
 
 from services.edge.perception.detector import DET_SIZE_MULTIPLE  # noqa: E402
+from services.edge.reports.build import (  # noqa: E402
+    TABLE_HEADER,
+    build_report,
+    run_dirs,
+    table_row,
+)
 from services.edge.session.types import CAMERA_ID_RE  # noqa: E402
 from services.edge.session.writer import redact  # noqa: E402
 
@@ -357,7 +363,21 @@ class Launcher:
             if c.camera_id not in started
         ]  # a Ctrl+C during the staggered start
         self.say(format_table(rows))
+        if reports := self.report_rows():
+            self.say(format_table(reports, REPORT_HEADER, "report (per camera, from the files):"))
         return 0 if all(r[2] in OK_STATUSES and r[5] in ("0", "-") for r in rows) else 1
+
+    def report_rows(self) -> list[tuple[str, ...]]:
+        """One row per camera that has a session: its report, built from its files."""
+        rows = []
+        for child in self.children:
+            if child.session_dir is None:
+                continue
+            try:
+                rows.append(table_row(build_report(run_dirs(child.session_dir)[-1])))
+            except (OSError, ValueError, KeyError, IndexError):
+                rows.append((child.cam.camera_id, *["n/a"] * (len(REPORT_HEADER) - 1)))
+        return rows
 
     def summary(self, child: Child) -> tuple[str, str, str, str, str, str]:
         """camera_id, session folder, final status, processed fps, failed reads, error events."""
@@ -427,14 +447,19 @@ def processed_fps(session_dir: Path) -> str:
         return "-"
 
 
-def format_table(rows: list[tuple[str, ...]]) -> str:
-    header = (
-        "camera_id", "session folder", "final status", "processed fps", "failed reads", "errors"
-    )  # fmt: skip
+RESULT_HEADER = (
+    "camera_id", "session folder", "final status", "processed fps", "failed reads", "errors"
+)  # fmt: skip
+REPORT_HEADER = TABLE_HEADER
+
+
+def format_table(
+    rows: list[tuple[str, ...]], header: tuple[str, ...] = RESULT_HEADER, title: str = "result:"
+) -> str:
     table = [header, *rows]
     widths = [max(len(r[i]) for r in table) for i in range(len(header))]
     lines = ["  ".join(cell.ljust(w) for cell, w in zip(r, widths, strict=True)) for r in table]
-    return "\n".join(f"[launcher] {line}" for line in ["result:", *lines])
+    return "\n".join(f"[launcher] {line}" for line in [title, *lines])
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:

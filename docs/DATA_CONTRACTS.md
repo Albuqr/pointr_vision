@@ -1,6 +1,6 @@
 # Data contracts
 
-Contract version: **0.6.0**. Any change bumps the version (minor for additive fields, major
+Contract version: **0.7.0**. Any change bumps the version (minor for additive fields, major
 for removals or meaning changes) and needs a `DECISIONS.md` entry. JSON Schemas in
 `contracts/` are written from this file and tests check them against it (D-009).
 
@@ -21,7 +21,7 @@ sessions/<folder>/         <camera_id>_<session_id>, or <session_id> without a c
     run.json
     frames.csv
     tracks.csv
-    report.json          (phase 5)
+    report.json          (section 8)
   video.mp4              (phase 4, raw, no annotations)
 ```
 
@@ -41,7 +41,7 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
 
 ```json
 {
-  "contract_version": "0.6.0",
+  "contract_version": "0.7.0",
   "session_id": "uuid",
   "device_id": "uuid",
   "camera_id": "cam1 | null",
@@ -82,7 +82,7 @@ Event kinds: `source_open_failed`, `source_lost`, `source_recovered`,
 
 ```json
 {
-  "contract_version": "0.6.0",
+  "contract_version": "0.7.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "mode": "live | replay",
@@ -196,3 +196,100 @@ Response: `{"accepted": [{"id": "...", "server_seq": 123}], "rejected": [{"id": 
 Conflict rule for registrations: highest `updated_at` wins; ties broken by `device_id`.
 Session data is append-only; a repeated `(session_id, run_id, part_no)` with the same sha256
 is accepted as a no-op, with a different sha256 is rejected.
+
+## 8. `report.json`
+
+Written to `runs/<run_id>/report.json` at the end of a session and by
+`python -m services.edge.report` (v0 report, D-023). It is computed only from the run's own
+files (`session.json`, `run.json`, `frames.csv`, `tracks.csv`); rerunning it replaces the file.
+One report per run, one per camera: there is no fusion across cameras.
+
+```json
+{
+  "contract_version": "0.7.0",
+  "run_id": "uuid",
+  "session_id": "uuid",
+  "camera_id": "cam1 | null",
+  "group_id": "token | null",
+  "generated_at": "2026-10-13T18:46:00Z",
+  "positions": {"unit": "px", "point": "bottom_centre", "calibrated": false},
+  "params": {
+    "max_gap": {"value": 1.0, "unit": "s"},
+    "smooth_window": {"value": 3, "unit": "samples"},
+    "min_valid_intervals": {"value": 2, "unit": "intervals"},
+    "short_track": {"value": 1.0, "unit": "s"},
+    "stationary_below": {"value": 40.0, "unit": "px/s"},
+    "walking_below": {"value": 400.0, "unit": "px/s"}
+  },
+  "session": {
+    "status": "running | ended | interrupted | error",
+    "detection": true,
+    "duration": {"value": 31.2, "unit": "s"},
+    "n_captured": 120, "n_processed": 59, "n_dropped": 61, "n_unprocessed": 0,
+    "processed_fps": {"value": 1.9, "unit": "frames/s"},
+    "drop_rate": {"value": 50.8, "unit": "percent"},
+    "coverage": {"value": 96.6, "unit": "percent"},
+    "n_tracks": 5, "n_short_tracks": 2,
+    "frame_interval_median": {"value": 0.52, "unit": "s"},
+    "frame_interval_max": {"value": 1.4, "unit": "s"},
+    "app_delay_p50": {"value": 520.0, "unit": "ms"},
+    "app_delay_p95": {"value": 640.0, "unit": "ms"},
+    "app_delay_max": {"value": 700.0, "unit": "ms"},
+    "events": [{"kind": "interrupted", "t_wall": "2026-10-13T18:45:59Z",
+                "t_since_t0": {"value": 30.9, "unit": "s"}, "detail": "Ctrl+C"}]
+  },
+  "tracks": [
+    {
+      "track_id": 3, "first_seen": {"value": 2.0, "unit": "s"},
+      "last_seen": {"value": 9.5, "unit": "s"}, "visible": {"value": 7.5, "unit": "s"},
+      "n_samples": 12, "median_sample_interval": {"value": 0.5, "unit": "s"},
+      "n_valid_intervals": 10, "n_gaps_excluded": 1, "gap_time": {"value": 2.0, "unit": "s"},
+      "valid_time": {"value": 5.0, "unit": "s"},
+      "path_length": {"value": 800.0, "unit": "px"},
+      "mean_speed": {"value": 160.0, "unit": "px/s"},
+      "max_speed": {"value": 300.0, "unit": "px/s"},
+      "activity": {"stationary": {"value": 10.0, "unit": "percent"},
+                   "walking": {"value": 90.0, "unit": "percent"},
+                   "running": {"value": 0.0, "unit": "percent"}},
+      "short": false
+    }
+  ],
+  "caveats": ["positions are pixels, not calibrated"]
+}
+```
+
+**Every measurement is `{"value", "unit"}`.** The unit comes from the position function
+(pixels now, metres once calibration supplies one): speeds are `<unit>/s`, so the report code
+does not change with calibration. A `value` of `null` (never `0`) carries a `reason`, for example
+`single sample` or `fewer than 2 valid intervals`. Counts are plain integers named `n_*`.
+Percentages are 0-100 with unit `percent`.
+
+- **Position** of a person in a frame is the bottom-centre of the track's box,
+  `((x1 + x2) / 2, y2)`, in the position function's unit. A sample is that point at the frame's
+  `t_recv` (frames.csv, joined on `seq`; tracks.csv has no time of its own).
+- **Smoothing.** Per track, positions are smoothed with a moving median of `smooth_window`
+  samples (default 3), applied separately to x and y, within runs of consecutive samples at most
+  `max_gap` apart. The window is symmetric and shrinks to 1 at the ends of a run, so the first and
+  last sample of a run stay raw.
+- **Intervals.** An interval is a pair of consecutive samples of one track. It is valid when
+  its length is at most `max_gap` seconds (default 1.0; `--max-gap`). Longer ones are excluded
+  from path length, speed and activity and counted in `n_gaps_excluded` / `gap_time`.
+  `path_length` is the sum of the valid intervals' straight-line distances (so it excludes the
+  gaps and underestimates a curved path), `null` when there is no valid interval.
+  `mean_speed` is `path_length / valid_time`; `max_speed` is the largest interval speed. Both are
+  `null` with a reason when there are fewer than `min_valid_intervals` (default 2) valid intervals.
+- **Activity** is the share of `valid_time` spent below `stationary_below` (stationary), below
+  `walking_below` (walking) or above (running), by interval speed. The thresholds are in the
+  position unit per second; the defaults for pixels are placeholders that depend on camera
+  distance and angle, hence the caveat. `null` with a reason when there is no valid interval.
+- **Session level.** `duration` is `run.json` `t0_wall` to `ended_at` (else the last processed
+  frame's time). `processed_fps` and the app delay use the benchmark's definitions (D-019,
+  D-020); `drop_rate = n_dropped / n_captured`; `coverage` is the share of processed frames with
+  at least one detection (`null` when detection was off); `n_short_tracks` counts tracks
+  visible (first to last sample) for less than `short_track` seconds, likely fragments or false
+  positives. `n_captured`, `n_dropped` and `n_unprocessed` are `null` while `run.json` has no
+  counts (a run that did not end). `events` lists every `session.json` event, `t_since_t0`
+  being its `t_mono`.
+- **`caveats`** (at least one) states what is uncalibrated or not validated; it always includes
+  that positions are pixels and that detections and tracks are not validated against ground
+  truth, plus the processing rate of this run when it is low.

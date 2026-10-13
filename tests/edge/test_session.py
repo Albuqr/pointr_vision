@@ -267,6 +267,51 @@ def test_preview_window_is_named_after_the_camera(monkeypatch, tmp_path, clips):
     assert titles == ["Pointr cam7 (q to quit)", None]  # None: the default title
 
 
+def test_report_is_written_when_the_session_ends_and_printed(monkeypatch, tmp_path, clips, capsys):
+    """D-023: report.json beside run.json, valid, with the run's own numbers; summary on stdout."""
+    out = tmp_path / "sessions"
+    code = run_main(
+        monkeypatch, out, "--source", str(clips["moving"]), "--link", "file",
+        detector=EvenFrameDetector(),
+    )  # fmt: skip
+    assert code == 0
+    session, run, frames, _ = session_files(out)
+    [report_path] = out.glob("*/runs/*/report.json")
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    validate("report", report)
+    assert report["run_id"] == run["run_id"] and report["session_id"] == session["session_id"]
+    assert report["session"]["n_processed"] == len(frames) == run["counts"]["processed"]
+    with_people = sum(r["n_detections"] == "1" for r in frames)
+    assert report["session"]["coverage"]["value"] == pytest.approx(100 * with_people / len(frames))
+    assert report["session"]["n_tracks"] == 1  # OneTrackPerDetection: every person is track 1
+    text = capsys.readouterr().out
+    assert "report " in text and "caveats:" in text and "positions in px" in text
+
+
+def test_a_report_failure_never_changes_the_session(monkeypatch, tmp_path, clips, capsys):
+    out = tmp_path / "sessions"
+
+    def boom(run_dir):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(cli, "write_report", boom)
+    assert run_main(monkeypatch, out, "--source", str(clips["moving"]), "--no-detect") == 0
+    session, _, _, _ = session_files(out)
+    assert session["status"] == "ended"
+    assert "warning: report not written: RuntimeError('boom')" in capsys.readouterr().err
+    assert not list(out.glob("*/runs/*/report.json"))
+
+
+def test_report_of_a_no_detect_session(monkeypatch, tmp_path, clips):
+    out = tmp_path / "sessions"
+    assert run_main(monkeypatch, out, "--source", str(clips["moving"]), "--no-detect") == 0
+    [report_path] = out.glob("*/runs/*/report.json")
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    validate("report", report)
+    assert report["session"]["detection"] is False
+    assert report["session"]["coverage"]["value"] is None and report["tracks"] == []
+
+
 # -- the writer on its own -------------------------------------------------------------------
 
 

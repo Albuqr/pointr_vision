@@ -1,0 +1,222 @@
+{
+  "contract_version": "0.7.0",
+  "run_id": "c2b9e6f4-1d3a-4c8e-9f7b-5a0d2e4c6b81",
+  "session_id": "3f1c2a8e-5b7d-4e9a-8c21-6d4f0b9e7a13",
+  "camera_id": "cam1",
+  "group_id": "8d2f6b1e-4c3a-4e7d-9a5b-0f1e2d3c4b5a",
+  "generated_at": "2026-10-07T18:46:00Z",
+  "positions": {
+    "unit": "px",
+    "point": "bottom_centre",
+    "calibrated": false
+  },
+  "params": {
+    "max_gap": {
+      "value": 1.0,
+      "unit": "s"
+    },
+    "smooth_window": {
+      "value": 3,
+      "unit": "samples"
+    },
+    "min_valid_intervals": {
+      "value": 2,
+      "unit": "intervals"
+    },
+    "short_track": {
+      "value": 1.0,
+      "unit": "s"
+    },
+    "stationary_below": {
+      "value": 40.0,
+      "unit": "px/s"
+    },
+    "walking_below": {
+      "value": 400.0,
+      "unit": "px/s"
+    }
+  },
+  "session": {
+    "status": "ended",
+    "detection": true,
+    "duration": {
+      "value": 31.2,
+      "unit": "s"
+    },
+    "n_captured": 120,
+    "n_processed": 59,
+    "n_dropped": 61,
+    "n_unprocessed": 0,
+    "processed_fps": {
+      "value": 1.9,
+      "unit": "frames/s"
+    },
+    "drop_rate": {
+      "value": 50.8,
+      "unit": "percent"
+    },
+    "coverage": {
+      "value": 96.6,
+      "unit": "percent"
+    },
+    "n_tracks": 2,
+    "n_short_tracks": 1,
+    "frame_interval_median": {
+      "value": 0.52,
+      "unit": "s"
+    },
+    "frame_interval_max": {
+      "value": 1.4,
+      "unit": "s"
+    },
+    "app_delay_p50": {
+      "value": 520.0,
+      "unit": "ms"
+    },
+    "app_delay_p95": {
+      "value": 640.0,
+      "unit": "ms"
+    },
+    "app_delay_max": {
+      "value": 700.0,
+      "unit": "ms"
+    },
+    "events": [
+      {
+        "kind": "source_lost",
+        "t_wall": "2026-10-07T18:00:10.250Z",
+        "t_since_t0": {
+          "value": 10.25,
+          "unit": "s"
+        },
+        "detail": "synthetic example"
+      }
+    ]
+  },
+  "tracks": [
+    {
+      "track_id": 3,
+      "first_seen": {
+        "value": 2.0,
+        "unit": "s"
+      },
+      "last_seen": {
+        "value": 9.5,
+        "unit": "s"
+      },
+      "visible": {
+        "value": 7.5,
+        "unit": "s"
+      },
+      "n_samples": 12,
+      "median_sample_interval": {
+        "value": 0.5,
+        "unit": "s"
+      },
+      "n_valid_intervals": 10,
+      "n_gaps_excluded": 1,
+      "gap_time": {
+        "value": 2.0,
+        "unit": "s"
+      },
+      "valid_time": {
+        "value": 5.0,
+        "unit": "s"
+      },
+      "path_length": {
+        "value": 800.0,
+        "unit": "px"
+      },
+      "mean_speed": {
+        "value": 160.0,
+        "unit": "px/s"
+      },
+      "max_speed": {
+        "value": 300.0,
+        "unit": "px/s"
+      },
+      "activity": {
+        "stationary": {
+          "value": 10.0,
+          "unit": "percent"
+        },
+        "walking": {
+          "value": 90.0,
+          "unit": "percent"
+        },
+        "running": {
+          "value": 0.0,
+          "unit": "percent"
+        }
+      },
+      "short": false
+    },
+    {
+      "track_id": 7,
+      "first_seen": {
+        "value": 12.0,
+        "unit": "s"
+      },
+      "last_seen": {
+        "value": 12.0,
+        "unit": "s"
+      },
+      "visible": {
+        "value": 0.0,
+        "unit": "s"
+      },
+      "n_samples": 1,
+      "median_sample_interval": {
+        "value": null,
+        "unit": "s",
+        "reason": "single sample"
+      },
+      "n_valid_intervals": 0,
+      "n_gaps_excluded": 0,
+      "gap_time": {
+        "value": 0.0,
+        "unit": "s"
+      },
+      "valid_time": {
+        "value": 0.0,
+        "unit": "s"
+      },
+      "path_length": {
+        "value": null,
+        "unit": "px",
+        "reason": "single sample"
+      },
+      "mean_speed": {
+        "value": null,
+        "unit": "px/s",
+        "reason": "single sample"
+      },
+      "max_speed": {
+        "value": null,
+        "unit": "px/s",
+        "reason": "single sample"
+      },
+      "activity": {
+        "stationary": {
+          "value": null,
+          "unit": "percent",
+          "reason": "single sample"
+        },
+        "walking": {
+          "value": null,
+          "unit": "percent",
+          "reason": "single sample"
+        },
+        "running": {
+          "value": null,
+          "unit": "percent",
+          "reason": "single sample"
+        }
+      },
+      "short": true
+    }
+  ],
+  "caveats": [
+    "synthetic example: positions are pixels, not calibrated"
+  ]
+}

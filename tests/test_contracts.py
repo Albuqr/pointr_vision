@@ -56,12 +56,12 @@ def doc_example(section: str) -> dict:
     return json.loads(m.group(1))
 
 
-@pytest.mark.parametrize("name", ["session", "run"])
+@pytest.mark.parametrize("name", ["session", "run", "report"])
 def test_example_validates(name):
     validator(name).validate(example(name))
 
 
-@pytest.mark.parametrize("name", ["session", "run"])
+@pytest.mark.parametrize("name", ["session", "run", "report"])
 def test_versions_agree(name):
     v = doc_version()
     assert schema(name)["properties"]["contract_version"]["const"] == v
@@ -194,6 +194,30 @@ BROKEN = {
         (("events", 0, "extra"), 1),
         (("extra",), 1),
     ],
+    "report": [
+        (("contract_version",), "0.6.0"),
+        (("run_id",), DELETE),
+        (("run_id",), "not-a-uuid"),
+        (("camera_id",), "a b"),
+        (("generated_at",), "2026-10-07 18:46:00"),
+        (("positions", "point"), "centre"),
+        (("positions", "calibrated"), "no"),
+        (("caveats",), []),
+        (("extra",), 1),
+        (("params", "max_gap"), 1.0),
+        (("params", "max_gap", "unit"), DELETE),
+        (("session", "status"), "finished"),
+        (("session", "coverage"), 5),
+        (("session", "coverage", "extra"), 1),
+        (("session", "n_captured"), 1.5),
+        (("session", "events", 0, "t_since_t0"), 10),
+        (("tracks", 0, "n_samples"), 0),
+        (("tracks", 0, "extra"), 1),
+        (("tracks", 0, "mean_speed", "value"), None),  # null needs a reason
+        (("tracks", 0, "mean_speed", "reason"), "not null, so no reason"),
+        (("tracks", 1, "mean_speed", "reason"), DELETE),
+        (("tracks", 1, "activity", "walking", "unit"), ""),
+    ],
     "run": [
         (("run_id",), DELETE),
         (("run_id",), UUID1),
@@ -282,3 +306,54 @@ def test_emitted_event_kinds_are_in_contract():
     events = schema("session")["properties"]["events"]["items"]
     assert emitted, "no HealthEvent kinds found"
     assert emitted <= set(events["properties"]["kind"]["enum"])
+
+
+def _resolve(node: dict, root: dict) -> dict:
+    """Follow $ref, and take the object alternative of an anyOf."""
+    while True:
+        if "$ref" in node:
+            node = root["$defs"][node["$ref"].rsplit("/", 1)[1]]
+        elif "anyOf" in node:
+            node = next(n for n in node["anyOf"] if n.get("type") != "null")
+        else:
+            return node
+
+
+def _assert_report_keys(doc_node, schema_node, root, path=()):
+    """The doc's example has exactly the schema's keys, quantities with value and unit."""
+    node = _resolve(schema_node, root)
+    if isinstance(doc_node, dict):
+        if node.get("required") == ["value", "unit"]:  # a quantity
+            assert {"value", "unit"} <= set(doc_node) <= set(node["properties"]), path
+            return
+        assert set(doc_node) == set(node["properties"]) == set(node["required"]), path
+        for key, value in doc_node.items():
+            _assert_report_keys(value, node["properties"][key], root, (*path, key))
+    elif isinstance(doc_node, list) and doc_node and isinstance(doc_node[0], dict):
+        _assert_report_keys(doc_node[0], node["items"], root, path)
+
+
+def test_report_schema_matches_doc():
+    """DATA_CONTRACTS section 8: the example block and the schema have the same keys, and the
+    schema accepts an example with the doc's placeholders replaced by real values."""
+    m = re.search(r"## 8\. `report\.json`.*?```json\n(.*?)```", DOC, re.S)
+    doc = json.loads(m.group(1))
+    _assert_report_keys(doc, schema("report"), schema("report"))
+    fixed = copy.deepcopy(doc)
+    ex = example("report")
+    for key in ("run_id", "session_id", "camera_id", "group_id"):
+        fixed[key] = ex[key]
+    fixed["tracks"][0]["track_id"] = 3
+    fixed["session"]["status"] = "ended"  # the doc lists the alternatives
+    validator("report").validate(fixed)  # the doc's own numbers are valid
+
+
+def test_report_null_quantity_needs_a_reason():
+    v = validator("report")
+    ok = mutate(
+        example("report"),
+        ("tracks", 0, "mean_speed"),
+        {"value": None, "unit": "px/s", "reason": "x"},
+    )
+    v.validate(ok)
+    assert list(v.iter_errors(mutate(ok, ("tracks", 0, "mean_speed", "reason"), DELETE)))
