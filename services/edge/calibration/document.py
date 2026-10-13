@@ -6,7 +6,7 @@ import re
 import uuid
 from pathlib import Path
 
-from services.edge.calibration.homography import _matrix
+from services.edge.calibration.homography import _matrix, check_homography
 
 CONTRACT_VERSION = "0.8.0"
 
@@ -112,6 +112,7 @@ def validate_calibration(document):
             raise ValueError("calibration point residual must be finite and non-negative")
     if document["audit_frame"] != "frame.jpg" or not isinstance(document["forced"], bool):
         raise ValueError("calibration audit frame or forced flag is invalid")
+    check_homography(document["homography_image_to_court"], [p["image_px"] for p in points])
     return document
 
 

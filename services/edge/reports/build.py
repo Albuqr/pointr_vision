@@ -217,13 +217,18 @@ def build_report(
 
     by_track: dict[int, dict[int, Sample]] = defaultdict(dict)  # per seq: one sample each
     no_time = 0
+    no_position = 0
     for r in read_csv(run_dir / "tracks.csv"):
         try:
             seq, tid = int(r["seq"]), int(r["track_id"])
-            x, y = positions((float(r["x1"]) + float(r["x2"])) / 2, float(r["y2"]))
+            xy = positions((float(r["x1"]) + float(r["x2"])) / 2, float(r["y2"]))
         except (TypeError, ValueError, KeyError):
             bad += 1
             continue
+        if xy is None:  # no valid position: not a path point, said in the notes
+            no_position += 1
+            continue
+        x, y = xy
         if seq not in time_of:
             no_time += 1
             continue
@@ -236,6 +241,11 @@ def build_report(
     notes = []
     if bad:
         notes.append(f"{bad} malformed CSV row(s) were skipped")
+    if no_position:
+        notes.append(
+            f"{no_position} track row(s) could not be projected to {positions.unit} (on or beyond "
+            "the horizon of the calibration) and were excluded from path length and speeds"
+        )
     if no_time:
         notes.append(f"{no_time} track row(s) had no matching processed frame and were skipped")
     if seconds_between(run.get("t0_wall"), run.get("ended_at")) is None:

@@ -356,17 +356,20 @@ class FileSessionWriter:
             for o in obs:
                 x1, y1, x2, y2 = o.xyxy
                 if positions:
-                    x_m, y_m = positions((x1 + x2) / 2, y2)
                     calibration_id = positions.calibration_id
                     position_method = "box_bottom_center"
-                    in_court = positions.in_court(x_m, y_m)
+                    xy = positions((x1 + x2) / 2, y2)
+                    if xy is None:  # on or beyond the horizon: no position, never (0, 0)
+                        x_m = y_m = in_court = ""
+                    else:
+                        x_m, y_m = xy
+                        in_court = str(positions.in_court(x_m, y_m)).lower()
                 else:
                     x_m = y_m = calibration_id = position_method = in_court = ""
                 self._tracks.writerow(
                     [seq, o.track_id, _num(x1, 2), _num(y1, 2), _num(x2, 2), _num(y2, 2),
                      _num(o.confidence, 4), _opt(o.state), "", _num(x_m, 4), _num(y_m, 4),
-                     calibration_id, position_method,
-                     str(in_court).lower() if positions else ""]
+                     calibration_id, position_method, in_court]
                 )  # fmt: skip
         elif kind == "event":
             self._session["events"].append(asdict(item[1]))

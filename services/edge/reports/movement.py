@@ -19,7 +19,9 @@ class PositionMap(Protocol):
     stationary_below: float
     walking_below: float
 
-    def __call__(self, x: float, y: float) -> tuple[float, float]: ...
+    def __call__(self, x: float, y: float) -> tuple[float, float] | None:
+        """None when the point has no valid position (calibrated maps only)."""
+        ...
 
 
 @dataclass(frozen=True)

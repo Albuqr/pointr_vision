@@ -160,10 +160,10 @@ One row per **processed** frame, including frames with zero detections.
 | confidence | float/empty | detector confidence if the tracker exposes it |
 | state | str | `observed` or `predicted`, when the tracker exposes it, else empty |
 | athlete_id | uuid/empty | empty until the assignment phase |
-| x_m, y_m | float/empty | projected box bottom-centre in court metres; empty without calibration |
+| x_m, y_m | float/empty | projected box bottom-centre in court metres; empty without calibration, and empty when the point cannot be projected (on or beyond the horizon, or not finite): never 0 |
 | calibration_id | uuid/empty | calibration used for the projection; empty without calibration |
 | position_method | str/empty | `box_bottom_center` when calibrated; empty without calibration |
-| in_court | bool/empty | whether projected point is within court bounds; empty without calibration |
+| in_court | bool/empty | `true` or `false`, lowercase: whether projected point is within court bounds; empty without calibration and for a point that cannot be projected |
 
 Out-of-court points are retained, with `in_court=false`; they are not clamped to court bounds.
 The image point is `((x1 + x2) / 2, y2)`. The position method describes the box estimate,
