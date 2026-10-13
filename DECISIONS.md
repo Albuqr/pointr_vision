@@ -682,3 +682,21 @@ the report cannot change the session's exit code; a launcher report failure is p
 launcher's table is rebuilt from the files with default parameters, not read from `report.json`.
 Rest in BACKLOG.
 **Status.** Accepted; merged to main.
+
+## D-026 · 2026-10-13 · Studio keeps camera errors until the user dismisses them
+
+**Context.** The Studio cleared its error banner on every successful poll (about 1.2 s), so a
+camera failure could be gone before it was read, and a refused start gave one message for the
+whole group.
+**Decision.** Studio holds, per camera and in memory for the current app run, `last_error`
+(plain message, technical detail with credentials masked, timestamp) and the last 50 events,
+newest first, copied from the session files. `/api/status` serves both, so a reload shows the
+same. An error leaves only when the user dismisses it (`DELETE /api/cameras/{id}/error`) or the
+camera next starts. A start is validated before any state changes: a refusal names the camera,
+is recorded for it (`idle_cameras` when it has no process) and leaves the previous group and the
+other cameras as they were. `mask_credentials` (writer.py) hides `user:password@` and secret-looking
+query parameters in free text; the launcher applies it to every child line and failure.
+**Not done.** The Studio status payload is still not in DATA_CONTRACTS.md (it was not before
+this change); no contract version bump because no file or schema changed. The frontend has no
+test runner, so the persistence is tested at the status level. The errors are not written to
+session files, so they do not survive an app restart.
