@@ -449,9 +449,10 @@ def run(args: argparse.Namespace) -> int:
         return open_failed(args.source, e)
 
     info = dataclasses.replace(info, link=args.link)
-    calibration = None
+    calibration = positions = None
     if args.calibration:
         from services.edge.calibration.document import load_calibration, run_calibration
+        from services.edge.calibration.homography import CalibrationPositions
 
         try:
             calibration = load_calibration(args.calibration)
@@ -468,6 +469,7 @@ def run(args: argparse.Namespace) -> int:
                     f"calibration image size {size['width']}x{size['height']} differs from "
                     f"capture size {info.width}x{info.height}"
                 )
+            positions = CalibrationPositions(calibration)
         except (ValueError, OSError) as e:
             source.close()
             print(f"error: calibration cannot be used: {e}", file=sys.stderr)
@@ -504,7 +506,8 @@ def run(args: argparse.Namespace) -> int:
         run = run_meta(args, info, config, detector, tracker, gpu)
         if calibration is not None:
             run = dataclasses.replace(run, calibration=run_calibration(calibration))
-        writer.start(meta, run)
+        # positions only for a calibrated run: an uncalibrated run keeps the two-argument call
+        writer.start(meta, run, positions) if positions else writer.start(meta, run)
     except OSError as e:
         release_ctrl_c(held)
         source.close()

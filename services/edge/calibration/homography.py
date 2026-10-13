@@ -159,6 +159,7 @@ class CalibrationPositions:
         self.walking_below = walking_below
         try:  # a bad matrix must not stop a writer or a report: every point is then invalid
             self._matrix = _matrix(calibration["homography_image_to_court"])
+            check_homography(self._matrix)  # a singular matrix would map every point to one place
         except ValueError:
             self._matrix = None
 

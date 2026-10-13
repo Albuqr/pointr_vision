@@ -20,13 +20,13 @@ from dataclasses import asdict
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
-from services.edge.calibration.homography import CalibrationPositions
 from services.edge.capture.types import utc_now
 from services.edge.perception.types import TrackObs
 from services.edge.session.types import (
     CAMERA_ID_RE,
     GROUP_ID_RE,
     FrameRecord,
+    PositionMap,
     RunCounts,
     RunMeta,
     SessionEvent,
@@ -43,6 +43,8 @@ TRACKS_COLUMNS = [
     "x_m", "y_m", "calibration_id", "position_method", "in_court",
 ]  # fmt: skip
 FLUSH_SECS = 0.5  # flush period; under the contract's "at least once per second"
+METHOD = "box_bottom_center"
+UNPROJECTED_EVENT_SECS = 30.0  # at most one "no metre position" event per this many seconds
 
 
 def redact(ref: str) -> str:
@@ -136,6 +138,10 @@ class FileSessionWriter:
         self.dir: Path | None = None  # <out>/<session_id>, set by start()
         self.error: BaseException | None = None  # why the writer thread stopped, if it failed
         self.lost = 0  # items put after the writer thread stopped
+        self.unprojected = 0  # track rows written without a metre position
+        self._reported_unprojected = 0
+        self._last_unprojected_event: float | None = None
+        self._positions: PositionMap | None = None
         self.status: str | None = None  # final status written by close()
         self._t0: float | None = None
         self._q: queue.Queue = queue.Queue(maxsize)
@@ -148,10 +154,14 @@ class FileSessionWriter:
 
     # -- producers (any thread) --------------------------------------------------------------
 
-    def start(self, meta: SessionMeta, run: RunMeta) -> None:
+    def start(self, meta: SessionMeta, run: RunMeta, positions: PositionMap | None = None) -> None:
         """Create the folders, write session.json and run.json (status running), start the
         thread. Raises OSError when the folder cannot be created; FileExistsError if it
-        exists: a run never writes into another run's folder (A5)."""
+        exists: a run never writes into another run's folder (A5). `positions` projects the
+        rows of a calibrated run and is required exactly when run.calibration is set."""
+        if (positions is None) != (run.calibration is None):
+            raise ValueError("a calibrated run needs positions, and positions need a calibration")
+        self._positions = positions
         # ids reach a folder name: refuse anything that is not a plain token (D-022)
         if meta.camera_id is not None and not CAMERA_ID_RE.fullmatch(meta.camera_id):
             raise ValueError(f"invalid camera_id {meta.camera_id!r}")
@@ -351,26 +361,20 @@ class FileSessionWriter:
             )
         elif kind == "tracks":
             _, seq, obs = item
-            calibration = self._run_doc["calibration"]
-            positions = CalibrationPositions(calibration) if calibration else None
+            changed = False
             for o in obs:
                 x1, y1, x2, y2 = o.xyxy
-                if positions:
-                    calibration_id = positions.calibration_id
-                    position_method = "box_bottom_center"
-                    xy = positions((x1 + x2) / 2, y2)
-                    if xy is None:  # on or beyond the horizon: no position, never (0, 0)
-                        x_m = y_m = in_court = ""
-                    else:
-                        x_m, y_m = xy
-                        in_court = str(positions.in_court(x_m, y_m)).lower()
-                else:
-                    x_m = y_m = calibration_id = position_method = in_court = ""
+                x_m, y_m, calibration_id, position_method, in_court, why = self._position(
+                    (x1 + x2) / 2, y2
+                )
+                if why:
+                    changed |= self._note_unprojected(why)
                 self._tracks.writerow(
                     [seq, o.track_id, _num(x1, 2), _num(y1, 2), _num(x2, 2), _num(y2, 2),
                      _num(o.confidence, 4), _opt(o.state), "", _num(x_m, 4), _num(y_m, 4),
                      calibration_id, position_method, in_court]
                 )  # fmt: skip
+            return changed
         elif kind == "event":
             self._session["events"].append(asdict(item[1]))
             return True
@@ -378,6 +382,47 @@ class FileSessionWriter:
             self._run_doc["t0_wall"] = item[1]
             self._snapshot(self._run_dir / "run.json", self._run_doc)  # also in the final write
         return False
+
+    def _position(self, x: float, y: float) -> tuple:
+        """The five position cells of one row and why the position is empty (or None). Nothing
+        a projection does can stop the writer: an error leaves the position empty."""
+        positions = self._positions
+        if positions is None:
+            return "", "", "", "", "", None
+        try:
+            xy = positions(x, y)
+            if xy is None:
+                return "", "", positions.calibration_id, METHOD, "", "outside the camera's view"
+            in_court = str(bool(positions.in_court(*xy))).lower()
+            return xy[0], xy[1], positions.calibration_id, METHOD, in_court, None
+        except (
+            Exception
+        ) as e:  # a bad homography or a NaN box is a missing position, not a dead run
+            calibration_id = getattr(positions, "calibration_id", "")
+            return "", "", calibration_id, METHOD, "", repr(e)
+
+    def _note_unprojected(self, why: str) -> bool:
+        """Count a row without a position; one event on the first, then at most one per
+        UNPROJECTED_EVENT_SECS. True when session.json changed."""
+        self.unprojected += 1
+        now = time.monotonic()
+        if self._last_unprojected_event is not None and (
+            now - self._last_unprojected_event < UNPROJECTED_EVENT_SECS
+        ):
+            return False
+        self._append_unprojected_event(why)
+        return True
+
+    def _append_unprojected_event(self, why: str) -> None:
+        self._last_unprojected_event = time.monotonic()
+        self._reported_unprojected = self.unprojected
+        detail = (
+            f"{self.unprojected} track row(s) so far have no metre position ({why}); "
+            "x_m, y_m and in_court are left empty"
+        )
+        self._session["events"].append(
+            asdict(SessionEvent(utc_now(), self._rel(), "error", detail))
+        )
 
     def _snapshot(self, path: Path, doc: dict) -> bool:
         """A mid-run JSON write. A failure (file held by OneDrive or an editor) is printed and
@@ -398,6 +443,8 @@ class FileSessionWriter:
     def _finish(self, status: str, counts: RunCounts, ended_at: str) -> None:
         self._frames_f.close()  # CSVs complete before the status says the run ended
         self._tracks_f.close()
+        if self.unprojected > self._reported_unprojected:  # the rate limit hid the final count
+            self._append_unprojected_event("final count for the run")
         self._finish_json(status, counts, ended_at)
 
     def _finish_json(self, status: str, counts: RunCounts, ended_at: str) -> None:

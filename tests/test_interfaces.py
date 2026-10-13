@@ -32,7 +32,7 @@ EXPECTED = {
     Detector: {"detect": ["frame"]},
     Tracker: {"update": ["dets", "frame"]},
     SessionWriter: {
-        "start": ["meta", "run"],
+        "start": ["meta", "run", "positions"],
         "set_t0": ["t0", "t0_wall"],
         "frame": ["rec"],
         "tracks": ["seq", "obs"],

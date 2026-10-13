@@ -79,8 +79,23 @@ class SessionEvent:
 
 
 @runtime_checkable
+class PositionMap(Protocol):
+    """Image point -> court metres for the rows of a calibrated run. Injected into the writer,
+    which does not import the calibration package. A map may return None for a point that
+    cannot be projected, and may raise: the writer leaves the position empty either way."""
+
+    calibration_id: str
+
+    def __call__(self, x: float, y: float) -> tuple[float, float] | None: ...
+
+    def in_court(self, x: float, y: float) -> bool: ...
+
+
+@runtime_checkable
 class SessionWriter(Protocol):
-    def start(self, meta: SessionMeta, run: RunMeta) -> None: ...
+    def start(self, meta: SessionMeta, run: RunMeta, positions: PositionMap | None = None) -> None:
+        """positions is required exactly when run.calibration is set."""
+        ...
 
     def set_t0(self, t0: float, t0_wall: str) -> None:
         """The run's t0 (time.perf_counter()) and its wall clock, once capture has started."""
