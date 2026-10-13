@@ -18,6 +18,8 @@ dependencies = [
     "rfdetr==1.11.2",
     "supervision==0.30.8",
     "trackers==2.6.1",
+    "fastapi==0.143.0",
+    "uvicorn==0.54.0",
 ]
 
 [project.optional-dependencies]
