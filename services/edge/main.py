@@ -7,7 +7,7 @@
 
 ref: a webcam index (0, 1, ...), a stream URL (http, https, rtsp) or an .mp4/.mov file.
 Each frame taken from capture is detected (RF-DETR Nano, person only) and tracked
-(ByteTrack). Once the source opens, the session is logged to DIR/<session_id>/ (default
+(ByteTrack). Once the source opens, the session is logged to DIR/<folder>/ (default
 ./sessions): session.json, runs/<run_id>/run.json, frames.csv, tracks.csv (D-020).
 """
 
@@ -156,7 +156,10 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 def print_event(ev: HealthEvent, t0: float | None) -> None:
     rel = f"+{ev.t_mono - t0:.2f}s" if t0 is not None else "-"
-    print(f"[{ev.t_wall}] {rel} {ev.kind}: {ev.detail}", flush=True)
+    try:
+        print(f"[{ev.t_wall}] {rel} {ev.kind}: {ev.detail}", flush=True)
+    except OSError:  # the launcher that read this pipe is gone: the event still goes to the file
+        pass
 
 
 def resolve_device(requested: str) -> tuple[str, str | None]:
@@ -274,7 +277,10 @@ def ignore_ctrl_c():
     previous handler, or None off the main thread (handlers cannot be set there)."""
 
     def wait(signum, frame):
-        print("stopping, please wait: saving the session", file=sys.stderr, flush=True)
+        try:
+            print("stopping, please wait: saving the session", file=sys.stderr, flush=True)
+        except OSError:  # nobody is reading any more
+            pass
 
     try:
         return signal.signal(signal.SIGINT, wait)
@@ -311,6 +317,14 @@ def stop_on_stdin() -> None:
     """Start a thread that turns any input on stdin, or its end, into Ctrl+C: the launcher's way
     to stop this process, also when the launcher itself dies (D-022). Fires once."""
 
+    if hasattr(signal, "SIGBREAK"):
+        # Ctrl+Break (unlike Ctrl+C) reaches a child in its own process group and would kill it
+        # before it saves: the launcher's stdin is the only stop channel
+        try:
+            signal.signal(signal.SIGBREAK, signal.SIG_IGN)
+        except ValueError:  # not the main thread
+            pass
+
     def watch() -> None:
         try:
             while not stdin_ready():
@@ -321,6 +335,20 @@ def stop_on_stdin() -> None:
         _thread.interrupt_main()  # the same path as Ctrl+C: KeyboardInterrupt in the main thread
 
     threading.Thread(target=watch, name="stdin-stop", daemon=True).start()
+
+
+def hold_ctrl_c(arrived: threading.Event):
+    """Until release_ctrl_c, a Ctrl+C (or interrupt_main) only sets `arrived`. Returns the
+    previous handler, or None off the main thread (handlers cannot be set there)."""
+    try:
+        return signal.signal(signal.SIGINT, lambda signum, frame: arrived.set())
+    except ValueError:
+        return None
+
+
+def release_ctrl_c(previous) -> None:
+    if previous is not None:
+        signal.signal(signal.SIGINT, previous)
 
 
 def link_conflict(kind: str, link: str | None) -> str | None:
@@ -397,6 +425,10 @@ def run(args: argparse.Namespace) -> int:
     py = sys.version.split()[0]
     print(f"versions: python {py}, opencv {cv2.__version__}, numpy {np.__version__}")
 
+    # A stop (Ctrl+C, or the launcher's) between the session folder and the main try would leave
+    # session.json "running": hold it back here and raise it inside the try.
+    stop_early = threading.Event()
+    held = hold_ctrl_c(stop_early)
     writer = FileSessionWriter(args.out)
     try:
         session_id = str(uuid.uuid4())
@@ -405,6 +437,7 @@ def run(args: argparse.Namespace) -> int:
         )
         writer.start(meta, run_meta(args, info, config, detector, tracker, gpu))
     except OSError as e:
+        release_ctrl_c(held)
         source.close()
         print(f"error: cannot write session data under {args.out!r}: {e}", file=sys.stderr)
         return EXIT_CAPTURE_ERROR
@@ -416,8 +449,8 @@ def run(args: argparse.Namespace) -> int:
         return None if t is None or t0 is None or t < t0 else t - t0
 
     def log_event(ev: HealthEvent) -> None:
-        on_event(ev)
         writer.event(SessionEvent(ev.t_wall, rel(ev.t_mono), ev.kind, ev.detail))
+        on_event(ev)
 
     def log_frame(p) -> None:
         if writer.done.is_set():  # nothing is saved any more: end the run (status error)
@@ -461,11 +494,14 @@ def run(args: argparse.Namespace) -> int:
             tracks=None if detector is None else (len(latest.tracks) if latest else 0),
         )
 
+    release_ctrl_c(held)
     status = 0
     session_status = "ended"
     until = time.perf_counter() + args.benchmark if args.benchmark else None
     try:
         # inside the try: a stop request right after "session:" must still end the session
+        if stop_early.is_set():
+            raise KeyboardInterrupt
         capture.start()
         processor.start()
         while capture.t0_wall is None:  # set first thing by the capture thread
@@ -539,6 +575,8 @@ def run(args: argparse.Namespace) -> int:
                 print_benchmark(args.benchmark, info.link, det, device, capture, processor)
         except KeyboardInterrupt:
             status = EXIT_INTERRUPTED
+        except OSError:  # stdout is gone (the launcher died): the files are already saved
+            pass
     if (capture.error or processor.error or writer.status != session_status) and not status:
         status = EXIT_CAPTURE_ERROR
     return status

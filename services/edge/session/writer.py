@@ -1,5 +1,5 @@
 """File SessionWriter (PHASE_03, D-020): session.json, runs/<run_id>/run.json, frames.csv and
-tracks.csv under <out>/<session_id>/ (DATA_CONTRACTS.md sections 1-5).
+tracks.csv under <out>/<folder>/ (DATA_CONTRACTS.md sections 1-5).
 
 One writer thread owns every file handle; the capture, processing and main threads only put
 on a bounded queue. At least once per second the CSVs are flushed and session.json is
@@ -52,11 +52,15 @@ def redact(ref: str) -> str:
 
 
 def _read_device_id(path: Path) -> str | None:
-    """The UUIDv4 in the file, or None if it is missing, unreadable or not a UUIDv4."""
+    """The UUIDv4 in the file, or None if it is missing or not a UUIDv4. OSError (a lock held
+    by OneDrive or an antivirus) propagates: that is not a reason to change the id."""
     try:
         value = path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return None
+    try:
         return value if uuid.UUID(value).version == 4 and str(uuid.UUID(value)) == value else None
-    except (OSError, ValueError):
+    except ValueError:
         return None
 
 
@@ -68,9 +72,16 @@ def device_id(out_dir: Path) -> str:
     winner writes after creating, so a reader may see the file empty for a moment: it retries."""
     path = Path(out_dir) / "device_id"
     path.parent.mkdir(parents=True, exist_ok=True)
+    locked: OSError | None = None
     for _ in range(40):  # 2 s: the winner's write takes microseconds
-        if (value := _read_device_id(path)) is not None:
-            return value
+        try:
+            if (value := _read_device_id(path)) is not None:
+                return value
+            locked = None
+        except OSError as e:  # unreadable for now: wait, never overwrite what we cannot read
+            locked = e
+            time.sleep(0.05)
+            continue
         try:
             with open(path, "x", encoding="utf-8") as f:
                 value = str(uuid.uuid4())
@@ -78,10 +89,14 @@ def device_id(out_dir: Path) -> str:
             return value
         except FileExistsError:
             time.sleep(0.05)  # another process won: read its value on the next turn
+    if locked is not None:
+        raise locked
     # present but never valid (corrupt, or its creator died mid-write): replace it, and say so
     print(f"warning: {path} is not a valid device id; replacing it", file=sys.stderr)
     value = str(uuid.uuid4())
-    path.write_text(value + "\n", encoding="utf-8")
+    tmp = path.with_name(f"device_id.{os.getpid()}.tmp")
+    tmp.write_text(value + "\n", encoding="utf-8")
+    os.replace(tmp, path)
     return value
 
 

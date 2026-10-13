@@ -12,6 +12,8 @@ MODES
   silent   never prints the session line, but still stops on request (a stuck start)
   fail     prints an error on stderr and exits 2 without a session (source_open_failed)
   deaf     prints the session line and never reacts to stop (it has to be killed)
+  noisy    prints a character an ascii console cannot encode, and 120 KB, before session:
+  errored  like ok, but its session.json holds an error event when it stops
 """
 
 import json
@@ -48,7 +50,7 @@ if mode != "deaf":
 session = out / f"{camera_id}_{uuid.uuid4()}"
 run_dir = session / "runs" / str(uuid.uuid4())
 run_dir.mkdir(parents=True)
-doc = {"camera_id": camera_id, "status": "running"}
+doc = {"camera_id": camera_id, "status": "running", "events": []}
 (session / "session.json").write_text(json.dumps(doc))
 rows = ["seq,t_recv,t_proc_start,t_proc_end"] + [
     f"{i},{i * 0.1},{i * 0.1},{i * 0.1 + 0.05}" for i in range(11)
@@ -57,6 +59,9 @@ rows = ["seq,t_recv,t_proc_start,t_proc_end"] + [
 
 if mode == "slow":
     time.sleep(0.5)
+if mode == "noisy":
+    for _ in range(120):
+        print("█" + "x" * 1000, flush=True)
 if mode != "silent":
     print(f"session: {session}", flush=True)
     (out / f"session_{camera_id}").write_text(str(time.time()))  # when the line was printed
@@ -67,6 +72,8 @@ while not stop.wait(0.05):
     print(f"tick {n}", flush=True)
 
 doc["status"] = "interrupted"
+if mode == "errored":
+    doc["events"] = [{"kind": "error", "detail": "capture did not stop in time"}]
 (session / "session.json").write_text(json.dumps(doc))
 (out / f"stopped_{camera_id}").write_text(str(time.time()))
 print(f"session interrupted: {session}", flush=True)

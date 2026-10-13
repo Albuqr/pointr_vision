@@ -70,7 +70,8 @@ def test_versions_agree(name):
 
 
 @pytest.mark.parametrize(
-    "camera_id,group_id", [(None, None), ("cam1", str(uuid.uuid4())), ("a_B-9", "g1")]
+    "camera_id,group_id",
+    [(None, None), ("cam1", str(uuid.uuid4())), ("a_B-9", "g1"), ("x" * 32, "y" * 64)],
 )
 def test_session_camera_and_group_ids_are_optional(camera_id, group_id):
     """null when the session was not started as one camera of a group (D-022)."""
@@ -167,6 +168,8 @@ BROKEN = {
         (("camera_id",), ""),
         (("camera_id",), "x" * 33),
         (("group_id",), DELETE),
+        (("group_id",), ""),
+        (("group_id",), ""),
         (("group_id",), "a/b"),
         (("group_id",), "x" * 65),
         (("started_at",), "2026-10-07 18:00:00"),

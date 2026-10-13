@@ -33,6 +33,7 @@ sys.path.insert(0, str(ROOT))  # run as a script, `services` must import without
 
 from services.edge.perception.detector import DET_SIZE_MULTIPLE  # noqa: E402
 from services.edge.session.types import CAMERA_ID_RE  # noqa: E402
+from services.edge.session.writer import redact  # noqa: E402
 
 LINKS = ("usb", "wifi", "builtin", "file")
 KEYS = {"camera_id", "source", "link", "det_size", "preview"}
@@ -69,6 +70,13 @@ def source_key(source: str) -> str:
             return text
         return f"{parts.hostname}:{port}"
     return text
+
+
+def absolute(source: str) -> str:
+    """A file path becomes absolute here: the children run in the repo folder, not in ours."""
+    if source.isdigit() or urlsplit(source).scheme in DEFAULT_PORTS:
+        return source
+    return str(Path(source).resolve())
 
 
 def parse_config(data: object) -> list[Camera]:
@@ -109,7 +117,7 @@ def parse_config(data: object) -> list[Camera]:
         preview = entry.get("preview")
         if preview is not None and not isinstance(preview, bool):
             raise ConfigError(f"{where}: preview must be true or false")
-        cameras.append(Camera(camera_id, source.strip(), entry["link"], size, preview))
+        cameras.append(Camera(camera_id, absolute(source.strip()), entry["link"], size, preview))
     for a in range(len(cameras)):
         for b in range(a):
             if cameras[a].camera_id == cameras[b].camera_id:
@@ -117,7 +125,7 @@ def parse_config(data: object) -> list[Camera]:
             if source_key(cameras[a].source) == source_key(cameras[b].source):
                 raise ConfigError(
                     f"{cameras[b].camera_id} and {cameras[a].camera_id} use the same source "
-                    f"({cameras[a].source}): a phone serves ONE viewer, so a second reader "
+                    f"({redact(cameras[a].source)}): a phone serves ONE viewer, so a second reader "
                     "would fail"
                 )
     return cameras
@@ -146,16 +154,16 @@ def child_command(cam: Camera, opts: Options) -> list[str]:
     """The command line of one camera's process: services.edge.main with its identity."""
     cmd = [
         sys.executable, "-u", "-m", "services.edge.main",
-        "--source", cam.source, "--link", cam.link,
-        "--camera-id", cam.camera_id, "--group-id", opts.group_id,
-        "--out", opts.out, "--stop-on-stdin",
+        f"--source={cam.source}", f"--link={cam.link}",
+        f"--camera-id={cam.camera_id}", f"--group-id={opts.group_id}",
+        f"--out={opts.out}", "--stop-on-stdin",
     ]  # fmt: skip
     if cam.det_size:
-        cmd += ["--det-size", str(cam.det_size)]
+        cmd.append(f"--det-size={cam.det_size}")
     if cam.preview if cam.preview is not None else opts.preview:
         cmd.append("--preview")
     if opts.device:
-        cmd += ["--device", opts.device]
+        cmd.append(f"--device={opts.device}")
     if opts.no_detect:
         cmd.append("--no-detect")
     return cmd
@@ -199,16 +207,23 @@ class Launcher:
 
     def say(self, text: str) -> None:
         with self._print:
-            print(text, flush=True)
+            try:
+                print(text, flush=True)
+            except UnicodeEncodeError:  # a console code page that lacks a character of the line
+                enc = sys.stdout.encoding or "ascii"
+                print(text.encode(enc, "replace").decode(enc), flush=True)
+            except OSError:  # our own stdout is gone: keep draining the child's pipe
+                pass
 
     # -- start ---------------------------------------------------------------------------------
 
     def spawn(self, child: Child) -> None:
         env = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"}
-        # own process group (session): the terminal's Ctrl+C reaches this launcher only, and
-        # each child is stopped through one path, its stdin
+        # Windows: no console of its own and its own process group, so neither a console event
+        # (Ctrl+C, Ctrl+Break, closing the window) nor the launcher's death kills a child: the
+        # only way to stop one is its stdin, and a dead launcher closes it, which stops it too
         group = (
-            {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+            {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}
             if sys.platform == "win32"
             else {"start_new_session": True}
         )
@@ -236,7 +251,7 @@ class Launcher:
                 child.opened.set()
             elif m := FAILED_READS.search(line):
                 child.failed_reads = m.group(1)
-            self.say(f"[{child.cam.camera_id}] {line}")
+            self.say(f"[{child.cam.camera_id}] {line}")  # never raises: the pipe must be drained
 
     def start_one(self, cam: Camera) -> None:
         """Start one camera and wait until its session exists, it exits, or the timeout."""
@@ -248,7 +263,7 @@ class Launcher:
             child.failure = f"failed to start: {e}"
             self.say(f"[launcher] {cam.camera_id}: {child.failure}")
             return
-        self.say(f"[launcher] starting {cam.camera_id} ({cam.source})")
+        self.say(f"[launcher] starting {cam.camera_id} ({redact(cam.source)})")
         deadline = time.monotonic() + self.start_timeout
         while not child.opened.is_set():
             if not child.running:
@@ -294,14 +309,27 @@ class Launcher:
                 except OSError:
                     pass
 
-    def stop_all(self) -> None:
-        """Stop every child; a further Ctrl+C meanwhile only prints a reminder."""
-        while True:
-            try:
-                self.stop(self.children)
-                return
-            except KeyboardInterrupt:
-                self.say("[launcher] stopping, please wait: the sessions are being saved")
+    def stop_all(self, reason: str | None = None) -> None:
+        """Stop every child. While it runs Ctrl+C and Ctrl+Break only print a reminder: the
+        stop deadline is not restarted and nothing escapes before the table."""
+
+        def remind(signum, frame):  # not self.say: that lock may be held by this very thread
+            print("[launcher] stopping, please wait: the sessions are being saved", flush=True)
+
+        saved = {}
+        for name in ("SIGINT", "SIGBREAK"):
+            if (sig := getattr(signal, name, None)) is not None:
+                try:
+                    saved[sig] = signal.signal(sig, remind)
+                except ValueError:  # not the main thread
+                    pass
+        try:
+            if reason:
+                self.say(reason)
+            self.stop(self.children)
+        finally:
+            for sig, handler in saved.items():
+                signal.signal(sig, handler)
 
     # -- run -----------------------------------------------------------------------------------
 
@@ -310,26 +338,33 @@ class Launcher:
             f"[launcher] group {self.opts.group_id}: "
             + ", ".join(c.camera_id for c in self.cameras)
         )
+        reason = None
         try:
             for cam in self.cameras:  # one at a time: first starts share device_id, RAM spikes
                 self.start_one(cam)
             while any(c.running for c in self.children):
                 time.sleep(0.2)
-            self.say("[launcher] every camera has stopped")
+            reason = "[launcher] every camera has stopped"
         except KeyboardInterrupt:
-            self.say("[launcher] Ctrl+C: stopping every camera")
+            reason = "[launcher] Ctrl+C: stopping every camera"
         finally:
-            self.stop_all()
+            self.stop_all(reason)
         rows = [self.summary(c) for c in self.children]
+        started = {c.cam.camera_id for c in self.children}
+        rows += [
+            (c.camera_id, "-", "not started", "-", "-", "-")
+            for c in self.cameras
+            if c.camera_id not in started
+        ]  # a Ctrl+C during the staggered start
         self.say(format_table(rows))
-        return 0 if all(r[2] in OK_STATUSES for r in rows) else 1
+        return 0 if all(r[2] in OK_STATUSES and r[5] in ("0", "-") for r in rows) else 1
 
-    def summary(self, child: Child) -> tuple[str, str, str, str, str]:
-        """camera_id, session folder, final status, processed fps, failed reads."""
+    def summary(self, child: Child) -> tuple[str, str, str, str, str, str]:
+        """camera_id, session folder, final status, processed fps, failed reads, error events."""
         cam = child.cam.camera_id
         if child.session_dir is None:
             code = child.proc.returncode if child.proc else None
-            return cam, "-", child.failure or f"failed (exit {code})", "-", "-"
+            return cam, "-", child.failure or f"failed (exit {code})", "-", "-", "-"
         status = session_status(child.session_dir)
         if child.killed:
             status += " (killed)"
@@ -339,6 +374,7 @@ class Launcher:
             status,
             processed_fps(child.session_dir),
             child.failed_reads,
+            error_events(child.session_dir),
         )
 
 
@@ -346,7 +382,12 @@ def kill_tree(proc: subprocess.Popen) -> None:
     """Last resort. On Windows a venv's python.exe is a stub that starts the real interpreter
     as its child: killing the stub alone would leave the camera recording, so kill the tree."""
     if sys.platform == "win32":
-        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
+        # full path: Git Bash can lose PATH (CLAUDE.md); a failure still falls through to kill()
+        taskkill = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "taskkill.exe"
+        try:
+            subprocess.run([str(taskkill), "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
+        except OSError:
+            pass
     else:
         try:
             os.killpg(proc.pid, signal.SIGKILL)  # started in its own session: pgid is its pid
@@ -354,6 +395,16 @@ def kill_tree(proc: subprocess.Popen) -> None:
             pass
     proc.kill()  # the stub itself, if taskkill missed it
     proc.wait()
+
+
+def error_events(session_dir: Path) -> str:
+    """How many `error` events session.json holds (a thread that did not stop in time, a dead
+    writer): a session can end `interrupted` and still have lost data."""
+    try:
+        doc = json.loads((session_dir / "session.json").read_text(encoding="utf-8"))
+        return str(sum(e["kind"] == "error" for e in doc["events"]))
+    except (OSError, ValueError, KeyError):
+        return "-"
 
 
 def session_status(session_dir: Path) -> str:
@@ -377,7 +428,9 @@ def processed_fps(session_dir: Path) -> str:
 
 
 def format_table(rows: list[tuple[str, ...]]) -> str:
-    header = ("camera_id", "session folder", "final status", "processed fps", "failed reads")
+    header = (
+        "camera_id", "session folder", "final status", "processed fps", "failed reads", "errors"
+    )  # fmt: skip
     table = [header, *rows]
     widths = [max(len(r[i]) for r in table) for i in range(len(header))]
     lines = ["  ".join(cell.ljust(w) for cell, w in zip(r, widths, strict=True)) for r in table]
@@ -400,14 +453,19 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if hasattr(sys.stdout, "reconfigure"):  # a piped console must not choke on a line
+        sys.stdout.reconfigure(errors="backslashreplace")
     try:
         cameras = load_config(args.config)
     except ConfigError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
-    if hasattr(signal, "SIGBREAK"):  # Ctrl+Break and a closing console window: same as Ctrl+C
+    if hasattr(signal, "SIGBREAK"):  # Ctrl+Break in this console stops us like Ctrl+C
         signal.signal(signal.SIGBREAK, signal.default_int_handler)
-    opts = Options(args.out, str(uuid.uuid4()), args.preview, args.device, args.no_detect)
+    # closing the console window kills the launcher and every camera: sessions stay "running"
+    opts = Options(
+        str(Path(args.out).resolve()), str(uuid.uuid4()), args.preview, args.device, args.no_detect
+    )
     return Launcher(
         cameras, opts, start_timeout=args.start_timeout, stop_timeout=args.stop_timeout
     ).run()

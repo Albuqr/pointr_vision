@@ -171,11 +171,14 @@ def test_example_config_is_valid():
 def test_child_command_carries_the_identity():
     c = rc.Camera("cam1", "http://10.0.0.5:4747/video", "wifi", det_size=320)
     cmd = rc.child_command(c, rc.Options("C:/out", GROUP, preview=True, device="cpu"))
-    arg = lambda flag: cmd[cmd.index(flag) + 1]  # noqa: E731
+    arg = lambda flag: next(c.split("=", 1)[1] for c in cmd if c.startswith(flag + "="))  # noqa: E731
     assert arg("--camera-id") == "cam1" and arg("--group-id") == GROUP
     assert arg("--det-size") == "320" and arg("--device") == "cpu" and arg("--out") == "C:/out"
     assert arg("--source") == "http://10.0.0.5:4747/video" and arg("--link") == "wifi"
     assert "--stop-on-stdin" in cmd and "--preview" in cmd
+    # a value that starts with "-" must not be taken for a flag by the child's argparse
+    odd = rc.child_command(rc.Camera("-cam", "-1", "usb"), rc.Options("o", GROUP))
+    assert "--camera-id=-cam" in odd and "--source=-1" in odd
     off = rc.Camera("cam2", "0", "usb", preview=False)  # the entry wins over --preview
     assert "--preview" not in rc.child_command(off, rc.Options("o", GROUP, preview=True))
     assert "--preview" in rc.child_command(
@@ -445,3 +448,188 @@ def test_device_id_replaces_a_corrupt_file_with_a_warning(tmp_path, capsys):
     assert uuid.UUID(value).version == 4
     assert (tmp_path / "device_id").read_text().strip() == value
     assert "not a valid device id" in capsys.readouterr().err
+
+
+def test_a_stop_during_session_setup_still_ends_the_session(monkeypatch, tmp_path, clips):
+    """The window between the session folder and the main try: held back, then raised inside."""
+    from services.edge.session.writer import FileSessionWriter
+
+    real = FileSessionWriter.start
+
+    def start_then_interrupt(self, meta, run):
+        real(self, meta, run)  # the folder and a "running" session.json exist now
+        _thread.interrupt_main()
+
+    monkeypatch.setattr(FileSessionWriter, "start", start_then_interrupt)
+    out = tmp_path / "out"
+    code = cli.main(["--source", str(clips["moving"]), "--no-detect", "--out", str(out)])
+    assert code == EXIT_INTERRUPTED
+    [folder] = [d for d in out.iterdir() if d.is_dir()]
+    session = json.loads((folder / "session.json").read_text())
+    assert session["status"] == "interrupted" and session["ended_at"]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="SIGBREAK is Windows only")
+def test_a_child_ignores_ctrl_break_so_only_the_launcher_stops_it():
+    """Ctrl+Break reaches a child in its own process group (Ctrl+C does not) and would kill it
+    before it saves."""
+    code = (
+        "import signal; from services.edge.main import stop_on_stdin; stop_on_stdin();"
+        "print(signal.getsignal(signal.SIGBREAK) == signal.SIG_IGN)"
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", code], cwd=ROOT, input="", capture_output=True, text=True, timeout=60
+    )
+    assert done.stdout.strip() == "True", done.stderr
+
+
+def test_relative_paths_are_resolved_against_the_launchers_folder(tmp_path, monkeypatch):
+    """The children run in the repo folder: a relative file source must not follow them."""
+    monkeypatch.chdir(tmp_path)
+    [c] = rc.parse_config([cam("a", "clips/x.mp4", "file")])
+    assert Path(c.source) == tmp_path / "clips" / "x.mp4"
+    cams = rc.parse_config([cam("a", "0"), cam("b", "http://h:1/v"), cam("c", "rtsp://h:2/v")])
+    assert [c.source for c in cams] == ["0", "http://h:1/v", "rtsp://h:2/v"]
+
+
+def test_a_line_the_console_cannot_encode_does_not_kill_the_reader(tmp_path, monkeypatch):
+    import io
+
+    lau = launcher(tmp_path, {"cam1": "ok"})
+    monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(io.BytesIO(), encoding="ascii"))
+    lau.say("[cam1] café ł")  # must not raise
+    sys.stdout.flush()
+    assert b"[cam1] caf" in sys.stdout.buffer.getvalue()
+
+
+def test_credentials_in_a_source_are_not_printed_by_the_launcher(tmp_path, capsys):
+    with pytest.raises(rc.ConfigError) as e:
+        rc.parse_config(
+            [cam("a", "http://u:secret@10.0.0.5:4747/video"), cam("b", "http://10.0.0.5:4747/x")]
+        )
+    assert "secret" not in str(e.value)
+    lau = rc.Launcher(
+        [rc.Camera("a", "http://u:secret@10.0.0.5:4747/video", "wifi")],
+        rc.Options(str(tmp_path), GROUP),
+        command=fake_command({"a": "ok"}),
+    )
+    run_then_ctrl_c(lau, all_ticking(tmp_path, ["a"]))
+    assert "secret" not in capsys.readouterr().out
+
+
+def test_print_event_survives_a_closed_pipe(monkeypatch):
+    """The launcher died: the event line has nowhere to go, the session file still gets it."""
+    from services.edge.capture.types import HealthEvent
+
+    def broken(*a, **k):
+        raise OSError(22, "pipe closed")
+
+    monkeypatch.setattr("builtins.print", broken)
+    cli.print_event(HealthEvent("source_lost", "2026-10-13T12:00:00Z", 1.0, "x"), 0.0)
+
+
+def test_a_console_that_cannot_encode_a_line_does_not_stall_the_child(tmp_path, monkeypatch):
+    """A cp1252/ascii pipe (Git Bash without ConPTY, `| tee`): the reader keeps draining, so the
+    child never blocks on a full pipe and still stops in time."""
+    import io
+
+    out = io.TextIOWrapper(io.BytesIO(), encoding="ascii", errors="strict", write_through=True)
+    monkeypatch.setattr(sys, "stdout", out)
+    lau = launcher(tmp_path, {"cam1": "noisy"}, stop_timeout=15)
+    run_then_ctrl_c(lau, all_ticking(tmp_path, ["cam1"]))
+    assert not lau.children[0].killed
+    assert status_of(tmp_path, "cam1") == "interrupted"
+
+
+def test_cameras_not_started_yet_are_in_the_table(tmp_path, capsys):
+    """Ctrl+C during the staggered start: the cameras that never started still get a row."""
+    lau = launcher(tmp_path, {"cam1": "ok", "cam2": "slow", "cam3": "ok"})
+    code = run_then_ctrl_c(lau, all_ticking(tmp_path, ["cam1"]))
+    out = capsys.readouterr().out
+    assert code == 1
+    table = out[out.index("result:") :]
+    assert "cam3" in table and "not started" in table
+    assert status_of(tmp_path, "cam1") == "interrupted"
+
+
+def test_error_events_are_counted_and_fail_the_exit_code(tmp_path, capsys):
+    """interrupted with a thread that did not stop is still lost data: the table says so."""
+    lau = launcher(tmp_path, {"cam1": "ok", "cam2": "errored"})
+    code = run_then_ctrl_c(lau, all_ticking(tmp_path, ["cam1", "cam2"]))
+    rows = {r[0]: r for r in (lau.summary(c) for c in lau.children)}
+    assert rows["cam1"][5] == "0" and rows["cam2"][5] == "1"
+    assert rows["cam2"][2] == "interrupted"
+    assert code == 1
+
+
+def test_a_dead_launcher_stops_every_real_child_cleanly(tmp_path, long_clips):
+    """The launcher is killed hard (the console closed, taskkill): its pipes close, and each
+    child ends its session as interrupted by itself instead of staying 'running'."""
+    out = tmp_path / "out"
+    cfg = tmp_path / "cams.json"
+    cfg.write_text(json.dumps([cam(f"c{i + 1}", str(p), "file") for i, p in enumerate(long_clips)]))
+    flags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
+    p = subprocess.Popen(
+        [sys.executable, "-u", "scripts/run_cameras.py", "--config", str(cfg), "--out", str(out),
+         "--no-detect"],  # fmt: skip
+        cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, creationflags=flags,
+    )  # fmt: skip
+    sessions = 0
+    for line in p.stdout:
+        sessions += "] session: " in line
+        if sessions == 2:
+            break
+    time.sleep(1.0)
+    p.kill()  # no table, no stop request: only the closed pipes
+    deadline = time.monotonic() + 30
+    statuses: list[str] = []
+    while time.monotonic() < deadline:
+        statuses = [json.loads(f.read_text())["status"] for f in out.glob("c*/session.json")]
+        if statuses == ["interrupted", "interrupted"]:
+            break
+        time.sleep(0.3)
+    assert statuses == ["interrupted", "interrupted"], statuses
+    for f in out.glob("c*/session.json"):
+        assert json.loads(f.read_text())["ended_at"]
+
+
+def test_a_child_whose_launcher_vanished_still_saves_the_interrupt(tmp_path, long_clips):
+    """Both of the child's pipes broken: the interrupted event reaches session.json (rule 6)."""
+    out = tmp_path / "out"
+    p = subprocess.Popen(
+        [sys.executable, "-u", "-m", "services.edge.main", "--no-detect", "--out", str(out),
+         "--source", str(long_clips[0]), "--stop-on-stdin"],  # fmt: skip
+        cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True,
+    )  # fmt: skip
+    try:
+        for line in p.stdout:
+            if line.startswith("session: "):
+                break
+        time.sleep(1.0)
+        p.stdout.close()
+        p.stdin.close()
+        assert p.wait(30) == EXIT_INTERRUPTED
+    finally:
+        p.kill()
+    [folder] = [d for d in out.iterdir() if d.is_dir()]
+    session = json.loads((folder / "session.json").read_text())
+    assert session["status"] == "interrupted"
+    assert [e["kind"] for e in session["events"]] == ["interrupted"]
+
+
+def test_a_locked_device_id_is_never_overwritten(tmp_path, monkeypatch):
+    """OneDrive or an antivirus holding the file is not a reason to give the device a new id."""
+    from services.edge.session import writer as writer_mod
+
+    first = writer_mod.device_id(tmp_path)
+
+    def locked(self, *a, **k):
+        raise PermissionError(13, "held by another process")
+
+    monkeypatch.setattr(Path, "read_text", locked)
+    monkeypatch.setattr(writer_mod.time, "sleep", lambda s: None)
+    with pytest.raises(PermissionError):
+        writer_mod.device_id(tmp_path)
+    monkeypatch.undo()
+    assert (tmp_path / "device_id").read_text().strip() == first
