@@ -12,6 +12,7 @@ import csv
 import json
 import os
 import queue
+import re
 import sys
 import threading
 import time
@@ -51,6 +52,16 @@ def redact(ref: str) -> str:
     if "@" not in parts.netloc:
         return ref
     return urlunsplit(parts._replace(netloc=parts.netloc.rsplit("@", 1)[1]))
+
+
+_USERINFO = re.compile(r"(?<=://)[^/\s@]+@")
+_SECRET_PARAM = re.compile(r"(?i)\b(password|passwd|pwd|token|secret|api[_-]?key)=[^&\s]+")
+
+
+def mask_credentials(text: str) -> str:
+    """Hide credentials in free text (an error message, a stderr line): user:password@ in any
+    URL and secret-looking query parameters. `redact` is for one URL going into a file."""
+    return _SECRET_PARAM.sub(r"\1=***", _USERINFO.sub("***@", text))
 
 
 def _read_device_id(path: Path) -> str | None:
