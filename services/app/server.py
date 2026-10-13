@@ -3,6 +3,7 @@ import csv
 import datetime as dt
 import ipaddress
 import json
+import os
 import socket
 import threading
 import time
@@ -50,6 +51,35 @@ class Studio:
         self.lock = threading.RLock()
         self.final: dict[str, dict] = {}
         self.frame_cache = {}
+        self.active_group_path = self.config.path.with_name("active_group.json")
+        self.recover_interrupted_group()
+
+    def recover_interrupted_group(self):
+        try:
+            group_id = json.loads(self.active_group_path.read_text(encoding="utf-8"))["group_id"]
+        except (OSError, ValueError, KeyError, TypeError):
+            return
+        for session_file in Path(self.out).glob("*/session.json"):
+            try:
+                session = json.loads(session_file.read_text(encoding="utf-8"))
+                if session.get("group_id") != group_id or session.get("status") != "running":
+                    continue
+                session["status"] = "interrupted"
+                session["ended_at"] = dt.datetime.now(dt.UTC).isoformat().replace("+00:00", "Z")
+                session.setdefault("events", []).append(
+                    {
+                        "t_wall": session["ended_at"],
+                        "t_mono": None,
+                        "kind": "interrupted",
+                        "detail": "app restarted after an unclean shutdown",
+                    }
+                )
+                temporary = session_file.with_suffix(".json.tmp")
+                temporary.write_text(json.dumps(session, indent=2) + "\n", encoding="utf-8")
+                os.replace(temporary, session_file)
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+        self.active_group_path.unlink(missing_ok=True)
 
     def entries(self):
         return self.config.read()
@@ -97,6 +127,10 @@ class Studio:
             ]
             opts = Options(self.out, self.group_id)
             self.launcher = self.launcher_factory(cameras, opts)
+            self.active_group_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self.active_group_path.with_suffix(".tmp")
+            temporary.write_text(json.dumps({"group_id": self.group_id}), encoding="utf-8")
+            os.replace(temporary, self.active_group_path)
             self.worker = threading.Thread(
                 target=self.launcher.run, name="studio-launcher", daemon=True
             )
@@ -116,6 +150,8 @@ class Studio:
         if worker and worker.is_alive():
             launcher.stop_all("[app] stop requested")
             worker.join(timeout=50)
+        if not worker or not worker.is_alive():
+            self.active_group_path.unlink(missing_ok=True)
         return self.status()
 
     def status(self):
@@ -285,16 +321,19 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
 
     @app.middleware("http")
     async def restrict_browser_origin(request, call_next):
+        client_host = request.client.host if request.client else ""
+        try:
+            loopback_client = ipaddress.ip_address(client_host).is_loopback
+        except ValueError:
+            loopback_client = False
+        if not loopback_client:
+            return JSONResponse({"detail": "local access only"}, status_code=403)
         origin = request.headers.get("origin")
         if origin:
-            host = origin.split("://", 1)[-1].split(":", 1)[0].strip("[]").lower()
-            try:
-                loopback = ipaddress.ip_address(host).is_loopback
-            except ValueError:
-                loopback = host == "localhost"
-            if not loopback:
+            request_origin = f"{request.url.scheme}://{request.url.netloc}".lower()
+            if origin.rstrip("/").lower() != request_origin:
                 return JSONResponse(
-                    {"detail": "only loopback browser origins are allowed"}, status_code=403
+                    {"detail": "cross-origin requests are not allowed"}, status_code=403
                 )
         return await call_next(request)
 
