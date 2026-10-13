@@ -1,6 +1,6 @@
 # Data contracts
 
-Contract version: **0.4.0**. Any change bumps the version (minor for additive fields, major
+Contract version: **0.5.0**. Any change bumps the version (minor for additive fields, major
 for removals or meaning changes) and needs a `DECISIONS.md` entry. JSON Schemas in
 `contracts/` are written from this file and tests check them against it (D-009).
 
@@ -38,7 +38,7 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
 
 ```json
 {
-  "contract_version": "0.4.0",
+  "contract_version": "0.5.0",
   "session_id": "uuid",
   "device_id": "uuid",
   "started_at": "2026-10-07T18:00:00Z",
@@ -70,7 +70,7 @@ Event kinds: `source_open_failed`, `source_lost`, `source_recovered`,
 
 ```json
 {
-  "contract_version": "0.4.0",
+  "contract_version": "0.5.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "mode": "live | replay",
@@ -83,6 +83,7 @@ Event kinds: `source_open_failed`, `source_lost`, `source_recovered`,
   "health": {"lost_reads": 30, "lost_secs": 2.0, "frozen_diff": 0.5, "frozen_secs": 2.0,
              "dark_level": 20.0, "dark_secs": 1.0},
   "runtime": {"python": "3.11.x", "platform": "...", "device": "cpu | cuda:0",
+              "gpu": "NVIDIA ... | null",
               "packages": {"opencv": "x.y.z", "numpy": "x.y.z", "torch": "x.y.z",
                            "supervision": "x.y.z"}},
   "started_at": "...", "t0_wall": "...", "ended_at": "...",
@@ -99,7 +100,8 @@ shutdown timeout, D-018); `captured = processed + dropped + unprocessed` on a cl
 `requested_width/height` are the size asked of a camera (`--width/--height`), `null` for
 streams and files. `detector.det_size` is the square side the image is resized to for
 detection. `detector` and `tracker` are `null` and `runtime.device` is `null` when detection
-is off (`--no-detect`). `runtime.device` is `cpu` or `cuda:N`. `runtime.packages` holds
+is off (`--no-detect`). `runtime.device` is `cpu` or `cuda:N`; `runtime.gpu` is the CUDA GPU's name
+(`torch.cuda.get_device_name`), `null` on `cpu` and with `--no-detect`. `runtime.packages` holds
 installed versions, `null` when a package is not installed. `health` holds the source-health
 thresholds of the run (`--lost-reads` ... `--dark-secs`). The tracker is fed `Frame.t_recv`
 as its timestamp (D-016).

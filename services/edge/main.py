@@ -85,7 +85,12 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--width", type=positive(int), default=1280, help="requested camera width")
     p.add_argument("--height", type=positive(int), default=720, help="requested camera height")
     p.add_argument("--threshold", type=confidence, default=0.5, help="person confidence")
-    p.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
+    p.add_argument(
+        "--device",
+        choices=["auto", "cpu", "cuda"],
+        default="auto",
+        help="auto: cuda when torch sees a CUDA GPU, else cpu; cuda fails if there is none",
+    )
     p.add_argument(
         "--det-size",
         type=det_size,
@@ -113,7 +118,22 @@ def print_event(ev: HealthEvent, t0: float | None) -> None:
     print(f"[{ev.t_wall}] {rel} {ev.kind}: {ev.detail}", flush=True)
 
 
-def load_perception(args: argparse.Namespace):
+def resolve_device(requested: str) -> tuple[str, str | None]:
+    """--device to (cpu | cuda:0, GPU name or None). auto is cuda when torch sees a CUDA GPU,
+    else cpu. Raises RuntimeError for a forced cuda with no usable GPU. Imports torch."""
+    import torch
+
+    if requested == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError(
+            f"--device cuda but torch {torch.__version__} cannot use a CUDA GPU "
+            "(a CPU-only wheel, no NVIDIA GPU, or an old driver); see README, Install on a new PC"
+        )
+    if requested == "cpu" or not torch.cuda.is_available():
+        return "cpu", None
+    return "cuda:0", torch.cuda.get_device_name(0)
+
+
+def load_perception(args: argparse.Namespace, device: str):
     """Detector and tracker, warmed up with one inference so the first slow call is not
     counted in the run. Imported here: torch loads only when detection is on. Called before
     the source opens, so a stream does not buffer stale frames during the load (D-018)."""
@@ -123,7 +143,7 @@ def load_perception(args: argparse.Namespace):
     from services.edge.perception.tracker import ByteTrackTracker
 
     t = time.perf_counter()
-    detector = RFDETRDetector.load(args.threshold, args.det_size, args.device)
+    detector = RFDETRDetector.load(args.threshold, args.det_size, device)
     loaded = time.perf_counter() - t
     blank = np.zeros((args.height, args.width, 3), np.uint8)
     t = time.perf_counter()
@@ -160,7 +180,7 @@ def normalise_device(device: str) -> str:
     return "cuda:0" if device == "cuda" else device
 
 
-def run_meta(args, info, config: HealthConfig, detector, tracker) -> RunMeta:
+def run_meta(args, info, config: HealthConfig, detector, tracker, gpu) -> RunMeta:
     """run.json fields known at start: input, detector, tracker, thresholds, versions."""
     camera = info.kind == "camera"
     return RunMeta(
@@ -196,6 +216,7 @@ def run_meta(args, info, config: HealthConfig, detector, tracker) -> RunMeta:
             "python": sys.version.split()[0],
             "platform": platform.platform(),
             "device": None if detector is None else normalise_device(detector.device),
+            "gpu": gpu,
             "packages": {
                 "opencv": cv2.__version__,
                 "numpy": np.__version__,
@@ -263,10 +284,17 @@ def run(args: argparse.Namespace) -> int:
         print(f"error: {conflict}", file=sys.stderr)
         return EXIT_OPEN_FAILED
 
-    detector = tracker = None
+    detector = tracker = gpu = None
     if not args.no_detect:
         try:
-            detector, tracker = load_perception(args)
+            device, gpu = resolve_device(args.device)
+        except Exception as e:  # forced cuda without a GPU, or a broken torch install
+            note = "" if isinstance(e, RuntimeError) else "device check failed: "
+            print(f"error: {note}{e}", file=sys.stderr)
+            return EXIT_CAPTURE_ERROR
+        print(f"device: {device}" + (f" ({gpu})" if gpu else " (no CUDA GPU in use)"))
+        try:
+            detector, tracker = load_perception(args, device)
         except Exception as e:  # e.g. no network for the first weights download
             # before any run, so no t0: t_mono is null (D-014)
             on_event(HealthEvent("error", utc_now(), None, f"model load failed: {e!r}"))
@@ -289,7 +317,7 @@ def run(args: argparse.Namespace) -> int:
     try:
         session_id = str(uuid.uuid4())
         meta = SessionMeta(session_id, device_id(args.out), utc_now(), info, False)
-        writer.start(meta, run_meta(args, info, config, detector, tracker))
+        writer.start(meta, run_meta(args, info, config, detector, tracker, gpu))
     except OSError as e:
         source.close()
         print(f"error: cannot write session data under {args.out!r}: {e}", file=sys.stderr)

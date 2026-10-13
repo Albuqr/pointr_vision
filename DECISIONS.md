@@ -474,3 +474,42 @@ written.
 and `PHASE_03_REPORT.md` are pending, so no `phase-03` tag. 02b stays open. Remaining phase 03
 items are in BACKLOG.
 **Status.** Accepted.
+
+## D-021 · 2026-10-13 · v0 runbook: device selection, `runtime.gpu`, contract 0.5.0
+**Context.** Tonight's recording runs on a stronger PC, probably with an NVIDIA GPU. The device
+choice existed (`--device auto|cpu|cuda`, handed to rfdetr), but the notebook never had a GPU,
+so the CUDA path was untested, the GPU name was not recorded, and a forced `cuda` without a
+GPU would have failed somewhere inside rfdetr.
+**Decision.**
+- **Pointr resolves the device itself**, before the model load (`main.resolve_device`):
+  `auto` is `cuda:0` when `torch.cuda.is_available()`, else `cpu`; `cpu` forces the CPU;
+  `cuda` without a usable GPU prints `error: --device cuda but torch <version> cannot use a
+  CUDA GPU ...` to stderr and exits 1, before the slow load. The resolved device is passed to
+  rfdetr explicitly (`RFDETRNano(device=...)`), so `auto` no longer defers to rfdetr's
+  detection, which could pick `mps`/`xpu`. This closes the BACKLOG item about `mps`/`xpu`
+  failing the schema. With `--no-detect` the device is not resolved or printed.
+- The startup line `device: cuda:0 (<GPU name>)` or `device: cpu (no CUDA GPU in use)` is
+  printed before the model load.
+- **Contract 0.5.0** (minor, additive): `run.json` `runtime.gpu`, the CUDA GPU's name from
+  `torch.cuda.get_device_name(0)`, `null` on cpu and with `--no-detect`. `runtime.device`
+  stays `cpu | cuda:N`. Only device 0 is used.
+- **Torch wheels for CUDA.** Checked on 2026-10-13 on download.pytorch.org: `torch==2.14.1`
+  and `torchvision==0.29.1` exist for cp311 / win_amd64 on `cpu`, `cu126`, `cu130` (and
+  `cu132`); `pip install --dry-run` resolves `+cu126` and `+cu130`. `cu118`, `cu121`, `cu124`,
+  `cu128` and `cu129` have no `2.14.1` wheels for it. No pin changes: the local label is
+  ignored by `torch==2.14.1`. README and the runbook offer `cu130` and `cu126`. **Not
+  verified:** a CUDA run (the dev notebook has no GPU); the CUDA path is covered by tests
+  with `torch.cuda` mocked only.
+- **Startup noise filtered** in `RFDETRDetector.load` by message only: the `torch.jit.script`
+  FutureWarning, rfdetr's `plus extras` ImportWarning, and two rfdetr log lines ("not
+  loading DINOv2 backbone weights", "Model is not optimized for inference"). Other warnings
+  and our own messages are untouched. rfdetr's INFO line about the weights' md5 remains (printed twice per load).
+- **Review fixes (code-reviewer).** The CUDA check in the docs runs a real GPU calculation
+  (`is_available()` alone does not prove the GPU can run kernels; GTX 9xx/10xx may not be
+  supported by the CUDA 13 build). The phone-URL path for a second phone is documented as
+  untested on hardware (PHASE_01_REPORT: StreamSource not exercised on a real phone). A
+  failing device check of any kind exits 1 with `error: ...`.
+**Consequences.** `docs/RUNBOOK_TONIGHT.md` and README "Install on a new PC" are the
+operating instructions for the v0 recording. The first real GPU run will show whether
+`cuda:0` works with rfdetr 1.11.2 end to end.
+**Status.** Accepted.

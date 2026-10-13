@@ -4,6 +4,9 @@ rfdetr is imported only by RFDETRDetector.load(), so code that never loads the m
 --no-detect) does not import torch. Library objects never leave this module.
 """
 
+import logging
+import warnings
+
 import numpy as np
 
 from services.edge.capture.types import Frame
@@ -13,6 +16,17 @@ COCO_PERSON_ID = 1  # pretrained COCO checkpoints return raw COCO category IDs (
 # Nano patch_size 16 * num_windows 2 (D-015). Lets the CLI reject a bad --det-size before the
 # slow model load; load() checks it again against the real config.
 DET_SIZE_MULTIPLE = 32
+
+# Known start-up noise (BACKLOG): matched by message, so any other warning still shows.
+_NOISE = (
+    "not loading DINOv2 backbone weights",  # rfdetr: expected for the COCO checkpoint
+    "Model is not optimized for inference",  # rfdetr: speed hint, tracked in BACKLOG
+)
+
+
+class _DropNoise(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not any(text in record.getMessage() for text in _NOISE)
 
 
 class RFDETRDetector:
@@ -25,13 +39,17 @@ class RFDETRDetector:
 
     @classmethod
     def load(cls, threshold: float, det_size: int | None, device: str) -> "RFDETRDetector":
-        """Build RF-DETR Nano with the COCO weights (downloaded once). device: auto|cpu|cuda.
+        """Build RF-DETR Nano with the COCO weights (downloaded once). device: cpu or cuda:N.
 
         det_size None means the model's own resolution. Raises ValueError when det_size is
         not a multiple of the model's patch_size * num_windows (32 for Nano)."""
-        from rfdetr import RFDETRNano
+        with warnings.catch_warnings():  # torch.jit.script deprecation, raised inside rfdetr
+            warnings.filterwarnings("ignore", message=".*torch.jit.script.*deprecated")
+            warnings.filterwarnings("ignore", message=".*requires the 'plus' extras")
+            from rfdetr import RFDETRNano
 
-        model = RFDETRNano() if device == "auto" else RFDETRNano(device=device)
+            logging.getLogger("rf-detr").addFilter(_DropNoise())
+            model = RFDETRNano(device=device)
         cfg = model.model_config
         block = cfg.patch_size * cfg.num_windows
         if block != DET_SIZE_MULTIPLE:
