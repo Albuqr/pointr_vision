@@ -586,6 +586,53 @@ i7-10510U: 1.5-1.7 fps (laptop) and 0.35-0.57 fps (phone URL) against about 2-2.
 the second model load took 27-30 s. Runbook: CPU-only PC, at most 2 cameras with det_size 320.
 **Status.** Accepted; merged to main.
 
+## D-023 · 2026-10-13 · v0 movement report per person, contract 0.7.0
+**Context.** Tonight's recordings need a readable result per camera. The processing rate on
+the dev CPU is low and uneven (0.35 to about 2.4 fps), so a track has few, unevenly spaced
+samples; the report must say what it can and cannot support.
+**Decision.**
+- **Contract 0.7.0** (minor, additive): new file `runs/<run_id>/report.json`, DATA_CONTRACTS
+  section 8 and `contracts/report.schema.json`. Every measurement is `{value, unit}`; a null
+  value carries a reason; counts are plain `n_*` integers; a top-level `caveats` list is
+  required. Chosen over unit suffixes in key names (`path_length_px`) so that calibration can
+  change the unit without renaming keys.
+- **Positions go through a function** (`PositionMap`: pixel point to output point, plus the
+  unit and default activity thresholds). `PixelPositions` is the only implementation now; part 5
+  (calibration) supplies metres without touching the report code.
+- **Definitions** (all in section 8): position = box bottom-centre at the frame's `t_recv`
+  (tracks.csv has no time, joined on `seq`); per-track moving median of 3 samples inside runs
+  of samples at most `max_gap` apart (symmetric, shrinking to 1 at the ends so a two-sample run
+  is never flattened into zero speed); only intervals up to `--max-gap` (1.0 s) count for path,
+  speed and activity, the rest are counted (`n_gaps_excluded`, `gap_time`); speed is null with
+  a reason below 2 valid intervals; activity shares are by interval speed, weighted by interval
+  time. The default thresholds, 40 and 400 px/s, are placeholders that depend on camera
+  distance (an estimate from typical speeds, not a measurement: a 1280 px wide view of about 8 m
+  puts walking near 220 px/s and running near 640 px/s); they are labelled as such in the caveats and configurable.
+- **Reuse.** processed fps and app delay percentiles use `perception.loop.rates` and
+  `delay_stats`, so the report and the benchmark agree.
+- **Placement.** Code in `services/edge/reports/` (ARCHITECTURE section 3); the CLI the phase
+  file names, `python -m services.edge.report`, is a one-line module that calls it. The CLI takes
+  a session folder, not a session id: a folder is `<camera_id>_<session_id>` (D-022), found by
+  path or, in group form, by reading each `session.json`.
+- **Automatic.** A live session writes `report.json` and prints a summary after the final
+  `session.json`; a report failure is printed and never changes the session's status or exit
+  code. The launcher then prints one table with a row per camera, rebuilt from the run's files with
+  the default parameters (not read from `report.json`, which may have been rerun with others). Group form (`--group G --out DIR`) prints one section per camera: no fusion.
+**Not decided / out of scope.** Calibration, pose, basketball actions, cross-camera fusion,
+accuracy against ground truth (PHASE_05 keeps it out), identity.
+**Gate (code-reviewer, contract-guardian).** Both PASS, no BLOCKER or MAJOR (the first attempt of
+both subagents died on a session rate limit, nothing was reviewed; they were run again).
+Fixed from the MINORs: activity share needs the same minimum of valid intervals as speed (it
+was built from one interval); malformed CSV rows are skipped and counted; a duplicate
+(track, seq) is one sample; one processed frame gives no fps or interval; drop-rate and event
+nulls carry the right reason (`event precedes t0`: every null in the report has a reason);
+`--run` must be one of the session's runs; one broken camera does not stop a group report;
+nonsense thresholds are refused; the console summary lists the 20 longest tracks; Ctrl+C during
+the report cannot change the session's exit code; a launcher report failure is printed. The
+launcher's table is rebuilt from the files with default parameters, not read from `report.json`.
+Rest in BACKLOG.
+**Status.** Accepted; merged to main.
+
 ## D-024 · 2026-10-13 · Pointr Studio local UI stack
 **Context.** Phase 06's local recording UI is pulled forward for v0; camera registration and
 identity features remain out of scope.
@@ -636,49 +683,57 @@ exception: phase 06 local Studio and phase 10 visual calibration are pulled forw
 the v0 Studio/calibration deliverable; this does not formally close phase 03 or any intervening
 phase.
 
-## D-023 · 2026-10-13 · v0 movement report per person, contract 0.7.0
-**Context.** Tonight's recordings need a readable result per camera. The processing rate on
-the dev CPU is low and uneven (0.35 to about 2.4 fps), so a track has few, unevenly spaced
-samples; the report must say what it can and cannot support.
-**Decision.**
-- **Contract 0.7.0** (minor, additive): new file `runs/<run_id>/report.json`, DATA_CONTRACTS
-  section 8 and `contracts/report.schema.json`. Every measurement is `{value, unit}`; a null
-  value carries a reason; counts are plain `n_*` integers; a top-level `caveats` list is
-  required. Chosen over unit suffixes in key names (`path_length_px`) so that calibration can
-  change the unit without renaming keys.
-- **Positions go through a function** (`PositionMap`: pixel point to output point, plus the
-  unit and default activity thresholds). `PixelPositions` is the only implementation now; part 5
-  (calibration) supplies metres without touching the report code.
-- **Definitions** (all in section 8): position = box bottom-centre at the frame's `t_recv`
-  (tracks.csv has no time, joined on `seq`); per-track moving median of 3 samples inside runs
-  of samples at most `max_gap` apart (symmetric, shrinking to 1 at the ends so a two-sample run
-  is never flattened into zero speed); only intervals up to `--max-gap` (1.0 s) count for path,
-  speed and activity, the rest are counted (`n_gaps_excluded`, `gap_time`); speed is null with
-  a reason below 2 valid intervals; activity shares are by interval speed, weighted by interval
-  time. The default thresholds, 40 and 400 px/s, are placeholders that depend on camera
-  distance (an estimate from typical speeds, not a measurement: a 1280 px wide view of about 8 m
-  puts walking near 220 px/s and running near 640 px/s); they are labelled as such in the caveats and configurable.
-- **Reuse.** processed fps and app delay percentiles use `perception.loop.rates` and
-  `delay_stats`, so the report and the benchmark agree.
-- **Placement.** Code in `services/edge/reports/` (ARCHITECTURE section 3); the CLI the phase
-  file names, `python -m services.edge.report`, is a one-line module that calls it. The CLI takes
-  a session folder, not a session id: a folder is `<camera_id>_<session_id>` (D-022), found by
-  path or, in group form, by reading each `session.json`.
-- **Automatic.** A live session writes `report.json` and prints a summary after the final
-  `session.json`; a report failure is printed and never changes the session's status or exit
-  code. The launcher then prints one table with a row per camera, rebuilt from the run's files with
-  the default parameters (not read from `report.json`, which may have been rerun with others). Group form (`--group G --out DIR`) prints one section per camera: no fusion.
-**Not decided / out of scope.** Calibration, pose, basketball actions, cross-camera fusion,
-accuracy against ground truth (PHASE_05 keeps it out), identity.
-**Gate (code-reviewer, contract-guardian).** Both PASS, no BLOCKER or MAJOR (the first attempt of
-both subagents died on a session rate limit, nothing was reviewed; they were run again).
-Fixed from the MINORs: activity share needs the same minimum of valid intervals as speed (it
-was built from one interval); malformed CSV rows are skipped and counted; a duplicate
-(track, seq) is one sample; one processed frame gives no fps or interval; drop-rate and event
-nulls carry the right reason (`event precedes t0`: every null in the report has a reason);
-`--run` must be one of the session's runs; one broken camera does not stop a group report;
-nonsense thresholds are refused; the console summary lists the 20 longest tracks; Ctrl+C during
-the report cannot change the session's exit code; a launcher report failure is printed. The
-launcher's table is rebuilt from the files with default parameters, not read from `report.json`.
-Rest in BACKLOG.
-**Status.** Accepted; merged to main.
+## D-027 · 2026-10-13 · Review fixes for the calibration branch; commit order broke rule 2
+
+**Process deviation.** CLAUDE.md rule 2 puts the contract and the `DECISIONS.md` entry before the
+code. On `v0-calibration` they did not: the calibration code (`e57e266`, which already sets
+`CONTRACT_VERSION = "0.8.0"` and the file validator) was committed before the contract change
+(`c4a4567`), D-025 was committed last (`3ca2154`), and all seven commits were made within 20
+seconds, so the history cannot show contract-first order. The work was built in one sitting and
+committed in a batch. D-025 also sat between D-024 and D-023 in this file; the entries are now in
+order. From here a contract or format change is written in `DATA_CONTRACTS.md` and recorded here
+before the code that needs it.
+
+**Context.** Three subagent reviews of the branch (code-reviewer, reliability-reviewer,
+contract-guardian) found data-integrity defects: a dead projection guard, a writer that died on one
+bad row, check points that could duplicate fit points, and a calibration that could block or
+mislead a recording. Fixed one item per commit, each with a test that fails on the old code.
+
+**Decisions.**
+- **0.8.0 stays.** The branch has not been merged or released and nothing reads 0.8.0 files yet,
+  so the 0.8.0 documents were corrected in place instead of bumping: an unprojectable point has
+  empty `x_m`, `y_m` and `in_court` (never 0); `in_court` is lowercase `true`/`false`;
+  `max_check_error_m` is at most 2.0 (schema); `fiba_full` must be 28 x 15 (schema); the hold-out
+  and homography rules; the Studio calibration API (DATA_CONTRACTS section 9). Once a 0.8.0 file
+  is outside this branch, a change like these needs a bump.
+- **Projection.** An explicit homogeneous divide; a point is invalid when w <= 1e-6 or the result
+  is not finite. A homography is refused when it is non-finite, singular, has a condition number
+  above 1e7, or puts a point on or beyond the horizon; `save_anyway` cannot override this. The
+  1e7 limit is above the 2e4 that a synthetic camera trapezoid gives; no real camera fit has been
+  measured, so it may need to move.
+- **Hold-out.** No two points within 1e-6 m (court) or 1 px (image); fit points need a spread
+  (square root of minor to major variance) of at least 0.1 in the image and on the court. These
+  thresholds are chosen by reasoning, not measured.
+- **Writer.** The session writer receives its projector as an injected `PositionMap` and never
+  imports the calibration package. A row's projection error leaves its position empty, counts it
+  and records an `error` event (first one at once, then at most one per 30 s, and a final count
+  at close).
+- **Frame size.** The Studio captures the idle calibration frame with `DEFAULT_CAPTURE_SIZE`, the
+  recorder's own default. The recorder compares its first processed frame with the calibration and
+  fails that camera, with both sizes, on a mismatch; a later change stops the homography.
+- **One bad calibration.** `Studio.start` loads every calibration first; a camera whose file is
+  missing or invalid starts uncalibrated with a session event and a status warning, and never
+  refuses the group.
+- **Court model.** Key depth and width, basket offset and circle radius are fixed lengths on a
+  custom court; markings that do not fit are left out. The Studio draws the server's court model.
+- **Validator.** `validate_calibration` runs `calibration.schema.json` through `jsonschema`, which
+  is therefore a runtime dependency (it was dev-only). `ACCEPTED_VERSIONS` lists the calibration
+  versions the loader takes; `CONTRACT_VERSION` lives in `services/edge/contract.py` only.
+- **Durability.** Calibration files are fsynced before their rename, and a locked rename is
+  retried briefly.
+
+**Not decided / not verified.** Nothing here was run against a real webcam or a real court: the
+640x480 default and the recorder's refusal come from reading the code, and the fix is tested with a
+fake camera. RANSAC may leave out a good point instead of the bad one (its choice among equal
+fits); the Studio now names the point it left out. D-026 is used by the `v0-cameras` branch, so
+this branch skips it.
