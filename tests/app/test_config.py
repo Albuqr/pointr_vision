@@ -91,6 +91,25 @@ def test_camera_settings_keep_backup_and_active_file_on_replace_failure(tmp_path
     assert json.loads(store.path.with_name("cameras.json.bak").read_text()) == original
 
 
+def test_backup_replace_failure_does_not_replace_the_last_good_settings(tmp_path, monkeypatch):
+    store = CameraConfig(tmp_path / "cameras.json")
+    original = [{"camera_id": "cam1", "source": "0", "link": "builtin"}]
+    replacement = [{"camera_id": "cam1", "source": "1", "link": "builtin"}]
+    store.write(original)
+    real_replace = os.replace
+
+    def fail_backup_replace(source, destination):
+        if Path(destination).name == "cameras.json.bak":
+            raise PermissionError("simulated backup failure")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(os, "replace", fail_backup_replace)
+    with pytest.raises(PermissionError, match="simulated backup"):
+        store.write(replacement)
+    assert json.loads(store.path.read_text()) == original
+    assert not list(tmp_path.glob("cameras-*.tmp"))
+
+
 @pytest.mark.parametrize(
     "contents", ["{broken", "[]x", "null", '[{"camera_id":"cam1","source":"0","link":[]}]']
 )

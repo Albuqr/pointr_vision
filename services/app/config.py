@@ -198,8 +198,15 @@ class CameraConfig:
             if self.path.exists():
                 try:
                     previous = json.loads(self.path.read_text(encoding="utf-8"))
-                    if not _field_errors(previous):
-                        parse_config(previous)
+                except (OSError, ValueError, UnicodeError, RecursionError):
+                    previous = None
+                if previous is not None and not _field_errors(previous):
+                    try:
+                        if previous:
+                            parse_config(previous)
+                    except ConfigError:
+                        pass  # never replace the last good backup with a corrupt active file
+                    else:
                         backup_fd, backup_temporary = tempfile.mkstemp(
                             dir=self.path.parent, prefix="cameras-backup-", suffix=".tmp"
                         )
@@ -210,8 +217,6 @@ class CameraConfig:
                         finally:
                             if os.path.exists(backup_temporary):
                                 os.unlink(backup_temporary)
-                except (OSError, ValueError, ConfigError):
-                    pass  # never replace the last good backup with a corrupt active file
             os.replace(temporary, self.path)
             self.warning = None
         finally:
