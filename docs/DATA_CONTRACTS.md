@@ -1,6 +1,6 @@
 # Data contracts
 
-Contract version: **0.8.0**. Any change bumps the version (minor for additive fields, major
+Contract version: **0.9.0**. Any change bumps the version (minor for additive fields, major
 for removals or meaning changes) and needs a `DECISIONS.md` entry. JSON Schemas in
 `contracts/` are written from this file and tests check them against it (D-009).
 
@@ -50,7 +50,7 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
 
 ```json
 {
-  "contract_version": "0.8.0",
+  "contract_version": "0.9.0",
   "session_id": "uuid",
   "device_id": "uuid",
   "camera_id": "cam1 | null",
@@ -94,7 +94,7 @@ calibration used by this session and records its mean held-out check residual in
 
 ```json
 {
-  "contract_version": "0.8.0",
+  "contract_version": "0.9.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "mode": "live | replay",
@@ -181,7 +181,7 @@ pixel box and its `calibration_id`, with `x_m`, `y_m` and `in_court` empty; the 
 an `error` event with the count (the first time, then at most every 30 s, and a final count when
 the run closes). `position_method` is spelled `box_bottom_center` in this file; `report.json`
 `positions.point` spells the same estimate `bottom_centre` (section 8): two fields, two spellings,
-both fixed in 0.8.0.
+both fixed in 0.9.0.
 The image point is `((x1 + x2) / 2, y2)`. The position method describes the box estimate,
 not a measured anatomical foot point.
 
@@ -247,7 +247,7 @@ One report per run, one per camera: there is no fusion across cameras.
 
 ```json
 {
-  "contract_version": "0.8.0",
+  "contract_version": "0.9.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "camera_id": "cam1 | null",
@@ -411,3 +411,24 @@ All paths are served on loopback by `python -m services.app`.
 - `GET /api/status` cameras carry `calibration` (`{calibration_id, check_error_m}` or `null`) and
   `calibration_warning` (why a saved calibration was not used, or `null`). A camera whose frame
   size differs from the calibration at its first frame fails with both sizes in `error`.
+
+## 10. Studio camera settings (`%LOCALAPPDATA%/pointr/cameras.json`)
+
+The settings file is a JSON list. Each entry contains a stable `camera_id`, a unique display
+`name`, `source` (a camera index, local file path for file testing, or an `http`, `https` or
+`rtsp` URL), `link`, `det_size`, optional `fps_cap`, and `enabled`. Existing `camera_id` values
+remain the identity used by sessions and calibrations; omitted `name`, `enabled`, and `fps_cap`
+load as `camera_id`, `true`, and `null`. The Studio defaults are model-default detection size,
+no FPS cap, and enabled. Allowed detection sizes are 320, 352, 384, 416, 448, 480, 512, 544,
+576, 608, 640, 672, 704, 736, 768, 800, 832, 864, 896, 928, 960, 992, 1024, 1056, 1088,
+1120, 1152, 1184, 1216, 1248, and 1280. FPS cap is an optional positive number no greater than
+60; for camera indices it is requested from the capture backend. It is not a measured or
+guaranteed frame rate. Only enabled cameras start. Names must be unique without case
+distinctions. URL credentials are accepted for camera streams but masked in all Studio output.
+Loopback and link-local URL hosts and schemes other than HTTP, HTTPS, and RTSP are refused.
+
+Writes use a temporary file and atomic replacement. Before replacement, the prior valid file is
+preserved as `cameras.json.bak`. An unreadable or invalid settings file loads as an empty camera
+list and produces a visible warning; it is not silently replaced with the backup. The camera
+configuration is a local Studio setting and does not alter session, run, report, or calibration
+field meanings. This additive settings contract is recorded under contract version 0.9.0.

@@ -415,7 +415,7 @@ def test_write_report_replaces_report_json_and_matches_the_schema(tmp_path):
     write_report(run_dir)
     first = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
     schema("report").validate(first)
-    assert first["contract_version"] == "0.8.0"
+    assert first["contract_version"] == "0.9.0"
     write_report(run_dir, params=Params(max_gap=0.2))  # every interval is a gap
     second = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
     assert (
