@@ -14,6 +14,10 @@ def _matrix(value):
 
 
 EPS_W = 1e-6  # a point whose homogeneous scale w is at or below this is on or beyond the horizon
+MAX_CHECK_ERROR_LIMIT_M = 2.0  # the largest "maximum mean check error" a user may set
+COINCIDENT_COURT_M = 1e-6  # two points this close in court metres are the same physical mark
+COINCIDENT_IMAGE_PX = 1.0  # ... or this close in the image
+MIN_SPREAD = 0.1  # sqrt(minor / major variance) of the fit points, in the image and on the court
 COND_LIMIT = 1e7  # a larger condition number is treated as singular (real camera fits: ~2e4)
 
 
@@ -74,6 +78,50 @@ def check_homography(homography, image_points=()):
             raise ValueError("a calibration point lies on or beyond the horizon of the homography")
 
 
+def point_residuals(homography, points):
+    """Metres between each point's court position and its image position projected through the
+    homography, in the order of `points`. Raises ValueError if a point cannot be projected."""
+    out = []
+    for point in points:
+        x, y = project_image_to_court(homography, point["image_px"])
+        out.append(math.hypot(x - point["court_m"][0], y - point["court_m"][1]))
+    return out
+
+
+def _spread(points):
+    """sqrt(minor / major variance) of the points: 0 for collinear points or a point cloud with
+    no extent, near 1 for points spread evenly over an area, small for a thin sliver."""
+    array = np.asarray(points, dtype=np.float64)
+    minor, major = np.linalg.eigvalsh(np.cov(array.T))
+    return 0.0 if major <= 0 else float(math.sqrt(max(minor, 0.0) / major))
+
+
+def check_point_set(points):
+    """Hold-out integrity. A check point only tests the fit if it is a different physical mark
+    from every fit point, so no two points may coincide, and the fit points must be spread out
+    (not collinear, not bunched) in the image and on the court. Raises ValueError."""
+    for i, a in enumerate(points):
+        for b in points[i + 1 :]:
+            if math.dist(a["court_m"], b["court_m"]) <= COINCIDENT_COURT_M:
+                raise ValueError(
+                    f"two points are at the same court position {tuple(a['court_m'])}: a check "
+                    "point must be a different floor mark from every calibration point"
+                )
+            if math.dist(a["image_px"], b["image_px"]) < COINCIDENT_IMAGE_PX:
+                raise ValueError(
+                    f"two points are at the same image position {tuple(a['image_px'])}: a check "
+                    "point must be a different floor mark from every calibration point"
+                )
+    fit = [point for point in points if point["role"] == "calibration"]
+    for name, key in (("image", "image_px"), ("court", "court_m")):
+        spread = _spread([point[key] for point in fit])
+        if spread < MIN_SPREAD:
+            raise ValueError(
+                f"the calibration points are collinear or bunched together in the {name} "
+                f"(spread {spread:.3f}, at least {MIN_SPREAD} needed): spread them over the floor"
+            )
+
+
 def fit_calibration(
     points, max_check_error_m=0.5, save_anyway=False, enforce_limit=True, require_checks=True
 ):
@@ -92,8 +140,15 @@ def fit_calibration(
         raise ValueError("at least four calibration points are required")
     if require_checks and len(checks) < 2:
         raise ValueError("at least two separate check points are required")
-    if not math.isfinite(max_check_error_m) or max_check_error_m <= 0:
-        raise ValueError("maximum check error must be finite and greater than zero")
+    if (
+        not math.isfinite(max_check_error_m)
+        or max_check_error_m <= 0
+        or max_check_error_m > MAX_CHECK_ERROR_LIMIT_M
+    ):
+        raise ValueError(
+            f"maximum check error must be greater than zero and at most {MAX_CHECK_ERROR_LIMIT_M} m"
+        )
+    check_point_set(points)
     image_points = np.asarray([point["image_px"] for point in fit], dtype=np.float64)
     court_points = np.asarray([point["court_m"] for point in fit], dtype=np.float64)
     if image_points.shape != (len(fit), 2) or court_points.shape != (len(fit), 2):

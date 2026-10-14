@@ -249,7 +249,7 @@ def test_calibration_fit_save_and_load_round_trip(client, tmp_path):
         "frame_token": recaptured.headers["x-frame-token"],
         "max_check_error_m": 0.05,
     }
-    forced_payload["points"] = [*points[:-1], {**points[-1], "court_m": [4, 3]}]
+    forced_payload["points"] = [*points[:-1], {**points[-1], "court_m": [3.5, 2.5]}]
     refused = client.put("/api/cameras/clip/calibration", json=forced_payload)
     assert refused.status_code == 422 and "exceeds" in refused.text
     forced_payload["save_anyway"] = True

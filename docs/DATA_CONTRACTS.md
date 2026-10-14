@@ -342,6 +342,13 @@ court kind/dimensions/landmarks; capture image width/height; the image-to-court 
 all image/court points and their `calibration` or `check` role; each point's Euclidean residual in
 metres; separate calibration/check means and maximum check residual; the configured maximum
 check mean; and whether the user forced saving above that error. At least four fit points and two
-held-out check points are required. Check points never participate in fitting. Saving anyway can
-override the check-mean threshold only, not these minimums. The audit frame is the exact raw frame
+held-out check points are required. Check points never participate in fitting. No two points may
+mark the same place (within 1e-6 m on the court or 1 px in the image), so a check point is a
+different floor mark from every fit point; the fit points must not be collinear or bunched (the
+square root of the ratio of their minor to major variance is at least 0.1, in the image and on the
+court). The configured maximum check mean is at most 2.0 m. Saving anyway can override the
+check-mean threshold only, not these minimums, the point rules or the homography checks
+(finite, invertible, condition number at most 1e7, every point in front of the horizon). A loader
+recomputes the residuals, the mean errors and `forced` from the homography and the points and
+refuses a file where they disagree. The audit frame is the exact raw frame
 used to place the image points.

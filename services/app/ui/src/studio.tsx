@@ -100,15 +100,11 @@ const landmarkNames = [
   "near_key_far_left",
   "near_key_far_right",
   "near_key_near_right",
-  "near_free_throw_left",
-  "near_free_throw_right",
   "near_basket_floor",
   "far_key_near_left",
   "far_key_far_left",
   "far_key_far_right",
   "far_key_near_right",
-  "far_free_throw_left",
-  "far_free_throw_right",
   "far_basket_floor",
 ];
 const fibaPoints: Record<string, [number, number]> = {
@@ -123,15 +119,11 @@ const fibaPoints: Record<string, [number, number]> = {
   near_key_far_left: [5.8, 5.05],
   near_key_far_right: [5.8, 9.95],
   near_key_near_right: [0, 9.95],
-  near_free_throw_left: [5.8, 5.05],
-  near_free_throw_right: [5.8, 9.95],
   near_basket_floor: [1.575, 7.5],
   far_key_near_left: [22.2, 5.05],
   far_key_far_left: [28, 5.05],
   far_key_far_right: [28, 9.95],
   far_key_near_right: [22.2, 9.95],
-  far_free_throw_left: [22.2, 5.05],
-  far_free_throw_right: [22.2, 9.95],
   far_basket_floor: [26.425, 7.5],
 };
 
@@ -1229,6 +1221,7 @@ export default function StudioApp() {
                     <input
                       type="number"
                       min="0.01"
+                      max="2"
                       step="0.05"
                       value={maxError}
                       onChange={(event) => {

@@ -431,8 +431,8 @@ class Studio:
                 enforce_limit=save,
                 require_checks=save,
             )
-        except (KeyError, TypeError, ValueError) as exc:
-            raise HTTPException(422, str(exc)) from exc
+        except (KeyError, TypeError, ValueError, np.linalg.LinAlgError) as exc:
+            raise HTTPException(422, str(exc) or exc.__class__.__name__) from exc
         result["projected_court_lines"] = projected_court_lines(
             result["homography_image_to_court"], court
         )

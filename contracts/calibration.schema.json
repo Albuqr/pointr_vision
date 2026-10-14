@@ -63,7 +63,7 @@
         "check_max_m": {"type": "number", "minimum": 0}
       }
     },
-    "max_check_error_m": {"type": "number", "exclusiveMinimum": 0},
+    "max_check_error_m": {"type": "number", "exclusiveMinimum": 0, "maximum": 2.0},
     "forced": {"type": "boolean"},
     "audit_frame": {"const": "frame.jpg"}
   },

@@ -193,5 +193,80 @@ def test_validate_rejects_a_homography_whose_points_are_beyond_the_horizon():
 def test_fit_refuses_duplicate_image_points_even_with_save_anyway():
     source = points()
     source[1]["image_px"] = list(source[0]["image_px"])  # two fit points at one pixel
-    with pytest.raises(ValueError, match="singular|conditioned|RANSAC"):
+    with pytest.raises(ValueError, match="same image position"):
         fit_calibration(source, save_anyway=True, enforce_limit=False)
+
+
+# -- hold-out integrity ---------------------------------------------------------------------
+
+
+def test_check_point_at_a_fit_points_court_position_is_refused():
+    """The reviewed hole: a 3 m mislabel passed with check error 4e-7 because both 'check'
+    points were the fit points again."""
+    source = points()
+    source[0]["court_m"] = [3.0, 3.0]  # one corner mislabelled by 3 m
+    source[4] = {**source[1], "role": "check"}  # a check point on a fit point's mark
+    source[5] = {**source[2], "role": "check"}
+    with pytest.raises(ValueError, match="same (court|image) position"):
+        fit_calibration(source, save_anyway=True)
+
+
+def test_check_point_at_a_fit_points_pixel_is_refused_even_at_another_court_position():
+    source = points()
+    source[4] = {
+        **source[4],
+        "image_px": [source[0]["image_px"][0] + 0.5, source[0]["image_px"][1]],
+    }
+    with pytest.raises(ValueError, match="same image position"):
+        fit_calibration(source)
+
+
+def test_two_check_points_on_one_mark_are_refused():
+    source = points()
+    source[5] = {**source[4]}
+    with pytest.raises(ValueError, match="same (court|image) position"):
+        fit_calibration(source)
+
+
+def test_collinear_fit_points_are_a_clean_error_not_a_crash():
+    source = [point(x, 5, "calibration") for x in range(4)] + points()[4:]
+    with pytest.raises(ValueError, match="collinear or bunched"):
+        fit_calibration(source)
+
+
+def test_fit_points_bunched_in_a_sliver_are_refused():
+    sliver = [
+        {"image_px": [0, 0], "court_m": [0, 0], "role": "calibration"},
+        {"image_px": [1000, 0], "court_m": [10, 0], "role": "calibration"},
+        {"image_px": [1000, 5], "court_m": [10, 0.05], "role": "calibration"},
+        {"image_px": [0, 5], "court_m": [0, 0.05], "role": "calibration"},
+    ] + points()[4:]
+    with pytest.raises(ValueError, match="collinear or bunched"):
+        fit_calibration(sliver)
+
+
+@pytest.mark.parametrize("limit", [2.5, 100.0, float("inf"), 0.0])
+def test_the_error_limit_is_capped_at_two_metres(limit):
+    with pytest.raises(ValueError, match="at most 2.0 m"):
+        fit_calibration(points(), max_check_error_m=limit)
+
+
+def fixture_document():
+    return json.loads((ROOT / "tests/fixtures/contracts/calibration.example.json").read_text())
+
+
+@pytest.mark.parametrize(
+    "edit, message",
+    [
+        (lambda d: d["errors"].update(check_mean_m=0.01), "check_mean_m does not match"),
+        (lambda d: d["points"][4].update(residual_m=0.3), "residual does not match"),
+        (lambda d: d.update(forced=True), "forced flag does not match"),
+        (lambda d: d.update(max_check_error_m=5.0), "at most 2.0 m"),
+        (lambda d: d["points"][4].update(court_m=list(d["points"][0]["court_m"])), "same"),
+    ],
+)
+def test_validator_recomputes_errors_and_holdout_instead_of_trusting_the_file(edit, message):
+    document = fixture_document()
+    edit(document)
+    with pytest.raises(ValueError, match=message):
+        validate_calibration(document)

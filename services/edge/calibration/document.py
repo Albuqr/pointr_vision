@@ -6,7 +6,13 @@ import re
 import uuid
 from pathlib import Path
 
-from services.edge.calibration.homography import _matrix, check_homography
+from services.edge.calibration.homography import (
+    MAX_CHECK_ERROR_LIMIT_M,
+    _matrix,
+    check_homography,
+    check_point_set,
+    point_residuals,
+)
 
 CONTRACT_VERSION = "0.8.0"
 
@@ -65,8 +71,11 @@ def validate_calibration(document):
         or isinstance(threshold, bool)
         or not math.isfinite(threshold)
         or threshold <= 0
+        or threshold > MAX_CHECK_ERROR_LIMIT_M
     ):
-        raise ValueError("calibration error limit must be finite and positive")
+        raise ValueError(
+            f"calibration error limit must be positive and at most {MAX_CHECK_ERROR_LIMIT_M} m"
+        )
     _matrix(document["homography_image_to_court"])
     try:
         error = float(document["errors"]["check_mean_m"])
@@ -112,8 +121,34 @@ def validate_calibration(document):
             raise ValueError("calibration point residual must be finite and non-negative")
     if document["audit_frame"] != "frame.jpg" or not isinstance(document["forced"], bool):
         raise ValueError("calibration audit frame or forced flag is invalid")
-    check_homography(document["homography_image_to_court"], [p["image_px"] for p in points])
+    homography = document["homography_image_to_court"]
+    check_homography(homography, [p["image_px"] for p in points])
+    check_point_set(points)
+    _check_recomputed_errors(document, homography, points)
     return document
+
+
+def _check_recomputed_errors(document, homography, points, tolerance=1e-6):
+    """The per-point residuals, the mean errors and the forced flag are recomputed from the
+    homography and the points: a stored value that disagrees (or a check point that was never
+    held out) means the file was edited or written by a buggy writer."""
+    residuals = point_residuals(homography, points)
+    for stored, recomputed in zip((p["residual_m"] for p in points), residuals, strict=True):
+        if abs(stored - recomputed) > tolerance:
+            raise ValueError("calibration point residual does not match the homography")
+    fit = [r for r, p in zip(residuals, points, strict=True) if p["role"] == "calibration"]
+    check = [r for r, p in zip(residuals, points, strict=True) if p["role"] == "check"]
+    expected = {
+        "calibration_mean_m": sum(fit) / len(fit),
+        "check_mean_m": sum(check) / len(check),
+        "check_max_m": max(check),
+    }
+    for key, value in expected.items():
+        stored = document["errors"].get(key)
+        if not isinstance(stored, (int, float)) or abs(stored - value) > tolerance:
+            raise ValueError(f"calibration {key} does not match the points and homography")
+    if document["forced"] != (expected["check_mean_m"] > document["max_check_error_m"]):
+        raise ValueError("calibration forced flag does not match its check error and limit")
 
 
 def load_calibration(path: str | Path):
