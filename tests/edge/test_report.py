@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 from jsonschema import Draft202012Validator
 
+from services.edge.calibration.homography import CalibrationPositions
 from services.edge.reports import cli
 from services.edge.reports.build import build_report, format_summary, write_report
 from services.edge.reports.movement import Params
@@ -108,9 +109,21 @@ def make_run(
                 "in_court",
             ]
         )
+        positions = CalibrationPositions(calibration) if calibration else None
         for seq, tid, x, y in tracks:
-            w.writerow([seq, tid, x - 10, y - 100, x + 10, y, 0.9, "", ""])
+            cells = [""] * 5  # x_m, y_m, calibration_id, position_method, in_court
+            if positions and (xy := positions(x, y)) is not None:
+                cells = [f"{xy[0]:.4f}", f"{xy[1]:.4f}", positions.calibration_id,
+                         "box_bottom_center", str(positions.in_court(*xy)).lower()]  # fmt: skip
+            w.writerow([seq, tid, x - 10, y - 100, x + 10, y, 0.9, "", "", *cells])
     return run_dir
+
+
+def test_make_run_writes_tracks_rows_with_as_many_fields_as_the_header(tmp_path):
+    run_dir = make_run(tmp_path, dense(3), [(0, 1, 100, 200), (1, 1, 110, 200)])
+    with open(run_dir / "tracks.csv", newline="", encoding="utf-8") as f:
+        rows = list(csv.reader(f))
+    assert {len(row) for row in rows} == {len(rows[0])} == {14}
 
 
 def dense(n: int, step: float = 0.5, ndet: int = 1) -> list[tuple]:
