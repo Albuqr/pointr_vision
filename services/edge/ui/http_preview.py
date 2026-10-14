@@ -146,6 +146,13 @@ class HttpPreview:
             except queue.Full:
                 pass
 
+    def _matches_calibration_size(self, image) -> bool:
+        if not self.calibration:
+            return False
+        height, width = image.shape[:2]
+        size = self.calibration.get("image_size", {})
+        return (width, height) == (size.get("width"), size.get("height"))
+
     def _encode(self):
         while not self._stop.is_set():
             try:
@@ -157,7 +164,7 @@ class HttpPreview:
                 time.sleep(delay)
             try:
                 image = draw_tracks(item.frame.image, item.tracks)
-                if self.calibration:
+                if self._matches_calibration_size(image):
                     image = draw_projected_court(
                         image, self.calibration["homography_image_to_court"], self.court
                     )

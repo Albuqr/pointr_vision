@@ -807,3 +807,15 @@ mislead a recording. Fixed one item per commit, each with a test that fails on t
 fake camera. RANSAC may leave out a good point instead of the bad one (its choice among equal
 fits); the Studio now names the point it left out. D-026 is used by the `v0-cameras` branch, so
 this branch skips it.
+
+## D-028 · 2026-10-14 · Defer physical calibration acceptance
+
+**Decision.** Complete software fixes and automated tests for the calibration review without
+waiting for camera hardware or a tape-measure session. The user will perform the physical checks
+when equipment and time are available. Until then, do not describe the calibration as accepted on
+real cameras or measured court marks.
+
+**Deferred acceptance.** Capture an idle camera frame and verify its resolution against recording;
+fit measured floor marks on a real court and compare held-out check residuals with tape-measure
+truth. Record the result in the phase 10 report when performed.
+

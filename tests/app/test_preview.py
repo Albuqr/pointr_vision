@@ -62,6 +62,19 @@ def test_raw_snapshot_endpoint_uses_a_copy_from_the_capture_provider():
         preview.close()
 
 
+def test_calibration_overlay_is_only_used_at_the_saved_frame_size():
+    calibration = {
+        "image_size": {"width": 120, "height": 80},
+        "court": {"kind": "custom", "length_m": 4.0, "width_m": 3.0, "landmarks": {}},
+    }
+    preview = HttpPreview(
+        0, lambda: "OK", lambda: HudInfo(0, 0, 0, 0, 0, 0), calibration=calibration
+    )
+    assert preview._matches_calibration_size(np.zeros((80, 120, 3), np.uint8))
+    assert not preview._matches_calibration_size(np.zeros((180, 320, 3), np.uint8))
+    preview.server.server_close()
+
+
 def test_publish_drops_old_results_without_waiting():
     preview = HttpPreview(0, lambda: "OK", lambda: HudInfo(0, 0, 0, 0, 0, 0))
     frame = Frame(1, 0.0, "2026-01-01T00:00:00Z", np.zeros((8, 8, 3), np.uint8), "fake")

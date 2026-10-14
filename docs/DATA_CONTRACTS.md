@@ -137,7 +137,10 @@ as its timestamp (D-016). `tracker.params` records the effective installed track
 check residual, projection matrix, court bounds and image size used by this run. Keeping the
 projection in `run.json` permits offline report regeneration after later recalibration. The
 loaded calibration is rejected before processing if saved image dimensions differ from the opened
-capture dimensions.
+capture dimensions. If a later frame has another size, the run logs an `error` event and writes
+empty calibrated positions for its tracks; the homography is used again only when frames return to
+the saved dimensions. The HTTP preview also suppresses the court overlay on a differently sized
+frame.
 For ByteTrack timestamp mode, `lost_track_buffer` is a count of 30 FPS frames and the
 effective lost-track duration is `lost_track_buffer / 30` seconds, rounded to the nearest
 frame when configured with `--track-lost-secs`.

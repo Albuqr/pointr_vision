@@ -74,8 +74,10 @@ def test_first_frame_of_another_size_fails_the_camera_with_both_sizes(
     stderr = capsys.readouterr().err
     assert "calibration cannot be used" in stderr
     assert "320x180" in stderr and "640x360" in stderr  # both sizes, for the UI to show
-    session, _, _, _ = session_files(out)
+    session, _, frames, tracks = session_files(out)
     assert session["status"] == "error"
+    assert sum(int(frame["n_tracks"] or 0) for frame in frames) == len(tracks)
+    assert all(row["x_m"] == row["y_m"] == row["in_court"] == "" for row in tracks)
 
 
 def test_a_size_change_mid_session_stops_the_homography_and_logs_an_event(
