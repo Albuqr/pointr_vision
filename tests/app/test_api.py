@@ -85,6 +85,13 @@ def test_camera_config_returns_field_specific_errors(client):
     fields = {item["field"] for item in response.json()["detail"]["fields"]}
     assert {"name", "source", "det_size", "fps_cap"} <= fields
 
+    malformed = client.post(
+        "/api/cameras",
+        json={"camera_id": "invalid id", "name": "valid", "source": "0", "link": []},
+    )
+    errors = malformed.json()["detail"]["fields"]
+    assert {item["field"] for item in errors} >= {"camera_id", "link"}
+
 
 def test_camera_urls_are_masked_in_config_api_and_credentials_survive_edit(client):
     source = "rtsp://operator:secret@192.168.1.15:554/stream?token=token-secret"

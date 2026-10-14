@@ -91,7 +91,9 @@ def test_camera_settings_keep_backup_and_active_file_on_replace_failure(tmp_path
     assert json.loads(store.path.with_name("cameras.json.bak").read_text()) == original
 
 
-@pytest.mark.parametrize("contents", ["{broken", "[]x", "null"])
+@pytest.mark.parametrize(
+    "contents", ["{broken", "[]x", "null", '[{"camera_id":"cam1","source":"0","link":[]}]']
+)
 def test_corrupt_camera_settings_load_empty_with_warning(tmp_path, contents):
     path = tmp_path / "cameras.json"
     path.write_text(contents, encoding="utf-8")

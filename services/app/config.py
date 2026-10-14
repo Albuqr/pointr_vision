@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from services.edge.launcher import ConfigError, parse_config
+from services.edge.session.types import CAMERA_ID_RE
 from services.edge.session.writer import mask_credentials
 
 DET_SIZES = frozenset(range(320, 1281, 32))
@@ -47,11 +48,23 @@ def _field_errors(entries) -> list[dict]:
         return [{"index": None, "field": "cameras", "message": "must be a list"}]
     errors = []
     names: dict[str, int] = {}
+    camera_ids: dict[str, int] = {}
     for index, item in enumerate(entries):
         if not isinstance(item, dict):
             errors.append({"index": index, "field": "camera", "message": "must be an object"})
             continue
         camera_id = item.get("camera_id", f"camera {index + 1}")
+        if not isinstance(camera_id, str) or not CAMERA_ID_RE.fullmatch(camera_id):
+            errors.append(
+                {
+                    "index": index,
+                    "field": "camera_id",
+                    "message": "use 1-32 letters, digits, _ or -",
+                }
+            )
+        elif camera_id in camera_ids:
+            errors.append({"index": index, "field": "camera_id", "message": "ID must be unique"})
+        camera_ids[str(camera_id)] = index
         name = item.get("name", camera_id)
         if not isinstance(name, str) or not name.strip():
             errors.append({"index": index, "field": "name", "message": "name is required"})
@@ -93,6 +106,11 @@ def _field_errors(entries) -> list[dict]:
             )
         if "enabled" in item and not isinstance(item["enabled"], bool):
             errors.append({"index": index, "field": "enabled", "message": "must be true or false"})
+        link = item.get("link", "builtin")
+        if not isinstance(link, str) or link not in {"builtin", "usb", "wifi", "file"}:
+            errors.append(
+                {"index": index, "field": "link", "message": "choose a listed connection type"}
+            )
     return errors
 
 
@@ -112,7 +130,7 @@ class CameraConfig:
         except FileNotFoundError:
             self.warning = None
             return []
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, UnicodeError, RecursionError) as exc:
             self.warning = mask_credentials(
                 f"Camera settings could not be read: {exc}. Add cameras again."
             )
@@ -145,9 +163,27 @@ class CameraConfig:
             try:
                 parse_config(entries)
             except ConfigError as exc:
+                detail = str(exc)
+                field = next(
+                    (
+                        key
+                        for key in ("camera_id", "det_size", "track_", "link", "source")
+                        if key in detail
+                    ),
+                    "source",
+                )
+                if field == "track_":
+                    field = next(
+                        (
+                            key
+                            for key in ("track_lost_secs", "track_activation", "track_min_frames")
+                            if key in detail
+                        ),
+                        "source",
+                    )
                 error = ConfigError(str(exc))
                 error.field_errors = [
-                    {"index": None, "field": "source", "message": mask_credentials(str(exc))}
+                    {"index": None, "field": field, "message": mask_credentials(detail)}
                 ]
                 raise error from exc
         self.path.parent.mkdir(parents=True, exist_ok=True)

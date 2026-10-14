@@ -2,9 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 type Camera = {
   camera_id: string;
+  name?: string;
   source: string;
   link: string;
   det_size?: number;
+  fps_cap?: number;
+  enabled?: boolean;
   track_lost_secs?: number;
   track_activation?: number;
   track_min_frames?: number;
@@ -17,6 +20,7 @@ type TestResult = {
 };
 type CameraStatus = {
   camera_id: string;
+  name?: string;
   state: string;
   processed_fps: number | null;
   people: number;
@@ -44,7 +48,18 @@ type Status = {
   running: boolean;
   cameras: CameraStatus[];
   idle_cameras?: IdleCamera[];
+  config_warning?: string | null;
 };
+type FieldIssue = { index: number | null; field: string; message: string };
+
+class RequestError extends Error {
+  fields: FieldIssue[];
+
+  constructor(message: string, fields: FieldIssue[] = []) {
+    super(message);
+    this.fields = fields;
+  }
+}
 type Session = {
   camera_id: string;
   group_id: string;
@@ -104,13 +119,18 @@ async function request<T>(
   if (!response.ok) {
     const text = await response.text();
     let message = text.replace(/^"|"$/g, "");
+    let fields: FieldIssue[] = [];
     try {
       const detail = JSON.parse(text).detail;
       if (typeof detail === "string") message = detail;
+      else if (detail && typeof detail === "object") {
+        message = detail.message ?? "Camera settings were rejected.";
+        fields = Array.isArray(detail.fields) ? detail.fields : [];
+      }
     } catch {
       // not JSON: show the text as it is
     }
-    throw new Error(message);
+    throw new RequestError(message, fields);
   }
   return response.json() as Promise<T>;
 }
@@ -206,7 +226,13 @@ function EventLog({ events }: { events: CameraEvent[] }) {
   );
 }
 
-const emptyCamera: Camera = { camera_id: "cam1", source: "0", link: "builtin" };
+const emptyCamera: Camera = {
+  camera_id: "cam1",
+  name: "Camera 1",
+  source: "0",
+  link: "builtin",
+  enabled: true,
+};
 export default function StudioApp() {
   const [page, setPage] = useState("Record");
   const [cameras, setCameras] = useState<Camera[]>([]);
@@ -216,6 +242,7 @@ export default function StudioApp() {
   const [offline, setOffline] = useState(""); // the poll failed; clears when it works again
   const [notice, setNotice] = useState("");
   const [tested, setTested] = useState<Record<string, TestResult>>({});
+  const [fieldErrors, setFieldErrors] = useState<FieldIssue[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
   const [form, setForm] = useState<Camera>(emptyCamera);
   const [selected, setSelected] = useState("");
@@ -284,11 +311,15 @@ export default function StudioApp() {
     try {
       await request(url, method, body);
       setNotice("Changes saved.");
+      setFieldErrors([]);
       await refresh();
+      return true;
     } catch (reason) {
       setNotice("");
       setError(String(reason));
+      setFieldErrors(reason instanceof RequestError ? reason.fields : []);
       await refresh(); // a refused start leaves its reason in the camera's own panel
+      return false;
     }
   }
 
@@ -311,13 +342,25 @@ export default function StudioApp() {
 
   async function submitCamera(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await action(
+    const saved = await action(
       editing ? `/api/cameras/${editing}` : "/api/cameras",
       editing ? "PUT" : "POST",
       form,
     );
-    setEditing(null);
-    setForm(emptyCamera);
+    if (saved) {
+      setEditing(null);
+      setForm(emptyCamera);
+    }
+  }
+
+  const formIndex = editing
+    ? cameras.findIndex((camera) => camera.camera_id === editing)
+    : cameras.length;
+  function fieldError(field: string) {
+    return fieldErrors
+      .filter((issue) => issue.field === field && (issue.index === null || issue.index === formIndex))
+      .map((issue) => issue.message)
+      .join("; ");
   }
 
   async function captureFrame() {
@@ -506,6 +549,11 @@ export default function StudioApp() {
             Retrying…
           </div>
         )}
+        {status.config_warning && (
+          <div role="alert" className="notice error-box">
+            Camera configuration warning: {status.config_warning}
+          </div>
+        )}
         {(error || notice) && (
           <div role="status" className={error ? "notice error-box" : "notice"}>
             {error || notice}
@@ -542,7 +590,7 @@ export default function StudioApp() {
               >
                 <h3>{editing ? "Edit camera" : "Add a camera"}</h3>
                 <label>
-                  Camera name
+                  Camera ID
                   <input
                     required
                     value={form.camera_id}
@@ -550,7 +598,26 @@ export default function StudioApp() {
                       setForm({ ...form, camera_id: event.target.value })
                     }
                     placeholder="cam1"
+                    aria-invalid={!!fieldError("camera_id")}
                   />
+                  {fieldError("camera_id") && (
+                    <small className="field-error">{fieldError("camera_id")}</small>
+                  )}
+                </label>
+                <label>
+                  Display name
+                  <input
+                    required
+                    value={form.name ?? form.camera_id}
+                    onChange={(event) =>
+                      setForm({ ...form, name: event.target.value })
+                    }
+                    placeholder="Main court"
+                    aria-invalid={!!fieldError("name")}
+                  />
+                  {fieldError("name") && (
+                    <small className="field-error">{fieldError("name")}</small>
+                  )}
                 </label>
                 <label>
                   Connection type
@@ -565,6 +632,9 @@ export default function StudioApp() {
                     <option value="wifi">Wi-Fi phone</option>
                     <option value="file">Video file</option>
                   </select>
+                  {fieldError("link") && (
+                    <small className="field-error">{fieldError("link")}</small>
+                  )}
                 </label>
                 <label>
                   {form.link === "wifi"
@@ -583,17 +653,32 @@ export default function StudioApp() {
                         ? "http://192.168.1.20:4747/video"
                         : "0"
                     }
+                    aria-invalid={!!fieldError("source")}
                   />
+                  {fieldError("source") && (
+                    <small className="field-error">{fieldError("source")}</small>
+                  )}
+                </label>
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={form.enabled !== false}
+                    aria-invalid={!!fieldError("enabled")}
+                    onChange={(event) =>
+                      setForm({ ...form, enabled: event.target.checked })
+                    }
+                  />
+                  Enabled for recording
+                  {fieldError("enabled") && (
+                    <small className="field-error">{fieldError("enabled")}</small>
+                  )}
                 </label>
                 <details>
                   <summary>Detection and tracking options</summary>
                   <div className="option-grid">
                     <label>
                       Detection size
-                      <input
-                        type="number"
-                        min="32"
-                        step="32"
+                      <select
                         value={form.det_size ?? ""}
                         onChange={(event) =>
                           setForm({
@@ -603,8 +688,43 @@ export default function StudioApp() {
                               : undefined,
                           })
                         }
-                        placeholder="Model default"
+                        aria-invalid={!!fieldError("det_size")}
+                      >
+                        <option value="">Model default</option>
+                        {Array.from({ length: 31 }, (_, index) => 320 + index * 32).map(
+                          (size) => (
+                            <option key={size} value={size}>
+                              {size}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                      {fieldError("det_size") && (
+                        <small className="field-error">{fieldError("det_size")}</small>
+                      )}
+                    </label>
+                    <label>
+                      FPS cap (optional)
+                      <input
+                        type="number"
+                        min="1"
+                        max="60"
+                        step="1"
+                        value={form.fps_cap ?? ""}
+                        onChange={(event) =>
+                          setForm({
+                            ...form,
+                            fps_cap: event.target.value
+                              ? Number(event.target.value)
+                              : undefined,
+                          })
+                        }
+                        placeholder="No cap"
+                        aria-invalid={!!fieldError("fps_cap")}
                       />
+                      {fieldError("fps_cap") && (
+                        <small className="field-error">{fieldError("fps_cap")}</small>
+                      )}
                     </label>
                     <label>
                       Lost track (seconds)
@@ -689,9 +809,9 @@ export default function StudioApp() {
                 {cameras.map((camera) => (
                   <article className="camera-row" key={camera.camera_id}>
                     <div>
-                      <b>{camera.camera_id}</b>
+                      <b>{camera.name || camera.camera_id}</b>
                       <span>
-                        {camera.link} · {camera.source}
+                        {camera.camera_id} · {camera.link} · {camera.source}
                       </span>
                     </div>
                     <div className="row-actions">
@@ -802,7 +922,7 @@ export default function StudioApp() {
                 <button
                   className="primary"
                   type="button"
-                  disabled={status.running || cameras.length === 0}
+                  disabled={status.running || !cameras.some((camera) => camera.enabled !== false)}
                   onClick={() => void action("/api/recording/start")}
                 >
                   Start group
@@ -837,7 +957,7 @@ export default function StudioApp() {
                   <div className="feed-head">
                     <div>
                       <span className="eyebrow">CAMERA</span>
-                      <h3>{camera.camera_id}</h3>
+                      <h3>{camera.name || camera.camera_id}</h3>
                     </div>
                     <span className={`state ${camera.state}`}>
                       {camera.state}
