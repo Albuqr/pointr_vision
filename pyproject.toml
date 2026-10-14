@@ -20,14 +20,17 @@ dependencies = [
     "trackers==2.6.1",
     "fastapi==0.143.0",
     "uvicorn==0.54.0",
-    "jsonschema",  # the runtime calibration validator checks files against contracts/*.schema.json
+    "jsonschema==4.26.0",  # verified Draft 2020-12 validator for saved calibration files
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff", "jsonschema"]
+dev = ["pytest", "ruff"]
 
 [tool.setuptools.packages.find]
 include = ["services*"]
+
+[tool.setuptools.package-data]
+"services.edge.calibration" = ["calibration.schema.json"]
 
 [tool.ruff]
 line-length = 100
