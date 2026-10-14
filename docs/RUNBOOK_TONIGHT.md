@@ -75,6 +75,21 @@ if the camera moved. Positions are invalid while a player is in the air because 
 bottom-centre is not on the floor. A saved calibration is applied automatically on recording;
 the session report states whether positions are in metres or pixels.
 
+**Half-court setup (FIBA 14 × 15 m).** For a two-phone session, mount one phone high near each
+sideline/baseline corner and aim both diagonally so the baseline and midcourt line stay visible.
+Calibrate each camera separately after mounting. Select **Half court**; click the visible baseline
+corners (x=0) and midcourt-line corners (x=14) as the four fit points. The diagram highlights
+these anchors. Use two separate visible lane intersections or measured floor marks as held-out
+checks. Keep the fit points spread over at least 20% of the half-court area; a key-only cluster is
+rejected because it does not constrain the rest of the floor. If a recommended corner is hidden,
+use a measured floor mark with its actual coordinates. Keep out-of-court positions in the report;
+the calibration does not clamp them.
+
+**Tape-mark check.** Before recording, place tape marks on the floor 0.5 m in from the sideline,
+at x=1 m and x=4 m from the basket baseline. Add both as held-out check points at (1, 0.5) and
+(4, 0.5), not as fit points. The fitted distance between them should be 3 m; record the measured
+distance difference and the held-out residuals for each phone. Repeat after moving either phone.
+
 To use the CLI instead, pass the saved JSON explicitly with `--calibration FILE`. The saved
 image dimensions must match the capture resolution.
 
