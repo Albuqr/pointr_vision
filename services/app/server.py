@@ -98,11 +98,18 @@ class Studio:
 
     def save(self, entries):
         try:
-            if entries:
-                parse_config(entries)
             self.config.write(entries)
         except ConfigError as exc:
-            raise HTTPException(422, mask_credentials(str(exc))) from exc
+            detail = mask_credentials(str(exc))
+            if getattr(exc, "field_errors", None):
+                detail = {
+                    "message": detail,
+                    "fields": [
+                        {**error, "message": mask_credentials(error["message"])}
+                        for error in exc.field_errors
+                    ],
+                }
+            raise HTTPException(422, detail) from exc
 
     def recording(self):
         return bool(self.worker and self.worker.is_alive())
@@ -150,7 +157,9 @@ class Studio:
             entries = self.entries()
             if not entries:
                 raise HTTPException(422, "add at least one camera")
-            cameras = parse_config(entries)
+            cameras = [camera for camera in parse_config(entries) if camera.enabled]
+            if not cameras:
+                raise HTTPException(422, "enable at least one camera before starting")
             # Load every calibration before any state changes. A camera whose calibration is
             # missing records uncalibrated; one whose calibration is corrupt does too, but says
             # so (a session event, and a warning in the status). One camera never blocks the rest.
@@ -200,6 +209,9 @@ class Studio:
                         self.preview_ports[camera.camera_id],
                         calibration_paths[camera.camera_id],
                         warnings.get(camera.camera_id),
+                        camera.name,
+                        camera.fps_cap,
+                        camera.enabled,
                     )
                 )
             cameras = configured
@@ -292,6 +304,7 @@ class Studio:
             cameras.append(
                 {
                     "camera_id": child.cam.camera_id,
+                    "name": child.cam.name or child.cam.camera_id,
                     "state": status,
                     "processed_fps": fps,
                     "people": people,
@@ -332,6 +345,7 @@ class Studio:
             "group_id": self.group_id,
             "cameras": cameras,
             "idle_cameras": idle,
+            "config_warning": self.config.warning,
             "final": finals,
         }
 
@@ -360,7 +374,7 @@ class Studio:
                 continue
         return list(state["rows"])
 
-    def test_camera(self, camera_id, duration=2.0):
+    def test_camera(self, camera_id, duration=3.0):
         with self.lock:
             if self.recording() and any(c.camera_id == camera_id for c in self.launcher.cameras):
                 raise HTTPException(409, "cannot test a camera while it is recording")
@@ -370,6 +384,7 @@ class Studio:
         source = None
         try:
             source = open_source(str(entry["source"]), None)
+            source.fps_cap = entry.get("fps_cap")
             info = source.open()
             started = time.monotonic()
             deadline = started + duration
@@ -437,6 +452,7 @@ class Studio:
             else:
                 # the recorder's own capture size, so the frame is the one it will record
                 source = open_source(str(entry["source"]), DEFAULT_CAPTURE_SIZE)
+                source.fps_cap = entry.get("fps_cap")
                 try:
                     source.open()
                     deadline = time.monotonic() + 3
@@ -457,7 +473,9 @@ class Studio:
                     raise ValueError("JPEG encoding failed")
                 jpeg = encoded.tobytes()
         except (SourceOpenError, OSError, ValueError, cv2.error) as exc:
-            raise HTTPException(502, f"could not capture calibration frame: {exc}") from exc
+            raise HTTPException(
+                502, mask_credentials(f"could not capture calibration frame: {exc}")
+            ) from exc
         token = str(uuid.uuid4())
         if cache:
             with self.lock:
@@ -593,7 +611,15 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
 
     @app.get("/api/cameras")
     def list_cameras():
-        return studio.entries()
+        return [
+            {
+                **entry,
+                "name": entry.get("name", entry["camera_id"]),
+                "enabled": entry.get("enabled", True),
+                "source": mask_credentials(str(entry["source"])),
+            }
+            for entry in studio.entries()
+        ]
 
     @app.post("/api/cameras")
     async def add_camera(request: Request):
@@ -601,7 +627,12 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
         entries = studio.entries()
         entries.append(entry)
         studio.save(entries)
-        return entry
+        return {
+            **entry,
+            "source": mask_credentials(str(entry["source"])),
+            "name": entry.get("name", entry["camera_id"]),
+            "enabled": entry.get("enabled", True),
+        }
 
     @app.put("/api/cameras/{camera_id}")
     async def edit_camera(camera_id: str, request: Request):
@@ -612,9 +643,16 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
         )
         if index is None:
             raise HTTPException(404, "camera not found")
+        if entry.get("source") == mask_credentials(str(entries[index]["source"])):
+            entry["source"] = entries[index]["source"]
         entries[index] = entry
         studio.save(entries)
-        return entry
+        return {
+            **entry,
+            "source": mask_credentials(str(entry["source"])),
+            "name": entry.get("name", entry["camera_id"]),
+            "enabled": entry.get("enabled", True),
+        }
 
     @app.delete("/api/cameras/{camera_id}")
     def remove_camera(camera_id: str):

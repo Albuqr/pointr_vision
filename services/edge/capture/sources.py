@@ -32,8 +32,10 @@ class _CvSource:
 
     kind = ""
 
-    def __init__(self, ref: str):
+    def __init__(self, ref: str, fps_cap: float | None = None):
         self.ref = ref
+        self.fps_cap = fps_cap
+        self._next_read: float | None = None
         self._cap: cv2.VideoCapture | None = None
         self._seq = 0  # counts read attempts, so gaps mark failed reads (D-013)
 
@@ -60,6 +62,11 @@ class _CvSource:
     def _grab(self) -> Frame | None:
         if self._cap is None:
             raise RuntimeError(f"{self.kind} {self.ref!r} read before open()")
+        if self.fps_cap is not None:
+            now = time.perf_counter()
+            if self._next_read is not None and self._next_read > now:
+                time.sleep(self._next_read - now)
+            self._next_read = time.perf_counter() + 1 / self.fps_cap
         ok, image = self._cap.read()
         t_recv = time.perf_counter()
         seq = self._seq
@@ -83,8 +90,8 @@ class _LiveSource(_CvSource):
 
     reopen_after = 1.0
 
-    def __init__(self, ref: str):
-        super().__init__(ref)
+    def __init__(self, ref: str, fps_cap: float | None = None):
+        super().__init__(ref, fps_cap)
         self._next_reopen: float | None = None
 
     def read(self) -> Frame | None:
@@ -107,8 +114,10 @@ class CameraSource(_LiveSource):
 
     kind = "camera"
 
-    def __init__(self, index: int, size: tuple[int, int] | None = None):
-        super().__init__(str(index))
+    def __init__(
+        self, index: int, size: tuple[int, int] | None = None, fps_cap: float | None = None
+    ):
+        super().__init__(str(index), fps_cap)
         self.index = index
         self.size = size  # requested (width, height); open() reports what the camera gives
 
@@ -118,6 +127,8 @@ class CameraSource(_LiveSource):
         if self.size and cap.isOpened():  # on every reopen too, so a recovery keeps the size
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.size[0])
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.size[1])
+        if self.fps_cap is not None and cap.isOpened():
+            cap.set(cv2.CAP_PROP_FPS, self.fps_cap)
         return cap
 
 
@@ -143,8 +154,8 @@ class FileSource(_CvSource):
 
     kind = "file"
 
-    def __init__(self, path: str | Path, realtime: bool = True):
-        super().__init__(str(path))
+    def __init__(self, path: str | Path, realtime: bool = True, fps_cap: float | None = None):
+        super().__init__(str(path), fps_cap)
         self.realtime = realtime
         self._period = 0.0
         self._next_due: float | None = None

@@ -16,7 +16,9 @@ A child that fails to start does not stop the others.
 
 import argparse
 import csv
+import ipaddress
 import json
+import math
 import os
 import re
 import signal
@@ -46,9 +48,12 @@ from services.edge.session.writer import mask_credentials, redact  # noqa: E402
 LINKS = ("usb", "wifi", "builtin", "file")
 KEYS = {
     "camera_id",
+    "name",
     "source",
     "link",
     "det_size",
+    "fps_cap",
+    "enabled",
     "preview",
     "track_lost_secs",
     "track_activation",
@@ -78,6 +83,9 @@ class Camera:
     http_preview_port: int | None = None
     calibration_path: str | None = None
     calibration_problem: str | None = None  # why a saved calibration was not used (one line)
+    name: str | None = None
+    fps_cap: float | None = None
+    enabled: bool = True
 
 
 def source_key(source: str) -> str:
@@ -103,6 +111,32 @@ def absolute(source: str) -> str:
     return str(Path(source).resolve())
 
 
+def _validate_url(source: str, where: str) -> None:
+    parts = urlsplit(source)
+    if parts.scheme.lower() not in ("http", "https", "rtsp"):
+        raise ConfigError(f"{where}: URL scheme must be http, https, or rtsp")
+    try:
+        host = parts.hostname
+        _ = parts.port
+    except ValueError as exc:
+        raise ConfigError(f"{where}: URL is malformed") from exc
+    if not host:
+        raise ConfigError(f"{where}: URL must include a host")
+    if host.lower() == "localhost" or host.lower().endswith(".localhost"):
+        raise ConfigError(f"{where}: loopback camera URLs are not allowed")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        address = None
+    if address and (
+        address.is_loopback
+        or address.is_link_local
+        or address.is_unspecified
+        or address.is_multicast
+    ):
+        raise ConfigError(f"{where}: loopback and link-local camera URLs are not allowed")
+
+
 def parse_config(data: object) -> list[Camera]:
     """The camera list from parsed JSON; ConfigError says which entry is wrong and why."""
     if not isinstance(data, list) or not data:
@@ -121,23 +155,41 @@ def parse_config(data: object) -> list[Camera]:
         if not isinstance(camera_id, str) or not CAMERA_ID_RE.fullmatch(camera_id):
             raise ConfigError(f"{where}: camera_id must match {CAMERA_ID_RE.pattern}")
         where = f"camera {camera_id}"
+        name = entry.get("name")
+        if name is not None and (not isinstance(name, str) or not name.strip()):
+            raise ConfigError(f"{where}: name must not be empty")
         source = entry["source"]
         if isinstance(source, int) and not isinstance(source, bool):
             source = str(source)  # 0 is as good as "0"
         if not isinstance(source, str) or not source.strip():
             raise ConfigError(f"{where}: source must be a camera index or a URL or path")
+        source = source.strip()
+        if "://" in source or source.lower().startswith(("http:", "https:", "rtsp:", "file:")):
+            _validate_url(source, where)
         if entry["link"] not in LINKS:
             raise ConfigError(f"{where}: link must be one of {', '.join(LINKS)}")
         size = entry.get("det_size")
         if size is not None and (
             not isinstance(size, int)
             or isinstance(size, bool)
-            or size <= 0
-            or size % DET_SIZE_MULTIPLE
+            or size not in range(320, 1281, DET_SIZE_MULTIPLE)
         ):
-            raise ConfigError(
-                f"{where}: det_size must be a positive multiple of {DET_SIZE_MULTIPLE}"
+            raise ConfigError(f"{where}: det_size must be an allowed size from 320 through 1280")
+        fps_cap = entry.get("fps_cap")
+        try:
+            fps_valid = fps_cap is None or (
+                not isinstance(fps_cap, bool)
+                and isinstance(fps_cap, (int, float))
+                and math.isfinite(float(fps_cap))
+                and 0 < fps_cap <= 60
             )
+        except OverflowError:
+            fps_valid = False
+        if not fps_valid:
+            raise ConfigError(f"{where}: fps_cap must be greater than 0 and at most 60")
+        enabled = entry.get("enabled", True)
+        if not isinstance(enabled, bool):
+            raise ConfigError(f"{where}: enabled must be true or false")
         preview = entry.get("preview")
         if preview is not None and not isinstance(preview, bool):
             raise ConfigError(f"{where}: preview must be true or false")
@@ -172,12 +224,19 @@ def parse_config(data: object) -> list[Camera]:
                 track_lost_secs,
                 track_activation,
                 track_min_frames,
+                name=name.strip() if name else None,
+                fps_cap=fps_cap,
+                enabled=enabled,
             )
         )
     for a in range(len(cameras)):
         for b in range(a):
             if cameras[a].camera_id == cameras[b].camera_id:
                 raise ConfigError(f"camera_id {cameras[a].camera_id!r} is used twice")
+            name_a = (cameras[a].name or cameras[a].camera_id).casefold()
+            name_b = (cameras[b].name or cameras[b].camera_id).casefold()
+            if name_a == name_b:
+                raise ConfigError(f"camera name {name_a!r} is used twice")
             if source_key(cameras[a].source) == source_key(cameras[b].source):
                 raise ConfigError(
                     f"{cameras[b].camera_id} and {cameras[a].camera_id} use the same source "
@@ -216,6 +275,8 @@ def child_command(cam: Camera, opts: Options) -> list[str]:
     ]  # fmt: skip
     if cam.det_size:
         cmd.append(f"--det-size={cam.det_size}")
+    if cam.fps_cap is not None:
+        cmd.append(f"--fps-cap={cam.fps_cap}")
     if cam.track_lost_secs is not None:
         cmd.append(f"--track-lost-secs={cam.track_lost_secs}")
     if cam.track_activation is not None:

@@ -174,6 +174,14 @@ def test_camera_requests_size_and_reports_what_it_delivers(monkeypatch):
         assert cap.sets == {cv2.CAP_PROP_FRAME_WIDTH: 1280, cv2.CAP_PROP_FRAME_HEIGHT: 720}
 
 
+def test_camera_requests_configured_fps_cap(monkeypatch):
+    SizedCap.made = []
+    monkeypatch.setattr(cv2, "VideoCapture", SizedCap)
+    camera = CameraSource(1, fps_cap=24)
+    camera.open()
+    assert SizedCap.made[0].sets[cv2.CAP_PROP_FPS] == 24
+
+
 def test_camera_without_size_requests_nothing(monkeypatch):
     SizedCap.made = []
     monkeypatch.setattr(cv2, "VideoCapture", SizedCap)

@@ -69,6 +69,93 @@ def test_camera_crud_and_duplicate_source(client):
     assert client.delete("/api/cameras/cam1").status_code == 200
 
 
+def test_camera_config_returns_field_specific_errors(client):
+    response = client.post(
+        "/api/cameras",
+        json={
+            "camera_id": "cam1",
+            "name": "",
+            "source": "",
+            "link": "builtin",
+            "det_size": 333,
+            "fps_cap": 0,
+        },
+    )
+    assert response.status_code == 422
+    fields = {item["field"] for item in response.json()["detail"]["fields"]}
+    assert {"name", "source", "det_size", "fps_cap"} <= fields
+
+
+def test_camera_urls_are_masked_in_config_api_and_credentials_survive_edit(client):
+    source = "rtsp://operator:secret@192.168.1.15:554/stream?token=token-secret"
+    added = client.post(
+        "/api/cameras",
+        json={"camera_id": "cam1", "name": "Court", "source": source, "link": "wifi"},
+    )
+    assert added.status_code == 200
+    shown = client.get("/api/cameras").json()[0]
+    assert "secret" not in json.dumps(shown)
+    assert "***@" in shown["source"]
+    assert client.put("/api/cameras/cam1", json=shown).status_code == 200
+    assert client.app.state.studio.entries()[0]["source"] == source
+
+
+def test_disabled_cameras_are_not_started_and_config_warning_is_visible(client, tmp_path):
+    client.post(
+        "/api/cameras",
+        json={"camera_id": "cam1", "source": "0", "link": "builtin", "enabled": False},
+    )
+    client.post(
+        "/api/cameras",
+        json={"camera_id": "cam2", "source": "1", "link": "usb", "enabled": True},
+    )
+    client.post("/api/recording/start")
+    assert [camera.camera_id for camera in FakeLauncher.instances[-1].cameras] == ["cam2"]
+    client.post("/api/recording/stop")
+    client.app.state.studio.config.path.write_text("{broken", encoding="utf-8")
+    assert client.get("/api/cameras").json() == []
+    assert "could not be read" in client.get("/api/status").json()["config_warning"]
+
+
+def test_test_camera_measures_three_seconds_and_closes_before_start(client, monkeypatch):
+    from types import SimpleNamespace
+
+    import services.app.server as server
+
+    client.post("/api/cameras", json={"camera_id": "cam1", "source": "0", "link": "builtin"})
+    clock = [0.0]
+
+    class Source:
+        closed = False
+
+        def open(self):
+            return SimpleNamespace(width=64, height=48, reported_fps=30.0)
+
+        def read(self):
+            clock[0] += 1.0
+            return SimpleNamespace(image=np.zeros((48, 64, 3), dtype=np.uint8))
+
+        def close(self):
+            self.closed = True
+
+    source = Source()
+    monkeypatch.setattr(server, "open_source", lambda ref, size=None: source)
+    monkeypatch.setattr(server, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    result = client.post("/api/cameras/cam1/test").json()
+    assert result["resolution"] == [64, 48]
+    assert result["fps"] == 1.0 and clock[0] == 3.0
+    assert source.closed
+
+    class AssertReleasedLauncher(FakeLauncher):
+        def __init__(self, cameras, options):
+            assert source.closed
+            super().__init__(cameras, options)
+
+    client.app.state.studio.launcher_factory = AssertReleasedLauncher
+    assert client.post("/api/recording/start").status_code == 200
+    client.post("/api/recording/stop")
+
+
 def test_cli_and_app_share_launcher_library_and_http_preview_flag():
     assert run_cameras.Launcher is Launcher
     camera = Camera("cam1", "0", "builtin", http_preview_port=45678)
