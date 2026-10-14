@@ -464,7 +464,15 @@ class Studio:
                     "height": cached["image"].shape[0],
                 },
                 "homography_image_to_court": result["homography_image_to_court"],
-                "points": [{**p, "residual_m": next(residual_iter)} for p in points],
+                "points": [
+                    {
+                        "image_px": [float(v) for v in p["image_px"]],
+                        "court_m": [float(v) for v in p["court_m"]],
+                        "role": p["role"],
+                        "residual_m": next(residual_iter),
+                    }
+                    for p in points
+                ],
                 "errors": {
                     key: result[key]
                     for key in ("calibration_mean_m", "check_mean_m", "check_max_m")

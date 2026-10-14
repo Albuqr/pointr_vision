@@ -22,7 +22,13 @@
         "length_m": {"type": "number", "exclusiveMinimum": 0},
         "width_m": {"type": "number", "exclusiveMinimum": 0},
         "landmarks": {"type": "object", "additionalProperties": {"$ref": "#/$defs/point"}}
-      }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"kind": {"const": "fiba_full"}}},
+          "then": {"properties": {"length_m": {"const": 28}, "width_m": {"const": 15}}}
+        }
+      ]
     },
     "image_size": {
       "type": "object",

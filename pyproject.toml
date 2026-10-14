@@ -20,6 +20,7 @@ dependencies = [
     "trackers==2.6.1",
     "fastapi==0.143.0",
     "uvicorn==0.54.0",
+    "jsonschema",  # the runtime calibration validator checks files against contracts/*.schema.json
 ]
 
 [project.optional-dependencies]

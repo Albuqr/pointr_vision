@@ -94,7 +94,7 @@ def test_calibration_document_is_validated_and_loadable(tmp_path):
     assert load_calibration(path)["calibration_id"] == fixture["calibration_id"]
     invalid = copy.deepcopy(fixture)
     invalid["image_size"]["width"] = 0
-    with pytest.raises(ValueError, match="dimensions"):
+    with pytest.raises(ValueError, match="image_size/width"):
         validate_calibration(invalid)
 
 
@@ -261,7 +261,7 @@ def fixture_document():
         (lambda d: d["errors"].update(check_mean_m=0.01), "check_mean_m does not match"),
         (lambda d: d["points"][4].update(residual_m=0.3), "residual does not match"),
         (lambda d: d.update(forced=True), "forced flag does not match"),
-        (lambda d: d.update(max_check_error_m=5.0), "at most 2.0 m"),
+        (lambda d: d.update(max_check_error_m=5.0), "maximum of 2.0"),
         (lambda d: d["points"][4].update(court_m=list(d["points"][0]["court_m"])), "same"),
     ],
 )
