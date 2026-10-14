@@ -64,7 +64,10 @@ def validate_calibration(document):
     )
     document = {**document, "homography_image_to_court": homography.tolist()}
     check_homography(homography, [p["image_px"] for p in points])
-    check_point_set(points)
+    dimensions = (
+        (court["length_m"], court["width_m"]) if court["type"] == "fiba_half" else None
+    )
+    check_point_set(points, dimensions)
     _check_recomputed_errors(document, homography, points)
     return document
 
