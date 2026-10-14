@@ -11,8 +11,12 @@ from services.edge.calibration.homography import (
     check_point_set,
     point_residuals,
 )
+from services.edge.contract import CONTRACT_VERSION
 
-CONTRACT_VERSION = "0.8.0"
+# Versions of this file format the loader accepts. A later contract bump that leaves the
+# calibration format unchanged adds the previous version here, so saved calibrations stay usable;
+# a bump that changes it does not, and the old files are refused with a clear message.
+ACCEPTED_VERSIONS = (CONTRACT_VERSION,)
 _SCHEMA = Path(__file__).resolve().parents[3] / "contracts" / "calibration.schema.json"
 
 
@@ -29,9 +33,13 @@ def validate_calibration(document):
     schema cannot make: the homography is usable, the points hold out, and the stored errors
     match the points. A document that passes can be loaded by every consumer (recording,
     report, preview); a file that does not pass is refused here, not later inside one of them."""
-    if not isinstance(document, dict) or document.get("contract_version") != CONTRACT_VERSION:
-        raise ValueError(f"calibration must use contract version {CONTRACT_VERSION}")
-    problems = _schema_errors(document)
+    if not isinstance(document, dict) or document.get("contract_version") not in ACCEPTED_VERSIONS:
+        raise ValueError(
+            f"calibration must use contract version {' or '.join(ACCEPTED_VERSIONS)}, "
+            f"not {document.get('contract_version') if isinstance(document, dict) else None!r}"
+        )
+    # an older accepted version is checked against the current schema as if it were current
+    problems = _schema_errors({**document, "contract_version": CONTRACT_VERSION})
     if problems:
         raise ValueError(
             "calibration does not match calibration.schema.json: " + "; ".join(problems)

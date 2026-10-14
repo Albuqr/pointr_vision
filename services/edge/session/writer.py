@@ -21,6 +21,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from services.edge.capture.types import utc_now
+from services.edge.contract import CONTRACT_VERSION
 from services.edge.perception.types import TrackObs
 from services.edge.session.types import (
     CAMERA_ID_RE,
@@ -33,7 +34,6 @@ from services.edge.session.types import (
     SessionMeta,
 )
 
-CONTRACT_VERSION = "0.8.0"
 FRAMES_COLUMNS = [
     "seq", "t_recv", "t_proc_start", "t_proc_end", "app_delay_ms",
     "n_detections", "n_tracks", "dropped_total",

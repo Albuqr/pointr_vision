@@ -27,6 +27,7 @@ from services.edge.calibration.homography import fit_calibration
 from services.edge.calibration.render import projected_court_lines
 from services.edge.capture.sources import DEFAULT_CAPTURE_SIZE, SourceOpenError, open_source
 from services.edge.capture.types import SourceEnded
+from services.edge.contract import CONTRACT_VERSION
 from services.edge.launcher import Camera, ConfigError, Launcher, Options, parse_config
 from services.edge.reports.build import build_report, format_summary, run_dirs
 
@@ -456,7 +457,7 @@ class Studio:
         if save:
             residual_iter = iter(result["point_errors_m"])
             document = {
-                "contract_version": "0.8.0",
+                "contract_version": CONTRACT_VERSION,
                 "calibration_id": str(uuid.uuid4()),
                 "camera_id": camera_id,
                 "created_at": dt.datetime.now(dt.UTC).isoformat().replace("+00:00", "Z"),
