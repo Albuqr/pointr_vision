@@ -28,8 +28,9 @@ def _has_keys(length_m: float, width_m: float) -> bool:
     return width_m >= KEY_WIDTH_M and length_m >= 2 * KEY_DEPTH_M
 
 
-def _has_circle(width_m: float) -> bool:
-    return width_m >= 2 * CIRCLE_RADIUS_M
+def _has_circle(length_m: float, width_m: float) -> bool:
+    diameter = 2 * CIRCLE_RADIUS_M
+    return length_m >= diameter and width_m >= diameter
 
 
 def court_model(kind="fiba_full", length_m=28.0, width_m=15.0, custom_landmarks=None):
@@ -89,7 +90,7 @@ def court_lines(court: Court) -> list[list[tuple[float, float]]]:
             [(0.0, low), (KEY_DEPTH_M, low), (KEY_DEPTH_M, high), (0.0, high)],
             [(length, low), (far, low), (far, high), (length, high)],
         ]
-    if _has_circle(width):
+    if _has_circle(length, width):
         lines.append(
             [
                 (
