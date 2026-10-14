@@ -59,6 +59,10 @@ type Fit = {
   projected_court_lines: number[][][];
   court: Court;
 };
+type CourtGeometry = {
+  landmarks: Record<string, [number, number]>;
+  lines: [number, number][][];
+};
 type CalibrationFrame = {
   token: string;
   url: string;
@@ -88,45 +92,6 @@ async function request<T>(
 }
 
 const emptyCamera: Camera = { camera_id: "cam1", source: "0", link: "builtin" };
-const landmarkNames = [
-  "corner_near_left",
-  "corner_far_left",
-  "corner_far_right",
-  "corner_near_right",
-  "centre_line_left",
-  "centre_line_right",
-  "centre_circle",
-  "near_key_near_left",
-  "near_key_far_left",
-  "near_key_far_right",
-  "near_key_near_right",
-  "near_basket_floor",
-  "far_key_near_left",
-  "far_key_far_left",
-  "far_key_far_right",
-  "far_key_near_right",
-  "far_basket_floor",
-];
-const fibaPoints: Record<string, [number, number]> = {
-  corner_near_left: [0, 0],
-  corner_far_left: [28, 0],
-  corner_far_right: [28, 15],
-  corner_near_right: [0, 15],
-  centre_line_left: [14, 0],
-  centre_line_right: [14, 15],
-  centre_circle: [14, 7.5],
-  near_key_near_left: [0, 5.05],
-  near_key_far_left: [5.8, 5.05],
-  near_key_far_right: [5.8, 9.95],
-  near_key_near_right: [0, 9.95],
-  near_basket_floor: [1.575, 7.5],
-  far_key_near_left: [22.2, 5.05],
-  far_key_far_left: [28, 5.05],
-  far_key_far_right: [28, 9.95],
-  far_key_near_right: [22.2, 9.95],
-  far_basket_floor: [26.425, 7.5],
-};
-
 export default function StudioApp() {
   const [page, setPage] = useState("Record");
   const [cameras, setCameras] = useState<Camera[]>([]);
@@ -154,6 +119,10 @@ export default function StudioApp() {
   const [customX, setCustomX] = useState(0);
   const [customY, setCustomY] = useState(0);
   const [hoverPoint, setHoverPoint] = useState<number | null>(null);
+  const [geometry, setGeometry] = useState<CourtGeometry | null>(null);
+  // the diagram and the snap points come from the server's court model, the one the fit uses
+  const landmarks: Record<string, [number, number]> =
+    fit?.court.landmarks ?? geometry?.landmarks ?? {};
 
   const refresh = useCallback(async () => {
     try {
@@ -173,6 +142,21 @@ export default function StudioApp() {
       setError(String(reason));
     }
   }, []);
+
+  useEffect(() => {
+    let current = true;
+    const query = new URLSearchParams({
+      kind: courtKind,
+      length_m: String(length),
+      width_m: String(width),
+    });
+    request<CourtGeometry>(`/api/court?${query}`)
+      .then((next) => current && setGeometry(next))
+      .catch(() => current && setGeometry(null)); // e.g. a dimension mid-edit: no diagram yet
+    return () => {
+      current = false;
+    };
+  }, [courtKind, length, width]);
 
   useEffect(() => {
     void refresh();
@@ -965,22 +949,21 @@ export default function StudioApp() {
                           rx="3"
                           className="court-fill"
                         />
-                        <path
-                          d="M140 1V149 M1 75H279 M1 26H59V124H1 M279 26H221V124H279 M59 26V124 M221 26V124"
-                          className="court-lines"
-                        />
-                        <circle
-                          cx="140"
-                          cy="75"
-                          r="18"
-                          className="court-lines"
-                          fill="none"
-                        />
-                        {landmarkNames.map((name) => {
-                          const xy = fit?.court.landmarks[name] ?? [
-                            (fibaPoints[name][0] * length) / 28,
-                            (fibaPoints[name][1] * width) / 15,
-                          ];
+                        {geometry?.lines.map((line, index) => (
+                          <path
+                            // biome-ignore lint/suspicious/noArrayIndexKey: fixed list from the server
+                            key={index}
+                            d={line
+                              .map(
+                                ([x, y], i) =>
+                                  `${i === 0 ? "M" : "L"}${((x / length) * 280).toFixed(2)} ${((y / width) * 150).toFixed(2)}`,
+                              )
+                              .join(" ")}
+                            className="court-lines"
+                            fill="none"
+                          />
+                        ))}
+                        {Object.entries(landmarks).map(([name, xy]) => {
                           return (
                             <g key={name} className="landmark">
                               <circle
@@ -1025,11 +1008,7 @@ export default function StudioApp() {
                           );
                         }}
                       />
-                      {landmarkNames.map((name) => {
-                        const xy = fit?.court.landmarks[name] ?? [
-                          (fibaPoints[name][0] * length) / 28,
-                          (fibaPoints[name][1] * width) / 15,
-                        ];
+                      {Object.entries(landmarks).map(([name, xy]) => {
                         return (
                           <button
                             key={name}

@@ -22,7 +22,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from services.app.calibrations import CalibrationStore
 from services.app.config import CameraConfig
-from services.edge.calibration.court import court_model
+from services.edge.calibration.court import court_lines, court_model
 from services.edge.calibration.homography import fit_calibration
 from services.edge.calibration.render import projected_court_lines
 from services.edge.capture.sources import DEFAULT_CAPTURE_SIZE, SourceOpenError, open_source
@@ -561,6 +561,21 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
     @app.post("/api/cameras/{camera_id}/test")
     def test_camera(camera_id: str):
         return studio.test_camera(camera_id)
+
+    @app.get("/api/court")
+    def court_geometry(kind: str = "custom", length_m: float = 28.0, width_m: float = 15.0):
+        """The court model the fit uses: named landmarks and the lines to draw, in metres."""
+        try:
+            court = court_model(kind, length_m, width_m)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return {
+            "kind": court.kind,
+            "length_m": court.length_m,
+            "width_m": court.width_m,
+            "landmarks": court.landmarks,
+            "lines": court_lines(court),
+        }
 
     @app.get("/api/cameras/{camera_id}/calibration")
     def get_calibration(camera_id: str):
