@@ -1,6 +1,6 @@
 # Data contracts
 
-Contract version: **0.9.0**. Any change bumps the version (minor for additive fields, major
+Contract version: **0.10.0**. Any change bumps the version (minor for additive fields, major
 for removals or meaning changes) and needs a `DECISIONS.md` entry. JSON Schemas in
 `contracts/` are written from this file and tests check them against it (D-009).
 
@@ -50,7 +50,7 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
 
 ```json
 {
-  "contract_version": "0.9.0",
+  "contract_version": "0.10.0",
   "session_id": "uuid",
   "device_id": "uuid",
   "camera_id": "cam1 | null",
@@ -94,7 +94,7 @@ calibration used by this session and records its mean held-out check residual in
 
 ```json
 {
-  "contract_version": "0.9.0",
+  "contract_version": "0.10.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "mode": "live | replay",
@@ -134,7 +134,7 @@ installed versions, `null` when a package is not installed. `health` holds the s
 thresholds of the run (`--lost-reads` ... `--dark-secs`). The tracker is fed `Frame.t_recv`
 as its timestamp (D-016). `tracker.params` records the effective installed tracker arguments.
 `calibration` is `null` when uncalibrated. Otherwise it records the calibration ID, mean held-out
-check residual, projection matrix, court bounds and image size used by this run. Keeping the
+check residual, court type and bounds, projection matrix and image size used by this run. Keeping the
 projection in `run.json` permits offline report regeneration after later recalibration. The
 loaded calibration is rejected before processing if saved image dimensions differ from the opened
 capture dimensions. If a later frame has another size, the run logs an `error` event and writes
@@ -181,7 +181,7 @@ pixel box and its `calibration_id`, with `x_m`, `y_m` and `in_court` empty; the 
 an `error` event with the count (the first time, then at most every 30 s, and a final count when
 the run closes). `position_method` is spelled `box_bottom_center` in this file; `report.json`
 `positions.point` spells the same estimate `bottom_centre` (section 8): two fields, two spellings,
-both fixed in 0.9.0.
+both fixed in 0.10.0.
 The image point is `((x1 + x2) / 2, y2)`. The position method describes the box estimate,
 not a measured anatomical foot point.
 
@@ -247,7 +247,7 @@ One report per run, one per camera: there is no fusion across cameras.
 
 ```json
 {
-  "contract_version": "0.9.0",
+  "contract_version": "0.10.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "camera_id": "cam1 | null",
@@ -305,6 +305,13 @@ One report per run, one per camera: there is no fusion across cameras.
 does not change with calibration. A `value` of `null` (never `0`) carries a `reason`, for example
 `single sample` or `fewer than 2 valid intervals`. Counts are plain integers named `n_*`.
 Percentages are 0-100 with unit `percent`.
+
+Contract 0.10.0 adds `fiba_half` (14 x 15 m, basket baseline x=0, midcourt x=14) alongside
+`fiba_full` (28 x 15 m) and `custom`. Calibration and run/session/report metadata record the
+selected court type and dimensions. Its landmarks are the `fiba_full` landmarks at x <= 14 m,
+with identical coordinates, plus corners and centre on x=14 m. Out-of-bounds projected points
+remain in metres and have `in_court=false`. The existing fit spread threshold remains 0.1 in
+image and court coordinates.
 
 - **Position** of a person in a frame is the bottom-centre of the track's box,
   `((x1 + x2) / 2, y2)`, in the position function's unit. A sample is that point at the frame's
@@ -431,4 +438,4 @@ Writes use a temporary file and atomic replacement. Before replacement, the prio
 preserved as `cameras.json.bak`. An unreadable or invalid settings file loads as an empty camera
 list and produces a visible warning; it is not silently replaced with the backup. The camera
 configuration is a local Studio setting and does not alter session, run, report, or calibration
-field meanings. This additive settings contract is recorded under contract version 0.9.0.
+field meanings. This additive settings contract is recorded under contract version 0.10.0.

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:pointr:contracts:0.9.0:session",
+  "$id": "urn:pointr:contracts:0.10.0:session",
   "title": "session.json",
   "description": "DATA_CONTRACTS.md section 2. Missing values are null, never 0.",
   "type": "object",
@@ -10,7 +10,7 @@
     "source", "registration", "recording", "runs", "events", "calibration"
   ],
   "properties": {
-    "contract_version": {"const": "0.9.0"},
+    "contract_version": {"const": "0.10.0"},
     "session_id": {"$ref": "#/$defs/uuid4"},
     "device_id": {"$ref": "#/$defs/uuid4"},
     "camera_id": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9_-]{1,32}$"},

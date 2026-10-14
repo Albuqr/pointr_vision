@@ -13,6 +13,7 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from services.edge.calibration.homography import CalibrationPositions
+from services.edge.contract import CONTRACT_VERSION
 from services.edge.reports import cli
 from services.edge.reports.build import build_report, format_summary, write_report
 from services.edge.reports.movement import Params
@@ -415,7 +416,7 @@ def test_write_report_replaces_report_json_and_matches_the_schema(tmp_path):
     write_report(run_dir)
     first = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
     schema("report").validate(first)
-    assert first["contract_version"] == "0.9.0"
+    assert first["contract_version"] == CONTRACT_VERSION
     write_report(run_dir, params=Params(max_gap=0.2))  # every interval is a gap
     second = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
     assert (
