@@ -4,6 +4,8 @@ read() returns None when no frame was obtained this attempt. A finite source tha
 ended raises SourceEnded instead, so the end of a file is not reported as source_lost.
 """
 
+import os
+import threading
 import time
 from pathlib import Path
 
@@ -16,6 +18,17 @@ STREAM_SCHEMES = ("http://", "https://", "rtsp://")
 # What the recorder requests from a camera. Anything that must see the recorder's frames (the
 # Studio's calibration frame) opens the camera with this size too.
 DEFAULT_CAPTURE_SIZE = (1280, 720)
+_FFMPEG_OPTIONS_LOCK = threading.Lock()
+
+
+def _disable_http_redirects() -> None:
+    """Keep FFmpeg from following an unvalidated camera stream redirect."""
+    with _FFMPEG_OPTIONS_LOCK:
+        current = os.environ.get("OPENCV_FFMPEG_CAPTURE_OPTIONS", "")
+        options = [item for item in current.split("|") if item]
+        options = [item for item in options if item.partition(";")[0] != "max_redirects"]
+        options.append("max_redirects;0")
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "|".join(options)
 
 
 class SourceOpenError(Exception):
@@ -140,6 +153,7 @@ class StreamSource(_LiveSource):
     read_timeout_ms = 2000
 
     def _new_capture(self) -> cv2.VideoCapture:
+        _disable_http_redirects()
         params = [
             cv2.CAP_PROP_OPEN_TIMEOUT_MSEC,
             self.open_timeout_ms,

@@ -1,5 +1,6 @@
 """A1: file source reads every frame in order; open_source dispatch and errors."""
 
+import os
 import time
 
 import cv2
@@ -67,6 +68,23 @@ def test_open_source_dispatch(clips, tmp_path):
     mov = tmp_path / "clip.MOV"
     mov.write_bytes(b"")
     assert isinstance(open_source(str(mov)), FileSource)
+
+
+def test_stream_capture_disables_ffmpeg_redirects(monkeypatch):
+    captured = {}
+
+    def video_capture(ref, backend, params):
+        captured["options"] = os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"]
+        captured["ref"] = ref
+        captured["backend"] = backend
+        captured["params"] = params
+        return object()
+
+    monkeypatch.setenv("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp|max_redirects;4")
+    monkeypatch.setattr(cv2, "VideoCapture", video_capture)
+    StreamSource("http://192.0.2.1/video")._new_capture()
+    assert captured["options"] == "rtsp_transport;tcp|max_redirects;0"
+    assert captured["ref"] == "http://192.0.2.1/video"
 
 
 @pytest.mark.parametrize(
