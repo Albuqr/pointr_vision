@@ -148,7 +148,12 @@ class Studio:
             lines.append(f"output (last {len(tail)} lines):")
             lines.extend(tail)
         log.set_error(message, "\n".join(lines))
-        log.add_event("start_failed" if failure else "error", failure or message)
+        failure_kind = (
+            "source_open_failed"
+            if failure and ("open" in failure.lower() or "source" in failure.lower())
+            else "start_failed"
+        )
+        log.add_event(failure_kind if failure else "error", failure or message)
 
     def start(self):
         with self.lock:

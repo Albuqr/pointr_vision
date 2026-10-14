@@ -66,6 +66,7 @@ def test_error_persists_across_polls_and_a_30_second_clock_advance(tmp_path, mon
         client.post("/api/recording/start")
         first = camera(client)["last_error"]
         assert first["message"] and "exit code: 3" in first["detail"] and first["at"]
+        assert camera(client)["recent_events"][0]["kind"] == "source_open_failed"
         real_monotonic, real_time = time.monotonic, time.time
         monkeypatch.setattr(time, "monotonic", lambda: real_monotonic() + 30)
         monkeypatch.setattr(time, "time", lambda: real_time() + 30)
@@ -118,6 +119,31 @@ def test_events_are_bounded_newest_first_and_read_from_the_session_file(tmp_path
             assert len(camera(client)["recent_events"]) == EVENT_LIMIT
         # a new "page load" (fresh request, no client state) sees the same list
         assert camera(client)["recent_events"] == shown
+
+
+def test_frame_size_errors_are_named_in_the_camera_event_log(tmp_path):
+    with make_client(tmp_path) as client:
+        client.post("/api/recording/start")
+        child = FakeLauncher.instances[-1].children[0]
+        child.session_dir = tmp_path / "session-size"
+        child.session_dir.mkdir()
+        (child.session_dir / "session.json").write_text(
+            json.dumps(
+                {
+                    "status": "running",
+                    "events": [
+                        {
+                            "t_wall": "2026-10-14T12:00:00Z",
+                            "t_mono": 1,
+                            "kind": "error",
+                            "detail": "frame size 640x480 differs from 1280x720",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        assert camera(client)["recent_events"][0]["kind"] == "frame_size_mismatch"
 
 
 def test_credentials_are_masked_everywhere_in_status(tmp_path):
