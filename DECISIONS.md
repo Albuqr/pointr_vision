@@ -841,7 +841,8 @@ the midcourt line. Its landmarks reuse the `fiba_full` constants for all points 
 then add both midcourt corners and the midcourt centre. Persist court type and bounds through
 calibration, run, session, and report data. Preserve older `fiba_full` and `custom` calibrations,
 and keep custom measured courts available. Fit spread remains governed by the existing 0.1
-minimum in image and court coordinates; explain that threshold and the physical reason in Studio.
+minimum in image and court coordinates. Half-court fits must also cover at least 20% of its 210 m²
+area by the fit-point bounding box; explain both thresholds and the physical reason in Studio.
 Projected points outside the selected bounds remain unchanged and are flagged out of court.
 Report movement remains computed in the position unit, so identical coordinates yield identical
 distance and speed regardless of whether the bounds are full or half court.
