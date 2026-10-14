@@ -1,0 +1,4 @@
+seq,track_id,x1,y1,x2,y2,confidence,state,athlete_id,x_m,y_m,calibration_id,position_method,in_court
+0,7,0,0,0,100,0.9,,,,,,,
+1,7,100,0,100,100,0.9,,,,,,,
+2,7,200,0,200,100,0.9,,,,,,,

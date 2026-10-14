@@ -75,6 +75,7 @@ class Report:
     camera_id: str | None
     group_id: str | None
     generated_at: str
+    court: dict | None
     unit: str
     calibrated: bool
     calibration_id: str | None
@@ -94,6 +95,7 @@ class Report:
             "camera_id": self.camera_id,
             "group_id": self.group_id,
             "generated_at": self.generated_at,
+            "court": self.court,
             "positions": {
                 "unit": u,
                 "point": "bottom_centre",
@@ -269,6 +271,17 @@ def build_report(
         session.get("camera_id"),
         session.get("group_id"),
         utc_now(),
+        (
+            {
+                "type": calibration.get("court", {}).get(
+                    "type", calibration.get("court", {}).get("kind")
+                ),
+                "length_m": calibration["court"]["length_m"],
+                "width_m": calibration["court"]["width_m"],
+            }
+            if calibration and calibration.get("court")
+            else None
+        ),
         positions.unit,
         positions.calibrated,
         getattr(positions, "calibration_id", None),

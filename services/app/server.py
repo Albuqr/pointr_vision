@@ -546,6 +546,9 @@ class Studio:
                 bool(payload.get("save_anyway", False)),
                 enforce_limit=save,
                 require_checks=save,
+                court_dimensions=(court.length_m, court.width_m)
+                if court.kind == "fiba_half"
+                else None,
             )
         except (KeyError, TypeError, ValueError, np.linalg.LinAlgError) as exc:
             raise HTTPException(422, str(exc) or exc.__class__.__name__) from exc
@@ -554,6 +557,7 @@ class Studio:
         )
         result["court"] = {
             "kind": court.kind,
+            "type": court.kind,
             "length_m": court.length_m,
             "width_m": court.width_m,
             "landmarks": court.landmarks,

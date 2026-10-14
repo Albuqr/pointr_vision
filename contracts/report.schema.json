@@ -1,21 +1,31 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:pointr:contracts:0.9.0:report",
+  "$id": "urn:pointr:contracts:0.10.0:report",
   "title": "report.json",
   "description": "DATA_CONTRACTS.md section 8. Every measurement is {value, unit}; a null value carries a reason. Counts are plain integers named n_*.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "contract_version", "run_id", "session_id", "camera_id", "group_id", "generated_at",
-    "positions", "params", "session", "tracks", "caveats"
+    "court", "positions", "params", "session", "tracks", "caveats"
   ],
   "properties": {
-    "contract_version": {"const": "0.9.0"},
+    "contract_version": {"const": "0.10.0"},
     "run_id": {"$ref": "#/$defs/uuid4"},
     "session_id": {"$ref": "#/$defs/uuid4"},
     "camera_id": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9_-]{1,32}$"},
     "group_id": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9_-]{1,64}$"},
     "generated_at": {"$ref": "#/$defs/utc"},
+    "court": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["type", "length_m", "width_m"],
+      "properties": {
+        "type": {"enum": ["fiba_full", "fiba_half", "custom"]},
+        "length_m": {"type": "number", "exclusiveMinimum": 0},
+        "width_m": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
     "positions": {
       "type": "object",
       "additionalProperties": false,

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:pointr:contracts:0.9.0:calibration",
+  "$id": "urn:pointr:contracts:0.10.0:calibration",
   "title": "camera calibration",
   "type": "object",
   "additionalProperties": false,
@@ -9,24 +9,29 @@
     "homography_image_to_court", "points", "errors", "max_check_error_m", "forced", "audit_frame"
   ],
   "properties": {
-    "contract_version": {"const": "0.9.0"},
+    "contract_version": {"const": "0.10.0"},
     "calibration_id": {"$ref": "#/$defs/uuid4"},
     "camera_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,32}$"},
     "created_at": {"$ref": "#/$defs/utc"},
     "court": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "length_m", "width_m", "landmarks"],
+      "required": ["kind", "type", "length_m", "width_m", "landmarks"],
       "properties": {
-        "kind": {"enum": ["fiba_full", "custom"]},
+        "kind": {"enum": ["fiba_full", "fiba_half", "custom"]},
+        "type": {"enum": ["fiba_full", "fiba_half", "custom"]},
         "length_m": {"type": "number", "exclusiveMinimum": 0},
         "width_m": {"type": "number", "exclusiveMinimum": 0},
         "landmarks": {"type": "object", "additionalProperties": {"$ref": "#/$defs/point"}}
       },
       "allOf": [
         {
-          "if": {"properties": {"kind": {"const": "fiba_full"}}},
+          "if": {"properties": {"type": {"const": "fiba_full"}}},
           "then": {"properties": {"length_m": {"const": 28}, "width_m": {"const": 15}}}
+        },
+        {
+          "if": {"properties": {"type": {"const": "fiba_half"}}},
+          "then": {"properties": {"length_m": {"const": 14}, "width_m": {"const": 15}}}
         }
       ]
     },

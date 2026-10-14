@@ -74,7 +74,7 @@ type Point = {
   role: "calibration" | "check";
 };
 type Court = {
-  kind: "fiba_full" | "custom";
+  kind: "fiba_full" | "fiba_half" | "custom";
   length_m: number;
   width_m: number;
   landmarks: Record<string, [number, number]>;
@@ -252,7 +252,7 @@ export default function StudioApp() {
   const [pendingImage, setPendingImage] = useState<[number, number] | null>(
     null,
   );
-  const [courtKind, setCourtKind] = useState<"fiba_full" | "custom">("custom");
+  const [courtKind, setCourtKind] = useState<"fiba_full" | "fiba_half" | "custom">("custom");
   const [length, setLength] = useState(28);
   const [width, setWidth] = useState(15);
   const [maxError, setMaxError] = useState(0.5);
@@ -266,6 +266,21 @@ export default function StudioApp() {
   // the diagram and the snap points come from the server's court model, the one the fit uses
   const landmarks: Record<string, [number, number]> =
     fit?.court.landmarks ?? geometry?.landmarks ?? {};
+  const fitCourtPoints = points.filter((point) => point.role === "calibration");
+  const fitXs = fitCourtPoints.map((point) => point.court_m[0]);
+  const fitYs = fitCourtPoints.map((point) => point.court_m[1]);
+  const fitAreaCoverage =
+    courtKind === "fiba_half" && fitXs.length >= 4
+      ? ((Math.max(...fitXs) - Math.min(...fitXs)) *
+          (Math.max(...fitYs) - Math.min(...fitYs))) /
+        (14 * 15)
+      : null;
+  const halfAnchors = new Set([
+    "corner_near_left",
+    "corner_near_right",
+    "midcourt_near_corner",
+    "midcourt_far_corner",
+  ]);
 
   const refresh = useCallback(async () => {
     try {
@@ -1104,12 +1119,25 @@ export default function StudioApp() {
                 <select
                   value={courtKind}
                   onChange={(event) => {
-                    setCourtKind(event.target.value as "fiba_full" | "custom");
+                    const kind = event.target.value as
+                      | "fiba_full"
+                      | "fiba_half"
+                      | "custom";
+                    setCourtKind(kind);
+                    if (kind === "fiba_full") {
+                      setLength(28);
+                      setWidth(15);
+                    } else if (kind === "fiba_half") {
+                      setLength(14);
+                      setWidth(15);
+                    }
+                    setPoints([]);
                     setFit(null);
                   }}
                 >
-                  <option value="custom">Custom measured court</option>
-                  <option value="fiba_full">FIBA full court</option>
+                  <option value="fiba_full">Full court</option>
+                  <option value="fiba_half">Half court</option>
+                  <option value="custom">Custom</option>
                 </select>
               </label>
               <label>
@@ -1119,7 +1147,7 @@ export default function StudioApp() {
                   min="0.1"
                   step="0.1"
                   value={length}
-                  disabled={courtKind === "fiba_full"}
+                  disabled={courtKind !== "custom"}
                   onChange={(event) => setLength(Number(event.target.value))}
                 />
               </label>
@@ -1130,7 +1158,7 @@ export default function StudioApp() {
                   min="0.1"
                   step="0.1"
                   value={width}
-                  disabled={courtKind === "fiba_full"}
+                  disabled={courtKind !== "custom"}
                   onChange={(event) => setWidth(Number(event.target.value))}
                 />
               </label>
@@ -1146,7 +1174,7 @@ export default function StudioApp() {
             <div className="axis-note">
               <b>Axes:</b> origin is the near-left corner. +X runs along court
               length; +Y runs across court width. Use measured metres for a
-              custom floor.
+              custom floor. {courtKind === "fiba_half" && "Half court runs from basket baseline x=0 to midcourt x=14 m."}
             </div>
             {frame ? (
               <>
@@ -1263,7 +1291,10 @@ export default function StudioApp() {
                         ))}
                         {Object.entries(landmarks).map(([name, xy]) => {
                           return (
-                            <g key={name} className="landmark">
+                            <g
+                              key={name}
+                              className={`landmark ${courtKind === "fiba_half" && halfAnchors.has(name) ? "recommended" : ""}`}
+                            >
                               <circle
                                 cx={(xy[0] / length) * 280}
                                 cy={(xy[1] / width) * 150}
@@ -1384,8 +1415,23 @@ export default function StudioApp() {
                       Click the diagram to place the point at a custom
                       coordinate. Click a named landmark to snap.
                     </small>
+                      {courtKind === "fiba_half" && (
+                        <small className="helper half-court-guide">
+                          Best visible anchors: baseline corners and midcourt
+                          line corners. Use separate lane or measured floor
+                          marks as held-out checks.
+                        </small>
+                      )}
                   </div>
                 </div>
+                {fitAreaCoverage !== null && fitAreaCoverage < 0.2 && (
+                  <p className="half-court-warning" role="alert">
+                    Fit points cover {(fitAreaCoverage * 100).toFixed(0)}% of
+                    the 210 m² half-court area; at least 20% is required. fit
+                    points too close together, add the baseline corners or
+                    midcourt line points or measured floor marks.
+                  </p>
+                )}
                 <div className="point-tools">
                   <div>
                     <b>{points.length} points</b>

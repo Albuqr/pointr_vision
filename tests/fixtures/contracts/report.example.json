@@ -1,10 +1,11 @@
 {
-  "contract_version": "0.9.0",
+  "contract_version": "0.10.0",
   "run_id": "c2b9e6f4-1d3a-4c8e-9f7b-5a0d2e4c6b81",
   "session_id": "3f1c2a8e-5b7d-4e9a-8c21-6d4f0b9e7a13",
   "camera_id": "cam1",
   "group_id": "8d2f6b1e-4c3a-4e7d-9a5b-0f1e2d3c4b5a",
   "generated_at": "2026-10-07T18:46:00Z",
+  "court": null,
   "positions": {
     "unit": "px",
     "point": "bottom_centre",

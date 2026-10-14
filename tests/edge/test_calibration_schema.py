@@ -12,7 +12,8 @@ from starlette.testclient import TestClient
 
 from services.app.config import CameraConfig
 from services.app.server import create_app
-from services.edge.calibration.document import validate_calibration
+from services.edge.calibration.document import load_calibration, validate_calibration
+from services.edge.calibration.homography import fit_calibration, point_residuals
 from tests.app.test_api import FakeLauncher
 from tests.fixtures.make_clips import make_clips
 
@@ -34,12 +35,59 @@ def mutated(edit):
     return document
 
 
+def half_calibration_for(points):
+    from services.edge.calibration.court import court_model
+
+    fitted = fit_calibration(points)
+    court = court_model("fiba_half", 14, 15)
+    document = copy.deepcopy(EXAMPLE)
+    document["court"] = {
+        "kind": "fiba_half",
+        "type": "fiba_half",
+        "length_m": court.length_m,
+        "width_m": court.width_m,
+        "landmarks": {name: list(point) for name, point in court.landmarks.items()},
+    }
+    document["image_size"] = {"width": 1600, "height": 1600}
+    document["homography_image_to_court"] = fitted["homography_image_to_court"]
+    residuals = point_residuals(document["homography_image_to_court"], points)
+    document["points"] = [
+        {**point, "residual_m": residual}
+        for point, residual in zip(points, residuals, strict=True)
+    ]
+    document["errors"] = {
+        "calibration_mean_m": fitted["calibration_mean_m"],
+        "check_mean_m": fitted["check_mean_m"],
+        "check_max_m": fitted["check_max_m"],
+    }
+    return document
+
+
+def half_floor_points(clustered):
+    court = (
+        [(0, 5.8), (5.8, 5.8), (5.8, 9.2), (0, 9.2)]
+        if clustered
+        else [(0, 0), (14, 0), (14, 15), (0, 15)]
+    )
+    checks = [(2, 6), (3, 8)] if clustered else [(7, 7.5), (5.8, 5.05)]
+    return [
+        {
+            "image_px": [x * 100, y * 100],
+            "court_m": [x, y],
+            "role": "calibration" if index < 4 else "check",
+        }
+        for index, (x, y) in enumerate([*court, *checks])
+    ]
+
+
 SCHEMA_VIOLATIONS = {
     "no landmarks": lambda d: d["court"].pop("landmarks"),
     "extra point key": lambda d: d["points"][0].update(label="corner"),
     "extra top-level key": lambda d: d.update(note="x"),
     "extra court key": lambda d: d["court"].update(surface="wood"),
-    "fiba court of another size": lambda d: d["court"].update(kind="fiba_full", length_m=3.0),
+    "fiba court of another size": lambda d: d["court"].update(
+        kind="fiba_full", type="fiba_full", length_m=3.0
+    ),
     "camera id with a space": lambda d: d.update(camera_id="cam 1"),
     "created_at without Z": lambda d: d.update(created_at="2026-10-13 12:00:00"),
     "landmark with three numbers": lambda d: d["court"]["landmarks"].update(bad=[1, 2, 3]),
@@ -66,7 +114,38 @@ def test_the_example_still_validates_and_builds_the_preview_court():
 
     validate_calibration(EXAMPLE)
     court = EXAMPLE["court"]
-    court_model(court["kind"], court["length_m"], court["width_m"], court["landmarks"])
+    court_model(court["type"], court["length_m"], court["width_m"], court["landmarks"])
+
+
+@pytest.mark.parametrize("kind", ["fiba_full", "custom"])
+def test_older_calibration_with_kind_only_remains_valid(kind):
+    legacy = copy.deepcopy(EXAMPLE)
+    legacy["contract_version"] = "0.9.0"
+    legacy["court"].pop("type")
+    legacy["court"]["kind"] = kind
+    if kind == "fiba_full":
+        from services.edge.calibration.court import court_model
+
+        full = court_model("fiba_full")
+        legacy["court"].update(length_m=28, width_m=15, landmarks=full.landmarks)
+    validated = validate_calibration(legacy)
+    assert validated["court"]["type"] == kind
+    assert "type" not in legacy["court"]  # reading never rewrites the saved input object
+
+
+def test_half_court_calibration_schema_accepts_type_and_bounds():
+    half = half_calibration_for(half_floor_points(clustered=False))
+    Draft202012Validator(SCHEMA).validate(half)
+    assert validate_calibration(half)["court"]["type"] == "fiba_half"
+
+
+def test_saved_half_court_calibration_rejects_fit_points_clustered_in_the_key(tmp_path):
+    saved = half_calibration_for(half_floor_points(clustered=True))
+    path = tmp_path / "clustered-half-calibration.json"
+    path.write_text(json.dumps(saved), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="20%.*fit points too close together"):
+        load_calibration(path)
 
 
 def test_saved_files_contain_only_schema_keys_even_if_the_client_sends_more(tmp_path):

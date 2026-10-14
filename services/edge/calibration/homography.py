@@ -19,6 +19,7 @@ MAX_CHECK_ERROR_LIMIT_M = 2.0  # the largest "maximum mean check error" a user m
 COINCIDENT_COURT_M = 1e-6  # two points this close in court metres are the same physical mark
 COINCIDENT_IMAGE_PX = 1.0  # ... or this close in the image
 MIN_SPREAD = 0.1  # sqrt(minor / major variance) of the fit points, in the image and on the court
+MIN_HALF_COURT_COVERAGE = 0.2  # fit-point bounding box / full 14 x 15 m half-court area
 COND_LIMIT = 1e7  # a larger condition number is treated as singular or numerically unstable
 
 
@@ -122,7 +123,7 @@ def _spread(points):
     return 0.0 if major <= 0 else float(math.sqrt(max(minor, 0.0) / major))
 
 
-def check_point_set(points):
+def check_point_set(points, court_dimensions=None):
     """Hold-out integrity. A check point only tests the fit if it is a different physical mark
     from every fit point, so no two points may coincide, and the fit points must be spread out
     (not collinear, not bunched) in the image and on the court. Raises ValueError."""
@@ -146,10 +147,22 @@ def check_point_set(points):
                 f"the calibration points are collinear or bunched together in the {name} "
                 f"(spread {spread:.3f}, at least {MIN_SPREAD} needed): spread them over the floor"
             )
+    if court_dimensions is not None and tuple(map(float, court_dimensions)) == (14.0, 15.0):
+        court_points = np.asarray([point["court_m"] for point in fit], dtype=np.float64)
+        area_fraction = (
+            float(np.ptp(court_points[:, 0]) * np.ptp(court_points[:, 1])) / (14.0 * 15.0)
+        )
+        if area_fraction < MIN_HALF_COURT_COVERAGE:
+            raise ValueError(
+                f"fit points cover {area_fraction:.0%} of the half-court area; at least "
+                f"{MIN_HALF_COURT_COVERAGE:.0%} coverage is required: fit points too close "
+                "together, add the baseline corners or midcourt line points or measured floor marks"
+            )
 
 
 def fit_calibration(
-    points, max_check_error_m=0.5, save_anyway=False, enforce_limit=True, require_checks=True
+    points, max_check_error_m=0.5, save_anyway=False, enforce_limit=True, require_checks=True,
+    court_dimensions=None,
 ):
     if not isinstance(points, list):
         raise ValueError("calibration points must be a list")
@@ -174,7 +187,7 @@ def fit_calibration(
         raise ValueError(
             f"maximum check error must be greater than zero and at most {MAX_CHECK_ERROR_LIMIT_M} m"
         )
-    check_point_set(points)
+    check_point_set(points, court_dimensions)
     image_points = np.asarray([point["image_px"] for point in fit], dtype=np.float64)
     court_points = np.asarray([point["court_m"] for point in fit], dtype=np.float64)
     if image_points.shape != (len(fit), 2) or court_points.shape != (len(fit), 2):

@@ -146,6 +146,71 @@ def test_true_perspective_fit_recovers_metres_and_check_error():
     )
 
 
+def test_half_court_perspective_fit_checks_known_points_within_one_micrometre():
+    import cv2
+
+    court = np.float32([[0, 0], [14, 0], [14, 15], [0, 15]])
+    image = np.float32([[300, 900], [1100, 900], [1000, 300], [450, 300]])
+    to_image = cv2.getPerspectiveTransform(court, image).astype(np.float64)
+
+    def point_at(x, y, role="calibration"):
+        px, py = cv2.perspectiveTransform(np.float64([[[x, y]]]), to_image)[0, 0]
+        return {"image_px": [float(px), float(py)], "court_m": [x, y], "role": role}
+
+    source = [
+        point_at(0, 0), point_at(14, 0), point_at(14, 15), point_at(0, 15),
+        point_at(7, 7.5, "check"), point_at(5.8, 5.05, "check"),
+    ]
+    result = fit_calibration(source, court_dimensions=(14, 15))
+    assert result["check_mean_m"] < 1e-6
+    assert result["check_max_m"] < 1e-6
+
+
+def test_half_court_fit_rejects_key_cluster_and_accepts_baseline_to_midcourt():
+    key = [point(0, 5.8), point(5.8, 5.8), point(5.8, 9.2), point(0, 9.2)]
+    key += [point(2, 6, "check"), point(3, 8, "check")]
+    message = (
+        "20%.*fit points too close together, add the baseline corners or midcourt line points "
+        "or measured floor marks"
+    )
+    with pytest.raises(ValueError, match=message):
+        fit_calibration(key, court_dimensions=(14, 15))
+
+    spanning = [point(0, 0), point(14, 0), point(14, 15), point(0, 15)]
+    spanning += [point(7, 7.5, "check"), point(5.8, 5.05, "check")]
+    fit_calibration(spanning, court_dimensions=(14, 15))
+
+
+def test_in_court_uses_full_or_half_bounds_without_clamping_positions():
+    from services.edge.calibration.court import court_model
+    from services.edge.calibration.homography import CalibrationPositions
+
+    document = json.loads((ROOT / "tests/fixtures/contracts/calibration.example.json").read_text())
+    full_court = court_model("fiba_full")
+    half_court = court_model("fiba_half", 14, 15)
+    full_document = {
+        **document,
+        "court": {
+            "kind": "fiba_full", "type": "fiba_full", "length_m": 28.0,
+            "width_m": 15.0, "landmarks": full_court.landmarks,
+        },
+    }
+    half_document = {
+        **document,
+        "court": {
+            "kind": "fiba_half", "type": "fiba_half", "length_m": 14.0,
+            "width_m": 15.0, "landmarks": half_court.landmarks,
+        },
+    }
+    full_document["homography_image_to_court"] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    half_document["homography_image_to_court"] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    half = CalibrationPositions(half_document)
+    full = CalibrationPositions(full_document)
+    assert half(14.5, 7.5) == (14.5, 7.5)
+    assert not half.in_court(14.5, 7.5)
+    assert full.in_court(14.5, 7.5)
+
+
 def test_point_on_the_horizon_has_no_position_instead_of_the_origin():
     positions = positions_for(HORIZON)
     assert positions(40.0, 50.0) == pytest.approx(

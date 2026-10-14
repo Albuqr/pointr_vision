@@ -830,3 +830,25 @@ visible warning rather than silently loading damaged settings.
 **Reason.** Camera setup errors must be clear before recording; an invalid or interrupted save
 must not erase the last usable setup. The FPS cap is a capture request, not an FPS guarantee.
 
+## D-032 · 2026-10-14 · Contract 0.10.0: add a FIBA half-court calibration model
+
+**Context.** Calibration has only `fiba_full` (28 x 15 m) and `custom`. Training sessions may
+cover one basket and the near half, so requiring points at both ends of a full court produces a
+poorly conditioned fit for the visible floor and makes `in_court` use the wrong length.
+
+**Decision.** Add `fiba_half` as a 14 x 15 m court with x=0 at the basket baseline and x=14 at
+the midcourt line. Its landmarks reuse the `fiba_full` constants for all points with x <= 14,
+then add both midcourt corners and the midcourt centre. Persist court type and bounds through
+calibration, run, session, and report data. Preserve older `fiba_full` and `custom` calibrations,
+and keep custom measured courts available. Fit spread remains governed by the existing 0.1
+minimum in image and court coordinates. Half-court fits must also cover at least 20% of its 210 m²
+area by the fit-point bounding box; explain both thresholds and the physical reason in Studio.
+Projected points outside the selected bounds remain unchanged and are flagged out of court.
+Report movement remains computed in the position unit, so identical coordinates yield identical
+distance and speed regardless of whether the bounds are full or half court.
+
+**Consequences.** Contract version is 0.10.0. Calibration, run, session and report schemas record
+court type/bounds. The report diagram follows the stored type. A half-court setup can use baseline
+and midcourt points visible from phones placed along the sideline; verify known floor marks with
+a tape measure before treating movement values as accepted measurements.
+

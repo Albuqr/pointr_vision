@@ -1266,3 +1266,21 @@ button:focus-visible,
 .test-failed p {
   color: var(--orange-dark);
 }
+.landmark.recommended circle {
+  fill: var(--orange);
+  stroke: #181818;
+  stroke-width: 2.4;
+}
+.half-court-guide {
+  color: var(--orange-dark);
+  font-weight: 700;
+}
+.half-court-warning {
+  color: #842f0b;
+  background: var(--orange-wash);
+  border-left: 3px solid var(--orange);
+  margin: 10px 0;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}

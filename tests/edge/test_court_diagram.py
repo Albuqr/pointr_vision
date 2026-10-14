@@ -72,6 +72,18 @@ def test_the_studio_gets_its_diagram_from_the_court_model_endpoint(client):
     assert refused.status_code == 422
 
 
+def test_half_court_diagram_endpoint_uses_the_same_landmarks_and_lines_as_fit(client):
+    response = client.get(
+        "/api/court", params={"kind": "fiba_half", "length_m": 14, "width_m": 15}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    court = court_model("fiba_half", 14, 15)
+    assert body["kind"] == "fiba_half"
+    assert {name: tuple(point) for name, point in body["landmarks"].items()} == court.landmarks
+    assert [[tuple(point) for point in line] for line in body["lines"]] == court_lines(court)
+
+
 def test_the_diagram_is_not_hand_drawn_in_the_ui_source():
     source = (ROOT / "services/app/ui/src/studio.tsx").read_text(encoding="utf-8")
     assert "M1 75H279" not in source and "fibaPoints" not in source

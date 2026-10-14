@@ -13,6 +13,7 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from services.edge.calibration.homography import CalibrationPositions
+from services.edge.contract import CONTRACT_VERSION
 from services.edge.reports import cli
 from services.edge.reports.build import build_report, format_summary, write_report
 from services.edge.reports.movement import Params
@@ -20,6 +21,9 @@ from services.edge.reports.movement import Params
 ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = ROOT / "tests" / "fixtures" / "contracts"
 GROUP = "g-2026-10-13"
+LEGACY_RUN = ROOT / "tests" / "fixtures" / "sessions" / "legacy_0_9" / "runs" / (
+    "c2b9e6f4-1d3a-4c8e-9f7b-5a0d2e4c6b81"
+)
 
 
 def schema(name: str) -> Draft202012Validator:
@@ -59,11 +63,21 @@ def make_run(
     )  # fmt: skip
     run = copy.deepcopy(example("run"))
     run.update(run_id=run_id, session_id=session_id)
+    calibration = copy.deepcopy(calibration)
+    if calibration:
+        calibration["court"].setdefault(
+            "type", "fiba_full" if calibration["court"]["length_m"] == 28 else "custom"
+        )
     run["calibration"] = calibration
     session["calibration"] = (
         {
             "calibration_id": calibration["calibration_id"],
             "check_error_m": calibration["check_error_m"],
+            "court": {
+                "type": calibration["court"]["type"],
+                "length_m": calibration["court"]["length_m"],
+                "width_m": calibration["court"]["width_m"],
+            },
         }
         if calibration
         else None
@@ -288,10 +302,35 @@ def test_hand_built_calibration_reports_metres_and_provenance(tmp_path):
     assert data["positions"]["unit"] == "m"
     assert data["positions"]["calibration_id"] == calibration["calibration_id"]
     assert data["positions"]["check_error_m"] == 0.12
+    assert data["court"] == {"type": "fiba_full", "length_m": 28, "width_m": 15}
     assert value(track_of(report, 12)["path_length"]) == pytest.approx(5)
     assert "check error 0.120 m" in format_summary(report)
     assert format_summary(report).count("check error") == 1
     schema("report").validate(data)
+
+
+def test_half_court_report_uses_metres_and_bounds_do_not_change_movement(tmp_path):
+    tracks = [(i, 12, i * 100, 500) for i in range(6)]
+
+    def report_for(kind, length):
+        calibration = {
+            "calibration_id": str(uuid.uuid4()),
+            "check_error_m": 0.12,
+            "homography_image_to_court": [[0.01, 0, 0], [0, 0.01, 0], [0, 0, 1]],
+            "court": {"type": kind, "length_m": length, "width_m": 15},
+            "image_size": {"width": 1920, "height": 1080},
+        }
+        folder = tmp_path / kind
+        folder.mkdir()
+        return build_report(make_run(folder, dense(8), tracks, calibration=calibration))
+
+    half = report_for("fiba_half", 14).to_dict()
+    full = report_for("fiba_full", 28).to_dict()
+    assert half["court"] == {"type": "fiba_half", "length_m": 14, "width_m": 15}
+    assert half["positions"]["unit"] == "m"
+    assert half["tracks"][0]["path_length"] == full["tracks"][0]["path_length"]
+    assert half["tracks"][0]["mean_speed"] == full["tracks"][0]["mean_speed"]
+    schema("report").validate(half)
 
 
 def test_activity_thresholds_are_configurable(tmp_path):
@@ -415,13 +454,27 @@ def test_write_report_replaces_report_json_and_matches_the_schema(tmp_path):
     write_report(run_dir)
     first = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
     schema("report").validate(first)
-    assert first["contract_version"] == "0.9.0"
+    assert first["contract_version"] == CONTRACT_VERSION
     write_report(run_dir, params=Params(max_gap=0.2))  # every interval is a gap
     second = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
     assert (
         second["tracks"][0]["n_gaps_excluded"] == 5 and first["tracks"][0]["n_gaps_excluded"] == 0
     )
     assert not list(run_dir.glob("*.tmp"))
+
+
+def test_legacy_session_and_run_fixture_still_produce_a_report():
+    session = json.loads((LEGACY_RUN.parent.parent / "session.json").read_text(encoding="utf-8"))
+    run = json.loads((LEGACY_RUN / "run.json").read_text(encoding="utf-8"))
+    assert session["contract_version"] == run["contract_version"] == "0.9.0"
+
+    report = build_report(LEGACY_RUN).to_dict()
+    assert report["session_id"] == session["session_id"]
+    assert report["run_id"] == run["run_id"]
+    assert report["positions"]["unit"] == "px"
+    assert report["court"] is None
+    assert report["tracks"][0]["path_length"] == {"value": 200.0, "unit": "px"}
+    schema("report").validate(report)
 
 
 def test_the_report_needs_no_live_state_and_never_writes_outside_report_json(tmp_path):
