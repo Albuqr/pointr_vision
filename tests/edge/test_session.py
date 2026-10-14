@@ -178,7 +178,11 @@ def test_calibrated_run_writes_metre_positions_and_provenance(monkeypatch, tmp_p
     validate("session", session)
     validate("run", run)
     assert session["calibration"]["calibration_id"] == calibration["calibration_id"]
+    assert session["calibration"]["court"] == {
+        "type": "custom", "length_m": 3.0, "width_m": 2.0
+    }
     assert run["calibration"]["check_error_m"] == calibration["errors"]["check_mean_m"]
+    assert run["calibration"]["court"]["type"] == "custom"
     assert tracks[0]["x_m"] == "0.6000" and tracks[0]["y_m"] == "2.2000"
     assert tracks[0]["calibration_id"] == calibration["calibration_id"]
     assert tracks[0]["position_method"] == "box_bottom_center"

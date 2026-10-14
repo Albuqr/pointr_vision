@@ -60,11 +60,21 @@ def make_run(
     )  # fmt: skip
     run = copy.deepcopy(example("run"))
     run.update(run_id=run_id, session_id=session_id)
+    calibration = copy.deepcopy(calibration)
+    if calibration:
+        calibration["court"].setdefault(
+            "type", "fiba_full" if calibration["court"]["length_m"] == 28 else "custom"
+        )
     run["calibration"] = calibration
     session["calibration"] = (
         {
             "calibration_id": calibration["calibration_id"],
             "check_error_m": calibration["check_error_m"],
+            "court": {
+                "type": calibration["court"]["type"],
+                "length_m": calibration["court"]["length_m"],
+                "width_m": calibration["court"]["width_m"],
+            },
         }
         if calibration
         else None
@@ -289,10 +299,35 @@ def test_hand_built_calibration_reports_metres_and_provenance(tmp_path):
     assert data["positions"]["unit"] == "m"
     assert data["positions"]["calibration_id"] == calibration["calibration_id"]
     assert data["positions"]["check_error_m"] == 0.12
+    assert data["court"] == {"type": "fiba_full", "length_m": 28, "width_m": 15}
     assert value(track_of(report, 12)["path_length"]) == pytest.approx(5)
     assert "check error 0.120 m" in format_summary(report)
     assert format_summary(report).count("check error") == 1
     schema("report").validate(data)
+
+
+def test_half_court_report_uses_metres_and_bounds_do_not_change_movement(tmp_path):
+    tracks = [(i, 12, i * 100, 500) for i in range(6)]
+
+    def report_for(kind, length):
+        calibration = {
+            "calibration_id": str(uuid.uuid4()),
+            "check_error_m": 0.12,
+            "homography_image_to_court": [[0.01, 0, 0], [0, 0.01, 0], [0, 0, 1]],
+            "court": {"type": kind, "length_m": length, "width_m": 15},
+            "image_size": {"width": 1920, "height": 1080},
+        }
+        folder = tmp_path / kind
+        folder.mkdir()
+        return build_report(make_run(folder, dense(8), tracks, calibration=calibration))
+
+    half = report_for("fiba_half", 14).to_dict()
+    full = report_for("fiba_full", 28).to_dict()
+    assert half["court"] == {"type": "fiba_half", "length_m": 14, "width_m": 15}
+    assert half["positions"]["unit"] == "m"
+    assert half["tracks"][0]["path_length"] == full["tracks"][0]["path_length"]
+    assert half["tracks"][0]["mean_speed"] == full["tracks"][0]["mean_speed"]
+    schema("report").validate(half)
 
 
 def test_activity_thresholds_are_configurable(tmp_path):

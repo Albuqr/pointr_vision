@@ -70,3 +70,36 @@ def test_an_error_limit_above_two_metres_is_refused(client_and_token):
         json=payload(token, GOOD_FIT + checks, max_check_error_m=100),
     )
     assert response.status_code == 422 and "at most 2.0" in response.text
+
+
+def test_half_court_fit_accepts_baseline_and_midcourt_and_refuses_key_cluster(client_and_token):
+    client, token = client_and_token
+    bounds = {"court_kind": "fiba_half", "length_m": 14, "width_m": 15}
+    spanning = [
+        point((0, 0), (0, 0), "calibration"),
+        point((400, 0), (14, 0), "calibration"),
+        point((400, 300), (14, 15), "calibration"),
+        point((0, 300), (0, 15), "calibration"),
+        point((200, 150), (7, 7.5), "check"),
+        point((165, 101), (5.8, 5.05), "check"),
+    ]
+    response = client.post(
+        "/api/cameras/clip/calibration/fit", json=payload(token, spanning, **bounds)
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["court"]["type"] == "fiba_half"
+    assert response.json()["court"]["length_m"] == 14
+
+    clustered = [
+        point((0, 100), (0, 5.8), "calibration"),
+        point((200, 100), (5.8, 5.8), "calibration"),
+        point((200, 200), (5.8, 9.2), "calibration"),
+        point((0, 200), (0, 9.2), "calibration"),
+        point((60, 120), (1.7, 6.5), "check"),
+        point((100, 180), (2.9, 8.5), "check"),
+    ]
+    response = client.post(
+        "/api/cameras/clip/calibration/fit", json=payload(token, clustered, **bounds)
+    )
+    assert response.status_code == 422
+    assert "20%" in response.text and "fit points too close together" in response.text

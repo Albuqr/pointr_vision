@@ -17,7 +17,7 @@ from services.edge.contract import CONTRACT_VERSION
 # Versions of this file format the loader accepts. A later contract bump that leaves the
 # calibration format unchanged adds the previous version here, so saved calibrations stay usable;
 # a bump that changes it does not, and the old files are refused with a clear message.
-ACCEPTED_VERSIONS = (CONTRACT_VERSION, "0.8.0")
+ACCEPTED_VERSIONS = (CONTRACT_VERSION, "0.9.0", "0.8.0")
 _SCHEMA = Path(__file__).with_name("calibration.schema.json")
 
 
@@ -39,14 +39,25 @@ def validate_calibration(document):
             f"calibration must use contract version {' or '.join(ACCEPTED_VERSIONS)}, "
             f"not {document.get('contract_version') if isinstance(document, dict) else None!r}"
         )
-    # an older accepted version is checked against the current schema as if it were current
+    # Older files named the selected court `kind`; normalize that alias for current consumers.
+    # The saved file itself is never rewritten when loaded.
+    document = dict(document)
+    court = dict(document.get("court", {}))
+    if "type" not in court and "kind" in court:
+        court["type"] = court["kind"]
+    if "kind" not in court and "type" in court:
+        court["kind"] = court["type"]
+    if court.get("type") != court.get("kind"):
+        raise ValueError("calibration court kind and type must agree")
+    document["court"] = court
+    # An older accepted version is checked against the current schema as if current.
     problems = _schema_errors({**document, "contract_version": CONTRACT_VERSION})
     if problems:
         raise ValueError(
             "calibration does not match calibration.schema.json: " + "; ".join(problems)
         )
     court = document["court"]
-    court_model(court["kind"], court["length_m"], court["width_m"], court["landmarks"])
+    court_model(court["type"], court["length_m"], court["width_m"], court["landmarks"])
     points = document["points"]
     homography = normalize_homography_sign(
         document["homography_image_to_court"], [p["image_px"] for p in points]
@@ -98,6 +109,7 @@ def run_calibration(document):
         "check_error_m": document["errors"]["check_mean_m"],
         "homography_image_to_court": document["homography_image_to_court"],
         "court": {
+            "type": document["court"].get("type", document["court"]["kind"]),
             "length_m": document["court"]["length_m"],
             "width_m": document["court"]["width_m"],
         },

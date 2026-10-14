@@ -526,6 +526,11 @@ def run(args: argparse.Namespace) -> int:
             else {
                 "calibration_id": calibration["calibration_id"],
                 "check_error_m": calibration["errors"]["check_mean_m"],
+                "court": {
+                    "type": calibration["court"].get("type", calibration["court"]["kind"]),
+                    "length_m": calibration["court"]["length_m"],
+                    "width_m": calibration["court"]["width_m"],
+                },
             },
         )
         run = run_meta(args, info, config, detector, tracker, gpu)
