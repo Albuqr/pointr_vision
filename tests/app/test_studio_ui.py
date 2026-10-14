@@ -36,3 +36,13 @@ def test_camera_test_result_and_event_log_are_visible_until_user_action():
     assert "Event log ({events.length})" in source
     assert "Test passed" in source and "Test failed:" in source
     assert "setTested" in source and "Dismiss" in source
+
+
+def test_half_court_controls_recommend_anchors_and_warn_below_area_coverage():
+    source = SOURCE.read_text(encoding="utf-8")
+    assert '<option value="fiba_half">Half court</option>' in source
+    assert "midcourt_near_corner" in source and "midcourt_far_corner" in source
+    assert "Best visible anchors: baseline corners and midcourt" in source
+    assert "(14 * 15)" in source and "fitAreaCoverage < 0.2" in source
+    assert "at least 20% is required" in source
+    assert "points too close together, add the baseline corners or" in source
