@@ -52,6 +52,8 @@ type Court = {
   landmarks: Record<string, [number, number]>;
 };
 type Fit = {
+  ransac_threshold_m: number;
+  ransac_dropped_points: number[];
   point_errors_m: number[];
   calibration_mean_m: number;
   check_mean_m: number | null;
@@ -1269,6 +1271,16 @@ export default function StudioApp() {
                         ? "not measured"
                         : `${fit.check_max_m.toFixed(3)} m`}
                     </span>
+                    {fit.ransac_dropped_points.length > 0 && (
+                      <span role="alert">
+                        Left out of the fit as outliers (further than{" "}
+                        {fit.ransac_threshold_m} m from it): point{" "}
+                        {fit.ransac_dropped_points
+                          .map((index) => index + 1)
+                          .join(", ")}
+                        . Check their image or court position.
+                      </span>
+                    )}
                   </div>
                 )}
               </>

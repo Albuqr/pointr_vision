@@ -270,3 +270,23 @@ def test_validator_recomputes_errors_and_holdout_instead_of_trusting_the_file(ed
     edit(document)
     with pytest.raises(ValueError, match=message):
         validate_calibration(document)
+
+
+# -- RANSAC: which fit points were left out, and the threshold ---------------------------------
+
+
+def test_fit_reports_the_ransac_threshold_and_no_dropped_points_for_a_clean_fit():
+    result = fit_calibration(perspective_points())
+    assert result["ransac_threshold_m"] == 0.1
+    assert result["ransac_dropped_points"] == []
+
+
+def test_fit_reports_which_point_ransac_left_out():
+    source = perspective_points()
+    outlier = {**source[5], "role": "calibration", "court_m": [2.0, 12.0]}  # wrong court position
+    source = [*source[:5], outlier]  # four good fit points, one check, one outlier fit point
+    result = fit_calibration(source, enforce_limit=False, require_checks=False)
+    # five fit points, one of them inconsistent: RANSAC keeps four (which four is its choice, so
+    # the report names the one it left out, by its index in the list that was passed in)
+    [dropped] = result["ransac_dropped_points"]
+    assert dropped in (0, 1, 2, 3, 5) and source[dropped]["role"] == "calibration"

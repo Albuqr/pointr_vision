@@ -14,6 +14,7 @@ def _matrix(value):
 
 
 EPS_W = 1e-6  # a point whose homogeneous scale w is at or below this is on or beyond the horizon
+RANSAC_THRESHOLD_M = 0.1  # a fit point farther than this from the fit is an outlier and is ignored
 MAX_CHECK_ERROR_LIMIT_M = 2.0  # the largest "maximum mean check error" a user may set
 COINCIDENT_COURT_M = 1e-6  # two points this close in court metres are the same physical mark
 COINCIDENT_IMAGE_PX = 1.0  # ... or this close in the image
@@ -156,11 +157,17 @@ def fit_calibration(
     if not np.isfinite(image_points).all() or not np.isfinite(court_points).all():
         raise ValueError("calibration coordinates must be finite")
     homography, inliers = cv2.findHomography(
-        image_points, court_points, cv2.RANSAC, ransacReprojThreshold=0.1
+        image_points, court_points, cv2.RANSAC, ransacReprojThreshold=RANSAC_THRESHOLD_M
     )
     if homography is None or inliers is None or int(inliers.sum()) < 4:
         raise ValueError("RANSAC could not fit four inlier calibration points")
     homography = _matrix(homography)
+    inlier = iter(bool(value) for value in inliers.ravel())
+    dropped = [  # indices into `points` of fit points RANSAC left out of the fit
+        index
+        for index, point in enumerate(points)
+        if point["role"] == "calibration" and not next(inlier)
+    ]
     every_image_point = [point["image_px"] for point in fit + checks]
     with np.errstate(all="ignore"):
         scale = [homography[2, 0] * x + homography[2, 1] * y + homography[2, 2]
@@ -189,6 +196,8 @@ def fit_calibration(
         )
     return {
         "homography_image_to_court": homography.tolist(),
+        "ransac_threshold_m": RANSAC_THRESHOLD_M,
+        "ransac_dropped_points": dropped,
         "calibration_errors_m": fit_errors,
         "check_errors_m": check_errors,
         "calibration_mean_m": float(np.mean(fit_errors)),
