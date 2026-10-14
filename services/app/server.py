@@ -160,7 +160,7 @@ class Studio:
                 calibration_paths[camera.camera_id] = None
                 try:
                     saved = self.calibrations.load(camera.camera_id)
-                except ValueError as exc:
+                except Exception as exc:
                     warnings[camera.camera_id] = (
                         " ".join(str(exc).split())
                         + "; recording without calibration (positions in pixels)"

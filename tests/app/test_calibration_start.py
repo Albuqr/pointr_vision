@@ -97,6 +97,24 @@ def test_a_refusal_free_start_replaces_the_group_and_clears_old_warnings(two_cam
     assert all(c["calibration_warning"] is None for c in again["cameras"])
 
 
+def test_an_unexpected_calibration_load_error_only_disables_that_camera(two_cameras, monkeypatch):
+    client = two_cameras
+    studio = client.app.state.studio
+    load = studio.calibrations.load
+
+    def load_one(camera_id):
+        if camera_id == "cam1":
+            raise RecursionError("too deeply nested")
+        return load(camera_id)
+
+    monkeypatch.setattr(studio.calibrations, "load", load_one)
+    started = client.post("/api/recording/start")
+    assert started.status_code == 200, started.text
+    cameras = {camera["camera_id"]: camera for camera in started.json()["cameras"]}
+    assert "too deeply nested" in cameras["cam1"]["calibration_warning"]
+    assert cameras["cam2"]["calibration_warning"] is None
+
+
 def test_the_launcher_passes_the_problem_to_the_recorder():
     cam = Camera("cam1", "0", "usb", calibration_problem="active.json is unreadable")
     command = child_command(cam, Options("out", "g1"))
