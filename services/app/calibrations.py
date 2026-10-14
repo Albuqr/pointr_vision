@@ -3,11 +3,38 @@
 import json
 import os
 import tempfile
+import time
 import uuid
 from pathlib import Path
 
 from services.edge.calibration.document import validate_calibration
 from services.edge.session.types import CAMERA_ID_RE
+
+REPLACE_ATTEMPTS = 20
+REPLACE_DELAY_S = 0.05
+
+
+def _replace(source: Path, target: Path) -> None:
+    """os.replace, retried briefly: Windows refuses it while another program (OneDrive, a
+    browser reading the file, an antivirus scan) has the target open."""
+    for attempt in range(REPLACE_ATTEMPTS):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if attempt == REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(REPLACE_DELAY_S)
+
+
+def _write_durably(temporary: Path, target: Path, data: bytes) -> None:
+    """Write to a temporary file in the same folder, fsync it, then replace the target: after a
+    power cut the target is the old file or the whole new one, never a renamed empty file."""
+    with open(temporary, "wb") as stream:
+        stream.write(data)
+        stream.flush()
+        os.fsync(stream.fileno())
+    _replace(temporary, target)
 
 
 class CalibrationStore:
@@ -28,19 +55,17 @@ class CalibrationStore:
         json_temp = directory / "calibration.json.tmp"
         jpeg_temp = directory / "frame.jpg.tmp"
         try:
-            json_temp.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
-            jpeg_temp.write_bytes(jpeg)
-            os.replace(jpeg_temp, jpeg_path)
-            os.replace(json_temp, json_path)
+            _write_durably(jpeg_temp, jpeg_path, jpeg)
+            text = json.dumps(document, indent=2) + "\n"
+            _write_durably(json_temp, json_path, text.encode("utf-8"))
             active = self.camera_dir(document["camera_id"]) / "active.json"
+            pointer = json.dumps({"calibration_id": document["calibration_id"]}).encode()
             fd, temporary = tempfile.mkstemp(dir=active.parent, prefix="active-", suffix=".tmp")
+            os.close(fd)
             try:
-                with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                    json.dump({"calibration_id": document["calibration_id"]}, stream)
-                os.replace(temporary, active)
+                _write_durably(Path(temporary), active, pointer)
             finally:
-                if os.path.exists(temporary):
-                    os.unlink(temporary)
+                Path(temporary).unlink(missing_ok=True)
         except Exception:
             json_temp.unlink(missing_ok=True)
             jpeg_temp.unlink(missing_ok=True)

@@ -395,15 +395,17 @@ class Studio:
             raise HTTPException(502, f"could not capture calibration frame: {exc}") from exc
         token = str(uuid.uuid4())
         if cache:
-            self.calibration_frames[camera_id] = {
-                "token": token,
-                "jpeg": jpeg,
-                "image": image.copy(),
-            }
+            with self.lock:
+                self.calibration_frames[camera_id] = {
+                    "token": token,
+                    "jpeg": jpeg,
+                    "image": image.copy(),
+                }
         return jpeg, token, image.shape[1], image.shape[0]
 
     def calibration_fit(self, camera_id, payload, save=False):
-        cached = self.calibration_frames.get(camera_id)
+        with self.lock:
+            cached = self.calibration_frames.get(camera_id)
         if not cached or payload.get("frame_token") != cached["token"]:
             raise HTTPException(409, "capture a fresh frame before fitting or saving")
         try:
