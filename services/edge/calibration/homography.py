@@ -19,7 +19,7 @@ MAX_CHECK_ERROR_LIMIT_M = 2.0  # the largest "maximum mean check error" a user m
 COINCIDENT_COURT_M = 1e-6  # two points this close in court metres are the same physical mark
 COINCIDENT_IMAGE_PX = 1.0  # ... or this close in the image
 MIN_SPREAD = 0.1  # sqrt(minor / major variance) of the fit points, in the image and on the court
-COND_LIMIT = 1e7  # a larger condition number is treated as singular (real camera fits: ~2e4)
+COND_LIMIT = 1e7  # a larger condition number is treated as singular or numerically unstable
 
 
 def _divide(matrix, x, y):
@@ -29,11 +29,17 @@ def _divide(matrix, x, y):
     if not (math.isfinite(x) and math.isfinite(y)):
         return None
     with np.errstate(all="ignore"):
-        w = matrix[2, 0] * x + matrix[2, 1] * y + matrix[2, 2]
+        # A homography is unchanged when multiplied by a non-zero scalar. Normalize by a
+        # positive factor before applying EPS_W so equivalent matrix scales project identically.
+        scale = float(np.max(np.abs(matrix)))
+        if not math.isfinite(scale) or scale == 0:
+            return None
+        normalized = matrix / scale
+        w = normalized[2, 0] * x + normalized[2, 1] * y + normalized[2, 2]
         if not math.isfinite(w) or w <= EPS_W:
             return None
-        px = (matrix[0, 0] * x + matrix[0, 1] * y + matrix[0, 2]) / w
-        py = (matrix[1, 0] * x + matrix[1, 1] * y + matrix[1, 2]) / w
+        px = (normalized[0, 0] * x + normalized[0, 1] * y + normalized[0, 2]) / w
+        py = (normalized[1, 0] * x + normalized[1, 1] * y + normalized[1, 2]) / w
     if not (math.isfinite(px) and math.isfinite(py)):
         return None
     return float(px), float(py)
@@ -77,6 +83,25 @@ def check_homography(homography, image_points=()):
     for point in image_points:
         if _divide(matrix, float(point[0]), float(point[1])) is None:
             raise ValueError("a calibration point lies on or beyond the horizon of the homography")
+
+
+def normalize_homography_sign(homography, image_points):
+    """Return an equivalent matrix with positive w at saved floor points, when all signs agree.
+
+    Earlier writers could persist the same projective mapping with its arbitrary global sign
+    reversed. Mixed signs still mean the saved points cross the horizon and are rejected by
+    check_homography after normalization.
+    """
+    matrix = _matrix(homography)
+    scale = float(np.max(np.abs(matrix)))
+    if not math.isfinite(scale) or scale == 0:
+        return matrix
+    matrix = matrix / scale
+    with np.errstate(all="ignore"):
+        weights = [matrix[2, 0] * x + matrix[2, 1] * y + matrix[2, 2] for x, y in image_points]
+    if weights and all(math.isfinite(w) and w < 0 for w in weights):
+        matrix = -matrix
+    return matrix
 
 
 def point_residuals(homography, points):

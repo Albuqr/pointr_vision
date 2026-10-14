@@ -9,6 +9,7 @@ from services.edge.calibration.court import court_model
 from services.edge.calibration.homography import (
     check_homography,
     check_point_set,
+    normalize_homography_sign,
     point_residuals,
 )
 from services.edge.contract import CONTRACT_VERSION
@@ -47,7 +48,10 @@ def validate_calibration(document):
     court = document["court"]
     court_model(court["kind"], court["length_m"], court["width_m"], court["landmarks"])
     points = document["points"]
-    homography = document["homography_image_to_court"]
+    homography = normalize_homography_sign(
+        document["homography_image_to_court"], [p["image_px"] for p in points]
+    )
+    document = {**document, "homography_image_to_court": homography.tolist()}
     check_homography(homography, [p["image_px"] for p in points])
     check_point_set(points)
     _check_recomputed_errors(document, homography, points)

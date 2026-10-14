@@ -43,6 +43,17 @@ def test_every_file_is_fsynced_before_it_is_renamed(tmp_path, monkeypatch):
     assert events == ["fsync", "replace"] * 3
 
 
+def test_save_normalizes_the_homography_global_sign(tmp_path):
+    doc = document()
+    doc["homography_image_to_court"] = [
+        [-value for value in row] for row in doc["homography_image_to_court"]
+    ]
+    store = CalibrationStore(tmp_path)
+    store.save(doc, b"jpeg")
+    saved = store.load("cam1")
+    assert saved["homography_image_to_court"][2][2] > 0
+
+
 def test_a_brief_windows_lock_on_the_target_is_retried(tmp_path, monkeypatch):
     real_replace, refusals = os.replace, []
 

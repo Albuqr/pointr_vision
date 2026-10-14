@@ -47,7 +47,7 @@ class CalibrationStore:
         return self.root / camera_id
 
     def save(self, document: dict, jpeg: bytes) -> Path:
-        validate_calibration(document)
+        document = validate_calibration(document)
         directory = self.camera_dir(document["camera_id"]) / document["calibration_id"]
         directory.mkdir(parents=True, exist_ok=False)
         json_path = directory / "calibration.json"
