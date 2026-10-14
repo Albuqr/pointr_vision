@@ -1,5 +1,6 @@
 import base64
 import csv
+import dataclasses
 import datetime as dt
 import ipaddress
 import json
@@ -22,7 +23,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from services.app.calibrations import CalibrationStore
 from services.app.camera_log import CameraLog
-from services.app.config import CameraConfig
+from services.app.config import CameraConfig, resolve_camera_source
 from services.edge.calibration.court import court_lines, court_model
 from services.edge.calibration.homography import fit_calibration
 from services.edge.calibration.render import projected_court_lines
@@ -165,6 +166,20 @@ class Studio:
             cameras = [camera for camera in parse_config(entries) if camera.enabled]
             if not cameras:
                 raise HTTPException(422, "enable at least one camera before starting")
+            resolved_cameras = []
+            for camera in cameras:
+                try:
+                    resolved_cameras.append(
+                        dataclasses.replace(camera, source=resolve_camera_source(camera.source))
+                    )
+                except ConfigError as exc:
+                    log = self.log(camera.camera_id)
+                    detail = f"source: {mask_credentials(str(camera.source))}\nreason: {exc}"
+                    log.set_error("The camera URL could not be used safely.", detail)
+                    log.add_event("source_open_failed", exc)
+            cameras = resolved_cameras
+            if not cameras:
+                raise HTTPException(422, "no enabled camera has a usable source; see camera errors")
             # Load every calibration before any state changes. A camera whose calibration is
             # missing records uncalibrated; one whose calibration is corrupt does too, but says
             # so (a session event, and a warning in the status). One camera never blocks the rest.
@@ -388,7 +403,7 @@ class Studio:
             raise HTTPException(404, "camera not found")
         source = None
         try:
-            source = open_source(str(entry["source"]), None)
+            source = open_source(resolve_camera_source(str(entry["source"])), None)
             source.fps_cap = entry.get("fps_cap")
             info = source.open()
             started = time.monotonic()
@@ -405,6 +420,7 @@ class Studio:
                     reads += 1
             elapsed = max(time.monotonic() - started, 0.001)
             if frame is None:
+                self.record_test_failure(camera_id, "no frame received", entry["source"])
                 return {
                     "error": "no frame received",
                     "resolution": [info.width, info.height],
@@ -412,6 +428,8 @@ class Studio:
                     "reported_fps": info.reported_fps,
                 }
             ok, encoded = cv2.imencode(".jpg", frame.image)
+            if not ok:
+                self.record_test_failure(camera_id, "JPEG encoding failed", entry["source"])
             return {
                 "snapshot": base64.b64encode(encoded.tobytes()).decode("ascii") if ok else None,
                 "resolution": [info.width, info.height],
@@ -419,7 +437,8 @@ class Studio:
                 "reported_fps": info.reported_fps,
                 "error": None if ok else "JPEG encoding failed",
             }
-        except (SourceOpenError, cv2.error, OSError) as exc:
+        except (ConfigError, SourceOpenError, cv2.error, OSError) as exc:
+            self.record_test_failure(camera_id, str(exc), entry["source"])
             return {
                 "snapshot": None,
                 "resolution": None,
@@ -430,6 +449,11 @@ class Studio:
         finally:
             if source:
                 source.close()
+
+    def record_test_failure(self, camera_id, reason, source):
+        detail = f"source: {mask_credentials(str(source))}\nreason: {mask_credentials(str(reason))}"
+        self.log(camera_id).set_error("The camera test failed.", detail)
+        self.log(camera_id).add_event("source_open_failed", reason)
 
     def calibration_frame(self, camera_id, cache=True):
         entry = next((item for item in self.entries() if item["camera_id"] == camera_id), None)
@@ -456,7 +480,9 @@ class Studio:
                     raise ValueError("recording process returned an invalid JPEG")
             else:
                 # the recorder's own capture size, so the frame is the one it will record
-                source = open_source(str(entry["source"]), DEFAULT_CAPTURE_SIZE)
+                source = open_source(
+                    resolve_camera_source(str(entry["source"])), DEFAULT_CAPTURE_SIZE
+                )
                 source.fps_cap = entry.get("fps_cap")
                 try:
                     source.open()
@@ -477,7 +503,7 @@ class Studio:
                 if not ok:
                     raise ValueError("JPEG encoding failed")
                 jpeg = encoded.tobytes()
-        except (SourceOpenError, OSError, ValueError, cv2.error) as exc:
+        except (ConfigError, SourceOpenError, OSError, ValueError, cv2.error) as exc:
             raise HTTPException(
                 502, mask_credentials(f"could not capture calibration frame: {exc}")
             ) from exc

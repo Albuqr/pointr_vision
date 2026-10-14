@@ -163,6 +163,68 @@ def test_test_camera_measures_three_seconds_and_closes_before_start(client, monk
     client.post("/api/recording/stop")
 
 
+def test_failed_camera_test_is_persisted_in_status_and_credentials_are_masked(client, monkeypatch):
+    import services.app.server as server
+
+    client.post(
+        "/api/cameras",
+        json={
+            "camera_id": "cam1",
+            "source": "rtsp://user:secret@192.0.2.20/live",
+            "link": "wifi",
+        },
+    )
+
+    def fail_open(source, size=None):
+        raise server.SourceOpenError("could not open rtsp://user:secret@192.0.2.20/live")
+
+    monkeypatch.setattr(server, "open_source", fail_open)
+    result = client.post("/api/cameras/cam1/test").json()
+    assert "secret" not in result["error"]
+    for _ in range(2):
+        status = client.get("/api/status").json()
+        camera = next(item for item in status["idle_cameras"] if item["camera_id"] == "cam1")
+        assert camera["last_error"]["message"] == "The camera test failed."
+        assert "secret" not in camera["last_error"]["detail"]
+        assert camera["recent_events"][0]["kind"] == "source_open_failed"
+
+
+def test_camera_test_opens_the_pinned_dns_address(client, monkeypatch):
+    import socket
+    from types import SimpleNamespace
+
+    import services.app.server as server
+
+    client.post(
+        "/api/cameras",
+        json={"camera_id": "cam1", "source": "http://camera.example/live", "link": "wifi"},
+    )
+    monkeypatch.setattr(
+        server.socket,
+        "getaddrinfo",
+        lambda host, port, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))
+        ],
+    )
+    opened = []
+
+    class Source:
+        def open(self):
+            return SimpleNamespace(width=10, height=10, reported_fps=None)
+
+        def read(self):
+            return None
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        server, "open_source", lambda source, size=None: opened.append(source) or Source()
+    )
+    client.app.state.studio.test_camera("cam1", duration=0)
+    assert opened == ["http://93.184.216.34/live"]
+
+
 def test_cli_and_app_share_launcher_library_and_http_preview_flag():
     assert run_cameras.Launcher is Launcher
     camera = Camera("cam1", "0", "builtin", http_preview_port=45678)

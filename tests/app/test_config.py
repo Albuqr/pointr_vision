@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from services.app.config import CameraConfig
+from services.app.config import CameraConfig, resolve_camera_source
 from services.edge.launcher import ConfigError
 
 
@@ -66,6 +66,54 @@ def test_unsafe_or_unsupported_camera_urls_are_rejected(tmp_path, source):
     store = CameraConfig(tmp_path / "cameras.json")
     with pytest.raises(ConfigError):
         store.write([{"camera_id": "cam1", "source": source, "link": "wifi"}])
+
+
+def test_camera_hostname_is_resolved_validated_and_pinned(monkeypatch):
+    import socket
+
+    def public_answer(host, port, **kwargs):
+        assert host == "camera.example"
+        assert port == 4747
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", public_answer)
+    assert resolve_camera_source("rtsp://user:secret@camera.example:4747/live") == (
+        "rtsp://user:secret@93.184.216.34:4747/live"
+    )
+
+
+@pytest.mark.parametrize("resolved", ["127.0.0.1", "169.254.169.254", "10.0.0.5"])
+def test_camera_hostname_rejects_private_or_link_local_dns_answers(monkeypatch, resolved):
+    import socket
+
+    from services.edge.launcher import ConfigError
+
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda host, port, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", (resolved, port))
+        ],
+    )
+    with pytest.raises(ConfigError, match="non-public"):
+        resolve_camera_source("http://camera.example/live")
+
+
+def test_camera_hostname_rejects_mixed_dns_answers(monkeypatch):
+    import socket
+
+    from services.edge.launcher import ConfigError
+
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda host, port, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", port)),
+        ],
+    )
+    with pytest.raises(ConfigError, match="non-public"):
+        resolve_camera_source("http://camera.example/live")
 
 
 def test_camera_settings_keep_backup_and_active_file_on_replace_failure(tmp_path, monkeypatch):

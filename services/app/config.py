@@ -3,9 +3,10 @@ import json
 import math
 import os
 import shutil
+import socket
 import tempfile
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from services.edge.launcher import ConfigError, parse_config
 from services.edge.session.types import CAMERA_ID_RE
@@ -14,6 +15,49 @@ from services.edge.session.writer import mask_credentials
 DET_SIZES = frozenset(range(320, 1281, 32))
 MAX_FPS_CAP = 60.0
 URL_SCHEMES = {"http", "https", "rtsp"}
+
+
+def resolve_camera_source(source: str) -> str:
+    """Resolve and pin network camera URLs so validation and connection use one address."""
+    if not isinstance(source, str) or "://" not in source:
+        return source
+    problem = _url_problem(source)
+    if problem:
+        raise ConfigError(problem)
+    parts = urlsplit(source)
+    host = parts.hostname
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        address = None
+    if address is not None:
+        return source
+    port = parts.port or {"http": 80, "https": 443, "rtsp": 554}[parts.scheme.lower()]
+    try:
+        results = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise ConfigError(f"camera hostname could not be resolved: {host}") from exc
+    addresses = []
+    for result in results:
+        try:
+            resolved = ipaddress.ip_address(result[4][0])
+        except ValueError:
+            continue
+        # A hostname is only accepted when every answer is globally routable. This
+        # prevents a mixed DNS response from selecting an internal service.
+        if not resolved.is_global:
+            raise ConfigError("camera hostname resolves to a non-public address")
+        addresses.append(resolved)
+    if not addresses:
+        raise ConfigError("camera hostname did not resolve to an IP address")
+    pinned = addresses[0]
+    netloc = ""
+    if parts.username is not None:
+        netloc = parts.netloc.rsplit("@", 1)[0] + "@"
+    netloc += f"[{pinned}]" if pinned.version == 6 else str(pinned)
+    if parts.port is not None:
+        netloc += f":{parts.port}"
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
 
 
 def _url_problem(source: str) -> str | None:
