@@ -137,6 +137,29 @@ def test_a_raising_projector_gives_empty_positions_and_one_rate_limited_event(tm
     assert "boom" in events[0]["detail"] and "200 track row(s)" in events[-1]["detail"]
 
 
+def test_a_bad_track_row_does_not_stop_the_writer_or_lose_its_frame(tmp_path):
+    writer = FileSessionWriter(tmp_path)
+    run = replace(run_meta(), calibration=calibration())
+    writer.start(meta(), run, CalibrationPositions(calibration()))
+    writer.set_t0(time.perf_counter(), "2026-10-13T12:00:01Z")
+    for seq in range(3):
+        writer.frame(rec(seq))
+        confidence = "not a number" if seq == 1 else 0.9
+        writer.tracks(seq, [TrackObs(1, (0, 0, 40, 50), confidence, None)])
+    writer.close("ended", RunCounts(3, 3, 0, 0))
+
+    folder = writer.dir / "runs" / run.run_id
+    with (folder / "frames.csv").open(newline="", encoding="utf-8") as stream:
+        frames = list(csv.DictReader(stream))
+    with (folder / "tracks.csv").open(newline="", encoding="utf-8") as stream:
+        tracks = list(csv.DictReader(stream))
+    session = json.loads((writer.dir / "session.json").read_text(encoding="utf-8"))
+    assert session["status"] == "ended" and writer.error is None
+    assert len(frames) == len(tracks) == 3
+    assert tracks[1]["x_m"] == tracks[1]["y_m"] == tracks[1]["in_court"] == ""
+    assert any("track row error" in event["detail"] for event in session["events"])
+
+
 def test_the_writer_does_not_import_the_calibration_package():
     import services.edge.session.writer as writer_module
 
