@@ -182,10 +182,30 @@ def test_half_court_fit_rejects_key_cluster_and_accepts_baseline_to_midcourt():
 
 
 def test_in_court_uses_full_or_half_bounds_without_clamping_positions():
-    half = positions_for([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
-    half.length_m = 14.0
-    full = positions_for([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
-    full.length_m = 28.0
+    from services.edge.calibration.court import court_model
+    from services.edge.calibration.homography import CalibrationPositions
+
+    document = json.loads((ROOT / "tests/fixtures/contracts/calibration.example.json").read_text())
+    full_court = court_model("fiba_full")
+    half_court = court_model("fiba_half", 14, 15)
+    full_document = {
+        **document,
+        "court": {
+            "kind": "fiba_full", "type": "fiba_full", "length_m": 28.0,
+            "width_m": 15.0, "landmarks": full_court.landmarks,
+        },
+    }
+    half_document = {
+        **document,
+        "court": {
+            "kind": "fiba_half", "type": "fiba_half", "length_m": 14.0,
+            "width_m": 15.0, "landmarks": half_court.landmarks,
+        },
+    }
+    full_document["homography_image_to_court"] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    half_document["homography_image_to_court"] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    half = CalibrationPositions(half_document)
+    full = CalibrationPositions(full_document)
     assert half(14.5, 7.5) == (14.5, 7.5)
     assert not half.in_court(14.5, 7.5)
     assert full.in_court(14.5, 7.5)
