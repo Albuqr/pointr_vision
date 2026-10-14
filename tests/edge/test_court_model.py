@@ -71,3 +71,15 @@ def test_centre_circle_is_omitted_when_its_diameter_exceeds_court_length():
     court = court_model("custom", 3.0, 5.0)
     assert len(court_lines(court)) == 2
     assert all(0 <= x <= 3.0 and 0 <= y <= 5.0 for line in court_lines(court) for x, y in line)
+
+
+def test_fiba_half_landmarks_reuse_all_full_court_landmarks_at_x_at_most_14():
+    full = court_model("fiba_full")
+    half = court_model("fiba_half", 14, 15)
+    expected = {name: point for name, point in full.landmarks.items() if point[0] <= 14}
+    assert {name: half.landmarks[name] for name in expected} == expected
+    assert half.landmarks["midcourt_near_corner"] == (14.0, 0.0)
+    assert half.landmarks["midcourt_far_corner"] == (14.0, 15.0)
+    assert half.landmarks["midcourt_center"] == (14.0, 7.5)
+    assert (half.length_m, half.width_m) == (14.0, 15.0)
+    assert all(0 <= x <= 14 and 0 <= y <= 15 for line in court_lines(half) for x, y in line)
