@@ -25,6 +25,7 @@ import sys
 import threading
 import time
 import uuid
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -40,7 +41,7 @@ from services.edge.reports.build import (  # noqa: E402
     table_row,
 )
 from services.edge.session.types import CAMERA_ID_RE  # noqa: E402
-from services.edge.session.writer import redact  # noqa: E402
+from services.edge.session.writer import mask_credentials, redact  # noqa: E402
 
 LINKS = ("usb", "wifi", "builtin", "file")
 KEYS = {
@@ -56,6 +57,7 @@ KEYS = {
 DEFAULT_PORTS = {"http": 80, "https": 443, "rtsp": 554}
 SESSION_PREFIX = "session: "  # printed by services.edge.main once the source has opened
 FAILED_READS = re.compile(r"\bfailed_reads=(\d+)")
+TAIL_LINES = 20  # last output lines of a child kept for the Studio error panel
 OK_STATUSES = ("ended", "interrupted")
 
 
@@ -246,6 +248,7 @@ class Child:
         self.opened = threading.Event()  # that line was seen
         self.failed_reads = "-"
         self.failure: str | None = None  # why it never recorded
+        self.tail: deque[str] = deque(maxlen=TAIL_LINES)  # last output lines, credentials masked
         self.killed = False
         self.stop_sent = False
         self.preview_port = cam.http_preview_port
@@ -313,6 +316,7 @@ class Launcher:
     def read(self, child: Child) -> None:
         for raw in child.proc.stdout:
             line = raw.rstrip("\r\n")
+            child.tail.append(mask_credentials(line))
             if line.startswith(SESSION_PREFIX):
                 child.session_dir = Path(line[len(SESSION_PREFIX) :])
                 child.opened.set()
@@ -324,8 +328,9 @@ class Launcher:
                 except ValueError:
                     child.failure = "invalid preview port reported"
             elif line.startswith("error: ") and child.failure is None:
-                child.failure = line.removeprefix("error: ").strip()
-            self.say(f"[{child.cam.camera_id}] {line}")  # never raises: the pipe must be drained
+                child.failure = mask_credentials(line.removeprefix("error: ").strip())
+            # never raises: the pipe must be drained
+            self.say(f"[{child.cam.camera_id}] {mask_credentials(line)}")
 
     def start_one(self, cam: Camera) -> None:
         """Start one camera and wait until its session exists, it exits, or the timeout."""
@@ -334,7 +339,7 @@ class Launcher:
         try:
             self.spawn(child)
         except OSError as e:
-            child.failure = f"failed to start: {e}"
+            child.failure = mask_credentials(f"failed to start: {e}")
             self.say(f"[launcher] {cam.camera_id}: {child.failure}")
             return
         self.say(f"[launcher] starting {cam.camera_id} ({redact(cam.source)})")

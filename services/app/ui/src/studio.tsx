@@ -29,9 +29,22 @@ type CameraStatus = {
   preview_port: number | null;
   error?: string | null;
   calibration_warning?: string | null;
+  last_error?: CameraError | null;
+  recent_events?: CameraEvent[];
   calibration?: { calibration_id: string; check_error_m: number } | null;
 };
-type Status = { running: boolean; cameras: CameraStatus[] };
+type CameraError = { message: string; detail: string; at: string };
+type CameraEvent = { t_wall: string; kind: string; detail: string | null };
+type IdleCamera = {
+  camera_id: string;
+  last_error: CameraError | null;
+  recent_events: CameraEvent[];
+};
+type Status = {
+  running: boolean;
+  cameras: CameraStatus[];
+  idle_cameras?: IdleCamera[];
+};
 type Session = {
   camera_id: string;
   group_id: string;
@@ -88,9 +101,109 @@ async function request<T>(
     headers: { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (!response.ok)
-    throw new Error((await response.text()).replace(/^"|"$/g, ""));
+  if (!response.ok) {
+    const text = await response.text();
+    let message = text.replace(/^"|"$/g, "");
+    try {
+      const detail = JSON.parse(text).detail;
+      if (typeof detail === "string") message = detail;
+    } catch {
+      // not JSON: show the text as it is
+    }
+    throw new Error(message);
+  }
   return response.json() as Promise<T>;
+}
+
+function errorText(cameraId: string, error: CameraError) {
+  return [
+    `Camera ${cameraId} · ${error.at}`,
+    error.message,
+    "",
+    error.detail,
+  ].join("\n");
+}
+
+async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = text;
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+  }
+}
+
+// An error stays until the user dismisses it (or the camera next starts):
+// there is no timer anywhere in this component.
+function ErrorPanel({
+  cameraId,
+  error,
+  onDismiss,
+}: {
+  cameraId: string;
+  error: CameraError;
+  onDismiss: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="error-panel" role="alert">
+      <div className="error-panel-head">
+        <b>{error.message}</b>
+        <time dateTime={error.at}>{new Date(error.at).toLocaleString()}</time>
+      </div>
+      {error.detail && (
+        <details>
+          <summary>Technical detail</summary>
+          <pre>{error.detail}</pre>
+        </details>
+      )}
+      <div className="error-panel-actions">
+        <button
+          type="button"
+          onClick={async () => {
+            await copyText(errorText(cameraId, error));
+            setCopied(true);
+          }}
+        >
+          {copied ? "Copied" : "Copy"}
+        </button>
+        <button type="button" onClick={onDismiss}>
+          Dismiss
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function EventLog({ events }: { events: CameraEvent[] }) {
+  if (events.length === 0) return null;
+  const counts = new Map<string, number>();
+  const rows = events.map((event) => {
+    const base = `${event.t_wall}|${event.kind}|${event.detail}`;
+    const n = (counts.get(base) ?? 0) + 1;
+    counts.set(base, n);
+    return { key: `${base}#${n}`, event };
+  });
+  return (
+    <details className="event-log">
+      <summary>Event log ({events.length})</summary>
+      <ol>
+        {rows.map(({ key, event }) => (
+          <li key={key}>
+            <time dateTime={event.t_wall}>
+              {new Date(event.t_wall).toLocaleTimeString()}
+            </time>
+            <b>{event.kind}</b>
+            {event.detail && <span>{event.detail}</span>}
+          </li>
+        ))}
+      </ol>
+    </details>
+  );
 }
 
 const emptyCamera: Camera = { camera_id: "cam1", source: "0", link: "builtin" };
@@ -100,6 +213,7 @@ export default function StudioApp() {
   const [status, setStatus] = useState<Status>({ running: false, cameras: [] });
   const [sessions, setSessions] = useState<Session[]>([]);
   const [error, setError] = useState("");
+  const [offline, setOffline] = useState(""); // the poll failed; clears when it works again
   const [notice, setNotice] = useState("");
   const [tested, setTested] = useState<Record<string, TestResult>>({});
   const [editing, setEditing] = useState<string | null>(null);
@@ -134,14 +248,14 @@ export default function StudioApp() {
       ]);
       setCameras(nextCameras);
       setStatus(nextStatus);
-      setError("");
+      setOffline("");
       setSelected((old) =>
         nextCameras.some((camera) => camera.camera_id === old)
           ? old
           : nextCameras[0]?.camera_id || "",
       );
     } catch (reason) {
-      setError(String(reason));
+      setOffline(String(reason));
     }
   }, []);
 
@@ -169,8 +283,18 @@ export default function StudioApp() {
   async function action(url: string, method = "POST", body?: unknown) {
     try {
       await request(url, method, body);
-      setError("");
       setNotice("Changes saved.");
+      await refresh();
+    } catch (reason) {
+      setNotice("");
+      setError(String(reason));
+      await refresh(); // a refused start leaves its reason in the camera's own panel
+    }
+  }
+
+  async function dismissCameraError(cameraId: string) {
+    try {
+      await request(`/api/cameras/${cameraId}/error`, "DELETE");
       await refresh();
     } catch (reason) {
       setError(String(reason));
@@ -329,7 +453,6 @@ export default function StudioApp() {
 
   function changePage(item: string) {
     setPage(item);
-    setError("");
     setNotice("");
     if (item === "Sessions") void loadSessions();
   }
@@ -377,6 +500,12 @@ export default function StudioApp() {
             {status.running ? "Group recording" : "Not recording"}
           </div>
         </header>
+        {offline && (
+          <div role="status" className="notice error-box">
+            Lost contact with Studio ({offline}). Recording is not affected.
+            Retrying…
+          </div>
+        )}
         {(error || notice) && (
           <div role="status" className={error ? "notice error-box" : "notice"}>
             {error || notice}
@@ -569,20 +698,19 @@ export default function StudioApp() {
                       <button
                         type="button"
                         onClick={async () => {
+                          let result: TestResult;
                           try {
-                            setTested({
-                              ...tested,
-                              [camera.camera_id]: await request<TestResult>(
-                                `/api/cameras/${camera.camera_id}/test`,
-                                "POST",
-                              ),
-                            });
+                            result = await request<TestResult>(
+                              `/api/cameras/${camera.camera_id}/test`,
+                              "POST",
+                            );
                           } catch (reason) {
-                            setTested({
-                              ...tested,
-                              [camera.camera_id]: { error: String(reason) },
-                            });
+                            result = { error: String(reason) };
                           }
+                          setTested((old) => ({
+                            ...old,
+                            [camera.camera_id]: result,
+                          }));
                         }}
                       >
                         Test
@@ -610,19 +738,42 @@ export default function StudioApp() {
                       </button>
                     </div>
                     {tested[camera.camera_id] && (
-                      <div className="test-result">
-                        {tested[camera.camera_id].snapshot ? (
+                      <div
+                        className={
+                          tested[camera.camera_id].error
+                            ? "test-result test-failed"
+                            : "test-result"
+                        }
+                      >
+                        {tested[camera.camera_id].snapshot && (
                           <img
                             alt={`${camera.camera_id} test snapshot`}
                             src={`data:image/jpeg;base64,${tested[camera.camera_id].snapshot}`}
                           />
+                        )}
+                        {tested[camera.camera_id].error ? (
+                          <p>Test failed: {tested[camera.camera_id].error}</p>
                         ) : (
-                          <p>{tested[camera.camera_id].error}</p>
+                          <p>Test passed</p>
                         )}
                         <small>
-                          {tested[camera.camera_id].resolution?.join(" × ")}{" "}
-                          {tested[camera.camera_id].fps?.toFixed(1)} fps
+                          {tested[camera.camera_id].resolution
+                            ? `${tested[camera.camera_id].resolution?.join(" × ")} · `
+                            : ""}
+                          {tested[camera.camera_id].fps != null
+                            ? `${tested[camera.camera_id].fps?.toFixed(1)} fps`
+                            : "no frame rate"}
                         </small>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setTested(
+                              ({ [camera.camera_id]: _gone, ...rest }) => rest,
+                            )
+                          }
+                        >
+                          Dismiss
+                        </button>
                       </div>
                     )}
                   </article>
@@ -666,7 +817,9 @@ export default function StudioApp() {
                 </button>
               </div>
             </div>
-            {!status.running && status.cameras.length === 0 && (
+            {!status.running &&
+              status.cameras.length === 0 &&
+              !status.idle_cameras?.length && (
               <div className="empty-state">
                 <span>01</span>
                 <b>No camera group is active</b>
@@ -736,7 +889,18 @@ export default function StudioApp() {
                       Calibration not used: {camera.calibration_warning}
                     </p>
                   )}
-                  {camera.error && <p className="feed-error">{camera.error}</p>}
+                  {camera.last_error ? (
+                    <ErrorPanel
+                      cameraId={camera.camera_id}
+                      error={camera.last_error}
+                      onDismiss={() => void dismissCameraError(camera.camera_id)}
+                    />
+                  ) : (
+                    !status.running &&
+                    camera.state === "error" &&
+                    camera.error && <p className="feed-error">{camera.error}</p>
+                  )}
+                  <EventLog events={camera.recent_events ?? []} />
                   {camera.last_event && (
                     <small className="last-event">
                       Last event: {JSON.stringify(camera.last_event)}
@@ -753,13 +917,25 @@ export default function StudioApp() {
                         Recording saved · {camera.state}
                       </p>
                     )}
-                  {!status.running &&
-                    camera.state === "error" &&
-                    !camera.error && (
-                      <p className="error">
-                        Camera process ended with an error.
-                      </p>
-                    )}
+                </article>
+              ))}
+              {(status.idle_cameras ?? []).map((camera) => (
+                <article className="feed" key={camera.camera_id}>
+                  <div className="feed-head">
+                    <div>
+                      <span className="eyebrow">CAMERA</span>
+                      <h3>{camera.camera_id}</h3>
+                    </div>
+                    <span className="state error">not started</span>
+                  </div>
+                  {camera.last_error && (
+                    <ErrorPanel
+                      cameraId={camera.camera_id}
+                      error={camera.last_error}
+                      onDismiss={() => void dismissCameraError(camera.camera_id)}
+                    />
+                  )}
+                  <EventLog events={camera.recent_events} />
                 </article>
               ))}
             </div>

@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from services.app.calibrations import CalibrationStore
+from services.app.camera_log import CameraLog
 from services.app.config import CameraConfig
 from services.edge.calibration.court import court_lines, court_model
 from services.edge.calibration.homography import fit_calibration
@@ -30,6 +31,7 @@ from services.edge.capture.types import SourceEnded
 from services.edge.contract import CONTRACT_VERSION
 from services.edge.launcher import Camera, ConfigError, Launcher, Options, parse_config
 from services.edge.reports.build import build_report, format_summary, run_dirs
+from services.edge.session.writer import mask_credentials
 
 ROOT = Path(__file__).resolve().parents[2]
 UI_DIST = Path(__file__).parent / "ui" / "dist"
@@ -57,6 +59,7 @@ class Studio:
         self.preview_ports: dict[str, int] = {}
         self.lock = threading.RLock()
         self.final: dict[str, dict] = {}
+        self.logs: dict[str, CameraLog] = {}
         self.frame_cache = {}
         self.calibration_frames = {}
         self.calibration_warnings: dict[str, str] = {}
@@ -99,10 +102,46 @@ class Studio:
                 parse_config(entries)
             self.config.write(entries)
         except ConfigError as exc:
-            raise HTTPException(422, str(exc)) from exc
+            raise HTTPException(422, mask_credentials(str(exc))) from exc
 
     def recording(self):
         return bool(self.worker and self.worker.is_alive())
+
+    def log(self, camera_id) -> CameraLog:
+        with self.lock:
+            return self.logs.setdefault(camera_id, CameraLog())
+
+    def note_child(self, child, log, state, events):
+        """Copy a child's news into its camera log: session events, and, once, why it ended
+        or never recorded (the error stays until dismissed or the camera next starts)."""
+        if child.session_dir:
+            log.ingest_session_events(str(child.session_dir), events)
+        if log.reported_child is child:
+            return
+        failure = getattr(child, "failure", None)
+        running = child.running
+        if not failure and (running or state != "error"):
+            return
+        log.reported_child = child
+        proc = getattr(child, "proc", None)
+        code = getattr(proc, "returncode", None)
+        if failure and "no session after" in failure:
+            message = "The camera took too long to open, so it was stopped."
+        elif failure:
+            message = "The camera could not start recording."
+        else:
+            message = "The camera stopped recording because of an error."
+        lines = [f"source: {mask_credentials(str(child.cam.source))}"]
+        if failure:
+            lines.append(f"reason: {failure}")
+        if code is not None:
+            lines.append(f"exit code: {code}")
+        tail = list(getattr(child, "tail", ()))
+        if tail:
+            lines.append(f"output (last {len(tail)} lines):")
+            lines.extend(tail)
+        log.set_error(message, "\n".join(lines))
+        log.add_event("start_failed" if failure else "error", failure or message)
 
     def start(self):
         with self.lock:
@@ -126,6 +165,9 @@ class Studio:
                         " ".join(str(exc).split())
                         + "; recording without calibration (positions in pixels)"
                     )
+                    self.log(camera.camera_id).add_event(
+                        "calibration_not_used", warnings[camera.camera_id]
+                    )
                     continue
                 if saved:
                     calibration_paths[camera.camera_id] = str(
@@ -138,6 +180,7 @@ class Studio:
             self.preview_ports = {}
             self.calibration_warnings = warnings
             for camera in cameras:
+                self.log(camera.camera_id).clear_error()
                 port = self.free_port()
                 while port in self.preview_ports.values():
                     port = self.free_port()
@@ -221,6 +264,8 @@ class Studio:
             except (OSError, ValueError, StopIteration, KeyError):
                 fps, people, track_count, drops = None, 0, 0, 0
             events = session.get("events", [])
+            log = self.log(child.cam.camera_id)
+            self.note_child(child, log, status, events)
             health = "OK"
             for event in events:
                 health = {
@@ -254,11 +299,16 @@ class Studio:
                     "drops": drops,
                     "preview_drops": live.get("preview_drops", 0) if preview_port else 0,
                     "health": health,
-                    "last_event": events[-1] if events else None,
+                    "last_event": (
+                        {**events[-1], "detail": mask_credentials(str(events[-1].get("detail")))}
+                        if events and events[-1].get("detail") is not None
+                        else (events[-1] if events else None)
+                    ),
                     "session_folder": str(session_dir) if session_dir else None,
                     "preview_port": preview_port,
-                    "error": getattr(child, "failure", None),
+                    "error": mask_credentials(getattr(child, "failure", None) or "") or None,
                     "calibration_warning": self.calibration_warnings.get(child.cam.camera_id),
+                    **log.snapshot(),
                     "calibration": (
                         {
                             "calibration_id": session.get("calibration", {}).get("calibration_id"),
@@ -269,7 +319,21 @@ class Studio:
                     ),
                 }
             )
-        return {"running": active, "group_id": self.group_id, "cameras": cameras, "final": finals}
+        shown = {camera["camera_id"] for camera in cameras}
+        with self.lock:
+            others = [(name, log) for name, log in self.logs.items() if name not in shown]
+        idle = []
+        for name, log in others:
+            snapshot = log.snapshot()
+            if snapshot["last_error"] or snapshot["recent_events"]:
+                idle.append({"camera_id": name, **snapshot})
+        return {
+            "running": active,
+            "group_id": self.group_id,
+            "cameras": cameras,
+            "idle_cameras": idle,
+            "final": finals,
+        }
 
     def read_recent_frames(self, path):
         state = self.frame_cache.setdefault(
@@ -341,7 +405,7 @@ class Studio:
                 "resolution": None,
                 "fps": None,
                 "reported_fps": None,
-                "error": str(exc),
+                "error": mask_credentials(str(exc)),
             }
         finally:
             if source:
@@ -559,6 +623,12 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
         if len(kept) == len(entries):
             raise HTTPException(404, "camera not found")
         studio.save(kept)
+        studio.logs.pop(camera_id, None)
+        return {"ok": True}
+
+    @app.delete("/api/cameras/{camera_id}/error")
+    def dismiss_camera_error(camera_id: str):
+        studio.log(camera_id).clear_error()
         return {"ok": True}
 
     @app.post("/api/cameras/{camera_id}/test")
