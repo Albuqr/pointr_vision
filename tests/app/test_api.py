@@ -124,6 +124,22 @@ def test_disabled_cameras_are_not_started_and_config_warning_is_visible(client, 
     assert "could not be read" in client.get("/api/status").json()["config_warning"]
 
 
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"source": "0", "link": "builtin"},
+        {"camera_id": "cam1", "source": "0"},
+    ],
+)
+def test_valid_json_with_missing_required_camera_fields_loads_empty_with_warning(client, entry):
+    path = client.app.state.studio.config.path
+    path.write_text(json.dumps([entry]), encoding="utf-8")
+    assert client.get("/api/cameras").json() == []
+    status = client.get("/api/status")
+    assert status.status_code == 200
+    assert "invalid" in status.json()["config_warning"].lower()
+
+
 def test_test_camera_measures_three_seconds_and_closes_before_start(client, monkeypatch):
     from types import SimpleNamespace
 

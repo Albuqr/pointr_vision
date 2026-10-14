@@ -97,6 +97,10 @@ def _field_errors(entries) -> list[dict]:
         if not isinstance(item, dict):
             errors.append({"index": index, "field": "camera", "message": "must be an object"})
             continue
+        if "camera_id" not in item:
+            errors.append(
+                {"index": index, "field": "camera_id", "message": "camera_id is required"}
+            )
         camera_id = item.get("camera_id", f"camera {index + 1}")
         if not isinstance(camera_id, str) or not CAMERA_ID_RE.fullmatch(camera_id):
             errors.append(
@@ -108,7 +112,8 @@ def _field_errors(entries) -> list[dict]:
             )
         elif camera_id in camera_ids:
             errors.append({"index": index, "field": "camera_id", "message": "ID must be unique"})
-        camera_ids[str(camera_id)] = index
+        if isinstance(camera_id, str) and CAMERA_ID_RE.fullmatch(camera_id):
+            camera_ids[camera_id] = index
         name = item.get("name", camera_id)
         if not isinstance(name, str) or not name.strip():
             errors.append({"index": index, "field": "name", "message": "name is required"})
@@ -150,8 +155,12 @@ def _field_errors(entries) -> list[dict]:
             )
         if "enabled" in item and not isinstance(item["enabled"], bool):
             errors.append({"index": index, "field": "enabled", "message": "must be true or false"})
-        link = item.get("link", "builtin")
-        if not isinstance(link, str) or link not in {"builtin", "usb", "wifi", "file"}:
+        if "link" not in item:
+            errors.append({"index": index, "field": "link", "message": "link is required"})
+        link = item.get("link")
+        if "link" in item and (
+            not isinstance(link, str) or link not in {"builtin", "usb", "wifi", "file"}
+        ):
             errors.append(
                 {"index": index, "field": "link", "message": "choose a listed connection type"}
             )
@@ -189,7 +198,7 @@ class CameraConfig:
         try:
             if entries:
                 parse_config(entries)
-        except ConfigError as exc:
+        except (ConfigError, KeyError, TypeError) as exc:
             self.warning = mask_credentials(
                 f"Camera settings are invalid; no cameras were loaded: {exc}"
             )

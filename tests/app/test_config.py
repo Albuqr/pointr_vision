@@ -52,6 +52,24 @@ def test_camera_settings_defaults_and_per_field_validation(tmp_path):
 
 
 @pytest.mark.parametrize(
+    "entry,missing_field",
+    [
+        ({"source": "0", "link": "builtin"}, "camera_id"),
+        ({"camera_id": "cam1", "source": "0"}, "link"),
+    ],
+)
+def test_camera_settings_require_camera_id_and_link(tmp_path, entry, missing_field):
+    path = tmp_path / "cameras.json"
+    path.write_text(json.dumps([entry]), encoding="utf-8")
+    store = CameraConfig(path)
+    assert store.read() == []
+    assert store.warning and "invalid" in store.warning.lower()
+    with pytest.raises(ConfigError) as raised:
+        store.write([entry])
+    assert raised.value.field_errors[0]["field"] == missing_field
+
+
+@pytest.mark.parametrize(
     "source",
     [
         "file:///etc/passwd",
