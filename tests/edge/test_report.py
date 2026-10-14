@@ -21,6 +21,9 @@ from services.edge.reports.movement import Params
 ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = ROOT / "tests" / "fixtures" / "contracts"
 GROUP = "g-2026-10-13"
+LEGACY_RUN = ROOT / "tests" / "fixtures" / "sessions" / "legacy_0_9" / "runs" / (
+    "c2b9e6f4-1d3a-4c8e-9f7b-5a0d2e4c6b81"
+)
 
 
 def schema(name: str) -> Draft202012Validator:
@@ -458,6 +461,20 @@ def test_write_report_replaces_report_json_and_matches_the_schema(tmp_path):
         second["tracks"][0]["n_gaps_excluded"] == 5 and first["tracks"][0]["n_gaps_excluded"] == 0
     )
     assert not list(run_dir.glob("*.tmp"))
+
+
+def test_legacy_session_and_run_fixture_still_produce_a_report():
+    session = json.loads((LEGACY_RUN.parent.parent / "session.json").read_text(encoding="utf-8"))
+    run = json.loads((LEGACY_RUN / "run.json").read_text(encoding="utf-8"))
+    assert session["contract_version"] == run["contract_version"] == "0.9.0"
+
+    report = build_report(LEGACY_RUN).to_dict()
+    assert report["session_id"] == session["session_id"]
+    assert report["run_id"] == run["run_id"]
+    assert report["positions"]["unit"] == "px"
+    assert report["court"] is None
+    assert report["tracks"][0]["path_length"] == {"value": 200.0, "unit": "px"}
+    schema("report").validate(report)
 
 
 def test_the_report_needs_no_live_state_and_never_writes_outside_report_json(tmp_path):
