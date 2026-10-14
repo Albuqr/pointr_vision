@@ -43,7 +43,7 @@ from services.edge.reports.build import (  # noqa: E402
     table_row,
 )
 from services.edge.session.types import CAMERA_ID_RE  # noqa: E402
-from services.edge.session.writer import mask_credentials, redact  # noqa: E402
+from services.edge.session.writer import mask_credentials  # noqa: E402
 
 LINKS = ("usb", "wifi", "builtin", "file")
 KEYS = {
@@ -240,8 +240,8 @@ def parse_config(data: object) -> list[Camera]:
             if source_key(cameras[a].source) == source_key(cameras[b].source):
                 raise ConfigError(
                     f"{cameras[b].camera_id} and {cameras[a].camera_id} use the same source "
-                    f"({redact(cameras[a].source)}): a phone serves ONE viewer, so a second reader "
-                    "would fail"
+                    f"({mask_credentials(cameras[a].source)})"
+                    ": a phone serves ONE viewer, so a second reader would fail"
                 )
     return cameras
 
@@ -403,7 +403,7 @@ class Launcher:
             child.failure = mask_credentials(f"failed to start: {e}")
             self.say(f"[launcher] {cam.camera_id}: {child.failure}")
             return
-        self.say(f"[launcher] starting {cam.camera_id} ({redact(cam.source)})")
+        self.say(f"[launcher] starting {cam.camera_id} ({mask_credentials(cam.source)})")
         deadline = time.monotonic() + self.start_timeout
         while not child.opened.is_set():
             if not child.running:
