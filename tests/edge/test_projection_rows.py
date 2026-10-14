@@ -60,7 +60,7 @@ def test_report_excludes_unprojectable_rows_from_path_and_says_so(tmp_path):
     report = build_report(run_dir)
     # kept samples are (16.67, 66.67), (33.33, 66.67) and (83.33, 66.67) m; the 1.5 s interval
     # that spans the dropped pair is over max_gap, so only the first step counts
-    assert value(track_of(report, 1)["path_length"]) == pytest.approx(50 / 3)
+    assert value(track_of(report, 1)["path_length"]) == pytest.approx(50 / 3, abs=0.001)
     assert any("2 track row(s) could not be projected" in note for note in report.caveats)
 
 
@@ -135,6 +135,29 @@ def test_a_raising_projector_gives_empty_positions_and_one_rate_limited_event(tm
     events = [e for e in session["events"] if e["kind"] == "error"]
     assert 1 <= len(events) <= 2  # the first failure, and the final count at close
     assert "boom" in events[0]["detail"] and "200 track row(s)" in events[-1]["detail"]
+
+
+def test_a_bad_track_row_does_not_stop_the_writer_or_lose_its_frame(tmp_path):
+    writer = FileSessionWriter(tmp_path)
+    run = replace(run_meta(), calibration=calibration())
+    writer.start(meta(), run, CalibrationPositions(calibration()))
+    writer.set_t0(time.perf_counter(), "2026-10-13T12:00:01Z")
+    for seq in range(3):
+        writer.frame(rec(seq))
+        confidence = "not a number" if seq == 1 else 0.9
+        writer.tracks(seq, [TrackObs(1, (0, 0, 40, 50), confidence, None)])
+    writer.close("ended", RunCounts(3, 3, 0, 0))
+
+    folder = writer.dir / "runs" / run.run_id
+    with (folder / "frames.csv").open(newline="", encoding="utf-8") as stream:
+        frames = list(csv.DictReader(stream))
+    with (folder / "tracks.csv").open(newline="", encoding="utf-8") as stream:
+        tracks = list(csv.DictReader(stream))
+    session = json.loads((writer.dir / "session.json").read_text(encoding="utf-8"))
+    assert session["status"] == "ended" and writer.error is None
+    assert len(frames) == len(tracks) == 3
+    assert tracks[1]["x_m"] == tracks[1]["y_m"] == tracks[1]["in_court"] == ""
+    assert any("track row error" in event["detail"] for event in session["events"])
 
 
 def test_the_writer_does_not_import_the_calibration_package():

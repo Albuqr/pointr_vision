@@ -3,6 +3,7 @@ load, and what it rejects fails here, not later inside the preview or the writer
 
 import copy
 import json
+from importlib.resources import files
 from pathlib import Path
 
 import pytest
@@ -17,9 +18,14 @@ from tests.fixtures.make_clips import make_clips
 
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMA = json.loads((ROOT / "contracts/calibration.schema.json").read_text(encoding="utf-8"))
+PACKAGED_SCHEMA = files("services.edge.calibration").joinpath("calibration.schema.json")
 EXAMPLE = json.loads(
     (ROOT / "tests/fixtures/contracts/calibration.example.json").read_text(encoding="utf-8")
 )
+
+
+def test_runtime_schema_is_packaged_and_matches_the_contract_copy():
+    assert json.loads(PACKAGED_SCHEMA.read_text(encoding="utf-8")) == SCHEMA
 
 
 def mutated(edit):

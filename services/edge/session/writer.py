@@ -376,17 +376,32 @@ class FileSessionWriter:
             _, seq, obs, no_positions = item
             changed = False
             for o in obs:
-                x1, y1, x2, y2 = o.xyxy
-                x_m, y_m, calibration_id, position_method, in_court, why = self._position(
-                    (x1 + x2) / 2, y2, no_positions
-                )
-                if why:
-                    changed |= self._note_unprojected(why)
-                self._tracks.writerow(
-                    [seq, o.track_id, _num(x1, 2), _num(y1, 2), _num(x2, 2), _num(y2, 2),
-                     _num(o.confidence, 4), _opt(o.state), "", _num(x_m, 4), _num(y_m, 4),
-                     calibration_id, position_method, in_court]
-                )  # fmt: skip
+                try:
+                    box = tuple(float(value) for value in o.xyxy)
+                    if len(box) != 4:
+                        raise ValueError("track box must have four coordinates")
+                    x1, y1, x2, y2 = box
+                    x_m, y_m, calibration_id, position_method, in_court, why = self._position(
+                        (x1 + x2) / 2, y2, no_positions
+                    )
+                    if why:
+                        changed |= self._note_unprojected(why)
+                    row = [
+                        seq, o.track_id, _num(x1, 2), _num(y1, 2), _num(x2, 2), _num(y2, 2),
+                        _num(o.confidence, 4), _opt(o.state), "", _num(x_m, 4), _num(y_m, 4),
+                        calibration_id, position_method, in_court,
+                    ]  # fmt: skip
+                except Exception as e:  # a bad track row is recorded as empty, never fatal
+                    changed |= self._note_unprojected(f"track row error: {e!r}")
+                    try:
+                        track_id = o.track_id
+                    except Exception:
+                        track_id = ""
+                    row = [
+                        seq, track_id, "", "", "", "", "", "", "", "", "",
+                        self._calibration_id(), METHOD if self._positions else "", "",
+                    ]  # fmt: skip
+                self._tracks.writerow(row)
             return changed
         elif kind == "event":
             self._session["events"].append(asdict(item[1]))
@@ -403,18 +418,21 @@ class FileSessionWriter:
         if positions is None:
             return "", "", "", "", "", None
         if no_positions:
-            return "", "", positions.calibration_id, METHOD, "", no_positions
+            return "", "", self._calibration_id(), METHOD, "", no_positions
         try:
             xy = positions(x, y)
             if xy is None:
-                return "", "", positions.calibration_id, METHOD, "", "outside the camera's view"
+                return "", "", self._calibration_id(), METHOD, "", "outside the camera's view"
             in_court = str(bool(positions.in_court(*xy))).lower()
-            return xy[0], xy[1], positions.calibration_id, METHOD, in_court, None
-        except (
-            Exception
-        ) as e:  # a bad homography or a NaN box is a missing position, not a dead run
-            calibration_id = getattr(positions, "calibration_id", "")
-            return "", "", calibration_id, METHOD, "", repr(e)
+            return xy[0], xy[1], self._calibration_id(), METHOD, in_court, None
+        except Exception as e:  # a projection failure is a missing position, not a dead run
+            return "", "", self._calibration_id(), METHOD, "", repr(e)
+
+    def _calibration_id(self) -> str:
+        try:
+            return getattr(self._positions, "calibration_id", "") or ""
+        except Exception:
+            return ""
 
     def _note_unprojected(self, why: str) -> bool:
         """Count a row without a position; one event on the first, then at most one per

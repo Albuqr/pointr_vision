@@ -339,7 +339,7 @@ export default function StudioApp() {
       setFit(null);
       setComparison(null);
       setNotice(
-        `Frame captured at ${response.headers.get("X-Frame-Width")} × ${response.headers.get("X-Frame-Height")}, the size the recorder will use for this camera. A recording refuses a calibration made at another size.`,
+        `Frame captured at ${response.headers.get("X-Frame-Width")} × ${response.headers.get("X-Frame-Height")} px. Recording checks this size before using the calibration.`,
       );
       setError("");
     } catch (reason) {

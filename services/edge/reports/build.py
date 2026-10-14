@@ -7,6 +7,7 @@ again at any time.
 
 import csv
 import json
+import math
 import statistics
 from collections import defaultdict
 from dataclasses import dataclass, field, replace
@@ -221,7 +222,17 @@ def build_report(
     for r in read_csv(run_dir / "tracks.csv"):
         try:
             seq, tid = int(r["seq"]), int(r["track_id"])
-            xy = positions((float(r["x1"]) + float(r["x2"])) / 2, float(r["y2"]))
+            if calibration and positions.calibrated and "x_m" in r:
+                # The writer leaves these cells empty when the frame size changed or the
+                # homography could not project the point. Re-projecting the pixel box here
+                # would turn an intentionally invalid position back into a valid one.
+                if not r.get("x_m") or not r.get("y_m"):
+                    no_position += 1
+                    continue
+                x_m, y_m = float(r["x_m"]), float(r["y_m"])
+                xy = (x_m, y_m) if math.isfinite(x_m) and math.isfinite(y_m) else None
+            else:
+                xy = positions((float(r["x1"]) + float(r["x2"])) / 2, float(r["y2"]))
         except (TypeError, ValueError, KeyError):
             bad += 1
             continue
@@ -385,7 +396,10 @@ def caveats(positions: PositionMap, params: Params, s: SessionStats, notes: list
             + (f" {median:.2f} s" if median is not None else " n/a")
             + "): samples per track are sparse and uneven"
         )
-    if s.n_tracks == 0 and s.coverage.value:
+    unprojectable = any("could not be projected" in note for note in notes)
+    if s.n_tracks == 0 and s.coverage.value and unprojectable:
+        out.append("Track rows were present, but none had a valid projected position")
+    elif s.n_tracks == 0 and s.coverage.value:
         slow = (
             ", which a low processing rate rarely gives"
             if fps is not None and fps < LOW_FPS

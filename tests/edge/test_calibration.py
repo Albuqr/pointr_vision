@@ -161,6 +161,13 @@ def test_point_beyond_the_horizon_is_invalid_not_mirrored():
     assert positions_for(HORIZON)(40.0, 99.9999999) is None  # w below the epsilon
 
 
+@pytest.mark.parametrize("scale", [1e-12, 1e12])
+def test_projection_is_invariant_to_homography_scale(scale):
+    scaled = [[value * scale for value in row] for row in HORIZON]
+    assert project_image_to_court(scaled, (40.0, 50.0)) == pytest.approx((80.0, 100.0))
+    assert positions_for(scaled)(40.0, 100.0) is None
+
+
 @pytest.mark.parametrize("x, y", [(float("nan"), 10.0), (10.0, float("inf"))])
 def test_non_finite_point_has_no_position(x, y):
     assert positions_for(HORIZON)(x, y) is None
@@ -183,11 +190,21 @@ def test_validate_rejects_singular_ill_conditioned_and_non_finite_homographies(m
 
 def test_validate_rejects_a_homography_whose_points_are_beyond_the_horizon():
     document = json.loads((ROOT / "tests/fixtures/contracts/calibration.example.json").read_text())
-    document["homography_image_to_court"] = [
-        [-v for v in row] for row in document["homography_image_to_court"]
-    ]  # w < 0
+    document["homography_image_to_court"][2] = [0.0, -0.01, 1.0]  # saved points cross w = 0
     with pytest.raises(ValueError, match="horizon"):
         validate_calibration(document)
+
+
+def test_validator_normalizes_an_equivalent_homography_with_reversed_global_sign():
+    document = json.loads((ROOT / "tests/fixtures/contracts/calibration.example.json").read_text())
+    document["homography_image_to_court"] = [
+        [-value for value in row] for row in document["homography_image_to_court"]
+    ]
+    validated = validate_calibration(document)
+    np.testing.assert_allclose(
+        validated["homography_image_to_court"],
+        [[0.01, 0.0, 0.0], [0.0, 0.01, 0.0], [0.0, 0.0, 1.0]],
+    )
 
 
 def test_fit_refuses_duplicate_image_points_even_with_save_anyway():
@@ -211,11 +228,12 @@ def test_check_point_at_a_fit_points_court_position_is_refused():
         fit_calibration(source, save_anyway=True)
 
 
-def test_check_point_at_a_fit_points_pixel_is_refused_even_at_another_court_position():
+@pytest.mark.parametrize("offset", [0.5, 1.0])
+def test_check_point_within_one_fit_pixel_is_refused_even_at_another_court_position(offset):
     source = points()
     source[4] = {
         **source[4],
-        "image_px": [source[0]["image_px"][0] + 0.5, source[0]["image_px"][1]],
+        "image_px": [source[0]["image_px"][0] + offset, source[0]["image_px"][1]],
     }
     with pytest.raises(ValueError, match="same image position"):
         fit_calibration(source)

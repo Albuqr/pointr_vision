@@ -137,7 +137,10 @@ as its timestamp (D-016). `tracker.params` records the effective installed track
 check residual, projection matrix, court bounds and image size used by this run. Keeping the
 projection in `run.json` permits offline report regeneration after later recalibration. The
 loaded calibration is rejected before processing if saved image dimensions differ from the opened
-capture dimensions.
+capture dimensions. If a later frame has another size, the run logs an `error` event and writes
+empty calibrated positions for its tracks; the homography is used again only when frames return to
+the saved dimensions. The HTTP preview also suppresses the court overlay on a differently sized
+frame.
 For ByteTrack timestamp mode, `lost_track_buffer` is a count of 30 FPS frames and the
 effective lost-track duration is `lost_track_buffer / 30` seconds, rounded to the nearest
 frame when configured with `--track-lost-secs`.
@@ -306,6 +309,8 @@ Percentages are 0-100 with unit `percent`.
 - **Position** of a person in a frame is the bottom-centre of the track's box,
   `((x1 + x2) / 2, y2)`, in the position function's unit. A sample is that point at the frame's
   `t_recv` (frames.csv, joined on `seq`; tracks.csv has no time of its own).
+  For calibrated runs, the report uses the `x_m` and `y_m` values written in `tracks.csv`; an
+  empty position remains invalid and is never reconstructed from the pixel box.
 - **Smoothing.** Per track, positions are smoothed with a moving median of `smooth_window`
   samples (default 3), applied separately to x and y, within runs of consecutive samples at most
   `max_gap` apart. The window is symmetric and shrinks to 1 at the ends of a run, so the first and

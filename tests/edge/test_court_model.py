@@ -65,3 +65,9 @@ def test_markings_that_do_not_fit_a_small_court_are_left_out_with_their_landmark
     assert "near_key_far_left" not in court.landmarks and "far_basket_floor" not in court.landmarks
     assert {"corner_near_left", "corner_far_right", "centre_circle"} <= set(court.landmarks)
     assert len(court_lines(court)) == 2  # boundary and centre line: no key, no circle
+
+
+def test_centre_circle_is_omitted_when_its_diameter_exceeds_court_length():
+    court = court_model("custom", 3.0, 5.0)
+    assert len(court_lines(court)) == 2
+    assert all(0 <= x <= 3.0 and 0 <= y <= 5.0 for line in court_lines(court) for x, y in line)

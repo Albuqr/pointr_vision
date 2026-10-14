@@ -549,11 +549,12 @@ def run(args: argparse.Namespace) -> int:
 
     size_state = {"first": True, "problem": None}
 
-    def frame_size_problem(p) -> str | None:
+    def frame_size_problem(p) -> tuple[str | None, bool]:
         """Why the calibration does not apply to this frame (a different size), else None. The
         first frame decides the run: a calibration made at another size would put every position
         in the wrong place, so the camera fails loudly. A later change (a reconnect at another
-        resolution) stops the positions and is an event; the rows stay."""
+        resolution) stops the positions and is an event; the rows stay. Return whether this is the
+        first-frame failure so its frame and track rows can be queued before stopping the run."""
         size = calibration["image_size"]
         height, width = p.frame.image.shape[:2]
         if (width, height) == (size["width"], size["height"]):
@@ -563,15 +564,14 @@ def run(args: argparse.Namespace) -> int:
                 f"frame size {width}x{height} differs from the calibration image size "
                 f"{size['width']}x{size['height']}"
             )
-        if size_state["first"]:
-            size_state["first"] = False
-            if problem:
-                print(f"error: calibration cannot be used: the first {problem}", file=sys.stderr)
-                raise RuntimeError(problem)
+        first_frame = size_state["first"]
+        size_state["first"] = False
+        if first_frame and problem:
+            print(f"error: calibration cannot be used: the first {problem}", file=sys.stderr)
         if problem != size_state["problem"] and problem:
             log_event(HealthEvent("error", utc_now(), p.frame.t_recv, f"{problem}; no positions"))
         size_state["problem"] = problem
-        return problem
+        return problem, bool(first_frame and problem)
 
     def log_frame(p) -> None:
         if writer.done.is_set():  # nothing is saved any more: end the run (status error)
@@ -588,13 +588,17 @@ def run(args: argparse.Namespace) -> int:
             n_tracks,
             p.dropped_total,
         )
+        no_positions, first_size_mismatch = (
+            frame_size_problem(p) if calibration is not None else (None, False)
+        )
         writer.frame(rec)
-        no_positions = frame_size_problem(p) if calibration is not None else None
         if p.tracks:
             if no_positions:
                 writer.tracks(p.frame.seq, p.tracks, no_positions)
             else:
                 writer.tracks(p.frame.seq, p.tracks)
+        if first_size_mismatch:
+            raise RuntimeError(f"calibration cannot be used: the first {no_positions}")
 
     monitor = HealthMonitor(config)
     capture = Capture(source, monitor, log_event)
