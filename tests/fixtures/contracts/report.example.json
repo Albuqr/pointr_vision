@@ -5,6 +5,7 @@
   "camera_id": "cam1",
   "group_id": "8d2f6b1e-4c3a-4e7d-9a5b-0f1e2d3c4b5a",
   "generated_at": "2026-10-07T18:46:00Z",
+  "court": null,
   "positions": {
     "unit": "px",
     "point": "bottom_centre",

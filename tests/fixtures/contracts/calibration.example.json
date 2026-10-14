@@ -5,6 +5,7 @@
   "created_at": "2026-10-13T18:00:00Z",
   "court": {
     "kind": "custom",
+    "type": "custom",
     "length_m": 3.0,
     "width_m": 2.0,
     "landmarks": {"near_left": [0.0, 0.0], "far_right": [3.0, 2.0]}

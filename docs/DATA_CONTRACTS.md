@@ -64,7 +64,8 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
   "recording": {"enabled": true, "path": "video.mp4", "sha256": null, "locked": true},
   "runs": ["uuid"],
   "events": [{"t_wall": "...", "t_mono": 12.3, "kind": "source_lost", "detail": "..."}],
-  "calibration": {"calibration_id": "uuid", "check_error_m": 0.12}
+  "calibration": {"calibration_id": "uuid", "check_error_m": 0.12,
+                  "court": {"type": "fiba_half", "length_m": 14.0, "width_m": 15.0}}
 }
 ```
 
@@ -114,7 +115,7 @@ calibration used by this session and records its mean held-out check residual in
   "counts": {"captured": 0, "processed": 0, "dropped": 0, "unprocessed": 0, "rec_dropped": 0},
   "calibration": {"calibration_id": "uuid", "check_error_m": 0.12,
                   "homography_image_to_court": [[0.01,0,0],[0,0.01,0],[0,0,1]],
-                  "court": {"length_m": 28.0, "width_m": 15.0},
+                  "court": {"type": "fiba_half", "length_m": 14.0, "width_m": 15.0},
                   "image_size": {"width": 1280, "height": 720}}
 }
 ```
@@ -253,6 +254,7 @@ One report per run, one per camera: there is no fusion across cameras.
   "camera_id": "cam1 | null",
   "group_id": "token | null",
   "generated_at": "2026-10-13T18:46:00Z",
+  "court": null,
   "positions": {"unit": "px", "point": "bottom_centre", "calibrated": false,
                  "calibration_id": null, "check_error_m": null},
   "params": {
@@ -308,12 +310,17 @@ Percentages are 0-100 with unit `percent`.
 
 Contract 0.10.0 adds `fiba_half` (14 x 15 m, basket baseline x=0, midcourt x=14) alongside
 `fiba_full` (28 x 15 m) and `custom`. Calibration and run/session/report metadata record the
-selected court type and dimensions. Its landmarks are the `fiba_full` landmarks at x <= 14 m,
+selected court type and dimensions in the nested `court.type`, `court.length_m` and
+`court.width_m` values. Calibration files also keep `court.kind` as a compatibility alias equal
+to `court.type`; older files with only `court.kind` remain valid. Its landmarks are the `fiba_full` landmarks at x <= 14 m,
 with identical coordinates, plus corners and centre on x=14 m. Out-of-bounds projected points
 remain in metres and have `in_court=false`. The fit requires spread >= 0.1 in image and court
 coordinates and, for a half court, fit-point bounding-box coverage >= 20% of the 210 m² court
 area. This area threshold rejects fits clustered in a small region such as the key while allowing
 baseline and midcourt corners to span the floor.
+
+`report.json` has the same `court` object as `run.json`, or `null` when uncalibrated. Session
+calibration metadata includes the court object with its calibration id and check error.
 
 - **Position** of a person in a frame is the bottom-centre of the track's box,
   `((x1 + x2) / 2, y2)`, in the position function's unit. A sample is that point at the frame's

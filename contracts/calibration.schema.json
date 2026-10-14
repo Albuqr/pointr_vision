@@ -16,17 +16,22 @@
     "court": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "length_m", "width_m", "landmarks"],
+      "required": ["kind", "type", "length_m", "width_m", "landmarks"],
       "properties": {
-        "kind": {"enum": ["fiba_full", "custom"]},
+        "kind": {"enum": ["fiba_full", "fiba_half", "custom"]},
+        "type": {"enum": ["fiba_full", "fiba_half", "custom"]},
         "length_m": {"type": "number", "exclusiveMinimum": 0},
         "width_m": {"type": "number", "exclusiveMinimum": 0},
         "landmarks": {"type": "object", "additionalProperties": {"$ref": "#/$defs/point"}}
       },
       "allOf": [
         {
-          "if": {"properties": {"kind": {"const": "fiba_full"}}},
+          "if": {"properties": {"type": {"const": "fiba_full"}}},
           "then": {"properties": {"length_m": {"const": 28}, "width_m": {"const": 15}}}
+        },
+        {
+          "if": {"properties": {"type": {"const": "fiba_half"}}},
+          "then": {"properties": {"length_m": {"const": 14}, "width_m": {"const": 15}}}
         }
       ]
     },

@@ -113,8 +113,9 @@
         "court": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["length_m", "width_m"],
+          "required": ["type", "length_m", "width_m"],
           "properties": {
+            "type": {"enum": ["fiba_full", "fiba_half", "custom"]},
             "length_m": {"type": "number", "exclusiveMinimum": 0},
             "width_m": {"type": "number", "exclusiveMinimum": 0}
           }

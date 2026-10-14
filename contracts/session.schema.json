@@ -77,10 +77,20 @@
     "calibration": {
       "type": ["object", "null"],
       "additionalProperties": false,
-      "required": ["calibration_id", "check_error_m"],
+      "required": ["calibration_id", "check_error_m", "court"],
       "properties": {
         "calibration_id": {"$ref": "#/$defs/uuid4"},
-        "check_error_m": {"type": "number", "minimum": 0}
+        "check_error_m": {"type": "number", "minimum": 0},
+        "court": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "length_m", "width_m"],
+          "properties": {
+            "type": {"enum": ["fiba_full", "fiba_half", "custom"]},
+            "length_m": {"type": "number", "exclusiveMinimum": 0},
+            "width_m": {"type": "number", "exclusiveMinimum": 0}
+          }
+        }
       }
     },
     "events": {

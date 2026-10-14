@@ -39,7 +39,9 @@ SCHEMA_VIOLATIONS = {
     "extra point key": lambda d: d["points"][0].update(label="corner"),
     "extra top-level key": lambda d: d.update(note="x"),
     "extra court key": lambda d: d["court"].update(surface="wood"),
-    "fiba court of another size": lambda d: d["court"].update(kind="fiba_full", length_m=3.0),
+    "fiba court of another size": lambda d: d["court"].update(
+        kind="fiba_full", type="fiba_full", length_m=3.0
+    ),
     "camera id with a space": lambda d: d.update(camera_id="cam 1"),
     "created_at without Z": lambda d: d.update(created_at="2026-10-13 12:00:00"),
     "landmark with three numbers": lambda d: d["court"]["landmarks"].update(bad=[1, 2, 3]),
@@ -66,7 +68,30 @@ def test_the_example_still_validates_and_builds_the_preview_court():
 
     validate_calibration(EXAMPLE)
     court = EXAMPLE["court"]
-    court_model(court["kind"], court["length_m"], court["width_m"], court["landmarks"])
+    court_model(court["type"], court["length_m"], court["width_m"], court["landmarks"])
+
+
+@pytest.mark.parametrize("kind", ["fiba_full", "custom"])
+def test_older_calibration_with_kind_only_remains_valid(kind):
+    legacy = copy.deepcopy(EXAMPLE)
+    legacy["contract_version"] = "0.9.0"
+    legacy["court"].pop("type")
+    legacy["court"]["kind"] = kind
+    if kind == "fiba_full":
+        from services.edge.calibration.court import court_model
+
+        full = court_model("fiba_full")
+        legacy["court"].update(length_m=28, width_m=15, landmarks=full.landmarks)
+    validated = validate_calibration(legacy)
+    assert validated["court"]["type"] == kind
+    assert "type" not in legacy["court"]  # reading never rewrites the saved input object
+
+
+def test_half_court_calibration_schema_accepts_type_and_bounds():
+    half = copy.deepcopy(EXAMPLE)
+    half["court"].update(kind="fiba_half", type="fiba_half", length_m=14, width_m=15)
+    Draft202012Validator(SCHEMA).validate(half)
+    assert validate_calibration(half)["court"]["type"] == "fiba_half"
 
 
 def test_saved_files_contain_only_schema_keys_even_if_the_client_sends_more(tmp_path):
