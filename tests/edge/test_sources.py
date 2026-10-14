@@ -1,5 +1,6 @@
 """A1: file source reads every frame in order; open_source dispatch and errors."""
 
+import os
 import time
 
 import cv2
@@ -67,6 +68,23 @@ def test_open_source_dispatch(clips, tmp_path):
     mov = tmp_path / "clip.MOV"
     mov.write_bytes(b"")
     assert isinstance(open_source(str(mov)), FileSource)
+
+
+def test_stream_capture_disables_ffmpeg_redirects(monkeypatch):
+    captured = {}
+
+    def video_capture(ref, backend, params):
+        captured["options"] = os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"]
+        captured["ref"] = ref
+        captured["backend"] = backend
+        captured["params"] = params
+        return object()
+
+    monkeypatch.setenv("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp|max_redirects;4")
+    monkeypatch.setattr(cv2, "VideoCapture", video_capture)
+    StreamSource("http://192.0.2.1/video")._new_capture()
+    assert captured["options"] == "rtsp_transport;tcp|max_redirects;0"
+    assert captured["ref"] == "http://192.0.2.1/video"
 
 
 @pytest.mark.parametrize(
@@ -172,6 +190,14 @@ def test_camera_requests_size_and_reports_what_it_delivers(monkeypatch):
     for cap in SizedCap.made:  # requested on the first open and on the reopen
         assert (cap.index, cap.api) == (1, cv2.CAP_ANY)
         assert cap.sets == {cv2.CAP_PROP_FRAME_WIDTH: 1280, cv2.CAP_PROP_FRAME_HEIGHT: 720}
+
+
+def test_camera_requests_configured_fps_cap(monkeypatch):
+    SizedCap.made = []
+    monkeypatch.setattr(cv2, "VideoCapture", SizedCap)
+    camera = CameraSource(1, fps_cap=24)
+    camera.open()
+    assert SizedCap.made[0].sets[cv2.CAP_PROP_FPS] == 24
 
 
 def test_camera_without_size_requests_nothing(monkeypatch):

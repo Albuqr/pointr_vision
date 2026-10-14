@@ -4,6 +4,8 @@ read() returns None when no frame was obtained this attempt. A finite source tha
 ended raises SourceEnded instead, so the end of a file is not reported as source_lost.
 """
 
+import os
+import threading
 import time
 from pathlib import Path
 
@@ -16,6 +18,17 @@ STREAM_SCHEMES = ("http://", "https://", "rtsp://")
 # What the recorder requests from a camera. Anything that must see the recorder's frames (the
 # Studio's calibration frame) opens the camera with this size too.
 DEFAULT_CAPTURE_SIZE = (1280, 720)
+_FFMPEG_OPTIONS_LOCK = threading.Lock()
+
+
+def _disable_http_redirects() -> None:
+    """Keep FFmpeg from following an unvalidated camera stream redirect."""
+    with _FFMPEG_OPTIONS_LOCK:
+        current = os.environ.get("OPENCV_FFMPEG_CAPTURE_OPTIONS", "")
+        options = [item for item in current.split("|") if item]
+        options = [item for item in options if item.partition(";")[0] != "max_redirects"]
+        options.append("max_redirects;0")
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "|".join(options)
 
 
 class SourceOpenError(Exception):
@@ -32,8 +45,10 @@ class _CvSource:
 
     kind = ""
 
-    def __init__(self, ref: str):
+    def __init__(self, ref: str, fps_cap: float | None = None):
         self.ref = ref
+        self.fps_cap = fps_cap
+        self._next_read: float | None = None
         self._cap: cv2.VideoCapture | None = None
         self._seq = 0  # counts read attempts, so gaps mark failed reads (D-013)
 
@@ -60,6 +75,11 @@ class _CvSource:
     def _grab(self) -> Frame | None:
         if self._cap is None:
             raise RuntimeError(f"{self.kind} {self.ref!r} read before open()")
+        if self.fps_cap is not None:
+            now = time.perf_counter()
+            if self._next_read is not None and self._next_read > now:
+                time.sleep(self._next_read - now)
+            self._next_read = time.perf_counter() + 1 / self.fps_cap
         ok, image = self._cap.read()
         t_recv = time.perf_counter()
         seq = self._seq
@@ -83,8 +103,8 @@ class _LiveSource(_CvSource):
 
     reopen_after = 1.0
 
-    def __init__(self, ref: str):
-        super().__init__(ref)
+    def __init__(self, ref: str, fps_cap: float | None = None):
+        super().__init__(ref, fps_cap)
         self._next_reopen: float | None = None
 
     def read(self) -> Frame | None:
@@ -107,8 +127,10 @@ class CameraSource(_LiveSource):
 
     kind = "camera"
 
-    def __init__(self, index: int, size: tuple[int, int] | None = None):
-        super().__init__(str(index))
+    def __init__(
+        self, index: int, size: tuple[int, int] | None = None, fps_cap: float | None = None
+    ):
+        super().__init__(str(index), fps_cap)
         self.index = index
         self.size = size  # requested (width, height); open() reports what the camera gives
 
@@ -118,6 +140,8 @@ class CameraSource(_LiveSource):
         if self.size and cap.isOpened():  # on every reopen too, so a recovery keeps the size
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.size[0])
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.size[1])
+        if self.fps_cap is not None and cap.isOpened():
+            cap.set(cv2.CAP_PROP_FPS, self.fps_cap)
         return cap
 
 
@@ -129,6 +153,7 @@ class StreamSource(_LiveSource):
     read_timeout_ms = 2000
 
     def _new_capture(self) -> cv2.VideoCapture:
+        _disable_http_redirects()
         params = [
             cv2.CAP_PROP_OPEN_TIMEOUT_MSEC,
             self.open_timeout_ms,
@@ -143,8 +168,8 @@ class FileSource(_CvSource):
 
     kind = "file"
 
-    def __init__(self, path: str | Path, realtime: bool = True):
-        super().__init__(str(path))
+    def __init__(self, path: str | Path, realtime: bool = True, fps_cap: float | None = None):
+        super().__init__(str(path), fps_cap)
         self.realtime = realtime
         self._period = 0.0
         self._next_due: float | None = None

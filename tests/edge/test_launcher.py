@@ -10,6 +10,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -128,6 +129,15 @@ def test_different_sources_are_accepted():
     assert cams[3] == rc.Camera("laptop", "0", "builtin", 320, True)
 
 
+def test_duplicate_source_error_masks_query_credentials():
+    source = "http://phone:secret@10.0.0.5:4747/video?token=token-secret"
+    with pytest.raises(rc.ConfigError) as raised:
+        rc.parse_config([cam("cam1", source), cam("cam2", source)])
+    assert "secret" not in str(raised.value)
+    assert "token-secret" not in str(raised.value)
+    assert "token=***" in str(raised.value)
+
+
 @pytest.mark.parametrize(
     "entries,message",
     [
@@ -140,8 +150,8 @@ def test_different_sources_are_accepted():
         ([{"camera_id": "a", "source": "0"}], "missing 'link'"),
         ([cam("a", "0", "bluetooth")], "link must be"),
         ([cam("a", "")], "source must be"),
-        ([cam("a", "0", det_size=100)], "multiple of"),
-        ([cam("a", "0", det_size=True)], "multiple of"),
+        ([cam("a", "0", det_size=100)], "allowed size"),
+        ([cam("a", "0", det_size=True)], "allowed size"),
         ([cam("a", "0", preview="yes")], "preview must be"),
         ([cam("a", "0", det_sizes=320)], "unknown keys"),
         ([cam("a", "0", track_lost_secs=0)], "track_lost_secs"),
@@ -211,6 +221,23 @@ def test_child_command_carries_the_identity():
 
 
 # -- the launcher with fake children ---------------------------------------------------------
+
+
+def test_start_log_masks_url_userinfo_and_query_secrets(tmp_path, monkeypatch, capsys):
+    source = "http://phone:secret@10.0.0.5:4747/video?token=token-secret"
+    camera = rc.Camera("cam1", source, "wifi")
+    lau = rc.Launcher([camera], rc.Options(str(tmp_path), GROUP))
+
+    def opened(self, child):
+        child.proc = SimpleNamespace(poll=lambda: None)
+        child.opened.set()
+
+    monkeypatch.setattr(lau, "spawn", opened.__get__(lau, rc.Launcher))
+    lau.start_one(camera)
+    output = capsys.readouterr().out
+    assert "secret" not in output
+    assert "token-secret" not in output
+    assert "token=***" in output
 
 
 def test_cameras_start_one_at_a_time(tmp_path):

@@ -56,7 +56,11 @@ class CameraLog:
             self.seen[session_key] = start + len(fresh)
         for event in fresh:
             if isinstance(event, dict):
-                self.add_event(str(event.get("kind")), event.get("detail"), event.get("t_wall"))
+                kind = str(event.get("kind"))
+                detail = event.get("detail")
+                if kind == "error" and "frame size" in str(detail).lower():
+                    kind = "frame_size_mismatch"
+                self.add_event(kind, detail, event.get("t_wall"))
 
     def snapshot(self) -> dict:
         """Newest event first."""

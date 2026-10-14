@@ -164,6 +164,11 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="square side the image is resized to for detection (default: the model's own)",
     )
     p.add_argument(
+        "--fps-cap",
+        type=positive(float),
+        help="maximum source read rate requested for this camera (does not guarantee camera FPS)",
+    )
+    p.add_argument(
         "--benchmark",
         type=positive(float),
         metavar="SECONDS",
@@ -438,7 +443,8 @@ def run(args: argparse.Namespace) -> int:
             print_event(ev, capture.t0 if capture else None)
 
     try:
-        source = open_source(args.source, (args.width, args.height))  # checks the ref only
+        source = open_source(args.source, (args.width, args.height))
+        source.fps_cap = args.fps_cap
     except SourceOpenError as e:
         return open_failed(args.source, e)
     conflict = args.link and link_conflict(source.kind, args.link)

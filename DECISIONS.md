@@ -819,3 +819,14 @@ real cameras or measured court marks.
 fit measured floor marks on a real court and compare held-out check residuals with tape-measure
 truth. Record the result in the phase 10 report when performed.
 
+## D-031 · 2026-10-14 · Validate and preserve Studio camera settings
+
+**Decision.** Version the additive Studio camera settings under contract 0.9.0. Keep stable
+`camera_id` values for session/calibration identity and add a unique display name, enabled flag,
+and optional requested FPS cap. Reject unsafe URL schemes and loopback or link-local hosts.
+Preserve the last valid settings file as `.bak`, atomically replace the active file, and surface a
+visible warning rather than silently loading damaged settings.
+
+**Reason.** Camera setup errors must be clear before recording; an invalid or interrupted save
+must not erase the last usable setup. The FPS cap is a capture request, not an FPS guarantee.
+
