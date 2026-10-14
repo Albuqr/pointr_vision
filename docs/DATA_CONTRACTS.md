@@ -25,7 +25,14 @@ sessions/<folder>/         <camera_id>_<session_id>, or <session_id> without a c
   video.mp4              (phase 4, raw, no annotations)
 %LOCALAPPDATA%/pointr/calibrations/<camera_id>/<calibration_id>/calibration.json
 %LOCALAPPDATA%/pointr/calibrations/<camera_id>/<calibration_id>/frame.jpg (audit frame)
+%LOCALAPPDATA%/pointr/calibrations/<camera_id>/active.json  ({"calibration_id": "uuid"}: the
+                         calibration the next recording of that camera uses; replaced atomically)
 ```
+
+The calibrations root is the folder of the Studio's `cameras.json` (`%LOCALAPPDATA%/pointr` by
+default) plus `calibrations/`. A missing `active.json` means the camera records uncalibrated; an
+unreadable one, or one that points at a missing or invalid calibration, starts that camera
+uncalibrated with a session event (`calibration not used: ...`) and a warning in the Studio status.
 
 A live session produces one run. Each replay adds a run. Nothing is overwritten.
 `device_id` is created with an exclusive create: processes that start together on a fresh
@@ -166,6 +173,12 @@ One row per **processed** frame, including frames with zero detections.
 | in_court | bool/empty | `true` or `false`, lowercase: whether projected point is within court bounds; empty without calibration and for a point that cannot be projected |
 
 Out-of-court points are retained, with `in_court=false`; they are not clamped to court bounds.
+A point that cannot be projected (on or beyond the camera's horizon, or not finite) keeps its
+pixel box and its `calibration_id`, with `x_m`, `y_m` and `in_court` empty; the writer records
+an `error` event with the count (the first time, then at most every 30 s, and a final count when
+the run closes). `position_method` is spelled `box_bottom_center` in this file; `report.json`
+`positions.point` spells the same estimate `bottom_centre` (section 8): two fields, two spellings,
+both fixed in 0.8.0.
 The image point is `((x1 + x2) / 2, y2)`. The position method describes the box estimate,
 not a measured anatomical foot point.
 
@@ -306,7 +319,8 @@ Percentages are 0-100 with unit `percent`.
   `null` with a reason when there are fewer than `min_valid_intervals` (default 2) valid intervals.
 - **Activity** is the share of `valid_time` spent below `stationary_below` (stationary), below
   `walking_below` (walking) or at or above it (running), by interval speed. The thresholds are in the
-  position unit per second; the defaults for pixels are placeholders that depend on camera
+  position unit per second; the defaults for metres are 0.5 m/s (stationary) and 2.5 m/s
+  (walking); the defaults for pixels, 40 and 400 px/s, are placeholders that depend on camera
   distance and angle, hence the caveat. `null` with a reason when there are fewer than `min_valid_intervals` valid intervals (a share
   of one interval is not a share).
 - **Other definitions.** `median_sample_interval` is the median time between all consecutive
@@ -326,8 +340,13 @@ Percentages are 0-100 with unit `percent`.
 - **`caveats`** (at least one) states what is uncalibrated or not validated; it always includes
   that positions are pixels when uncalibrated and that detections and tracks are not validated
   against ground truth, plus the processing rate of this run when it is low. Calibrated reports
-  include calibration ID and mean held-out check error in metres; text summaries print that
-  error beside each distance and speed as a quality indicator, not a per-measurement uncertainty.
+  include a caveat naming the calibration ID and its mean held-out check error in metres, and
+  `positions.calibration_id` / `positions.check_error_m`; text summaries print the check error
+  once, in the header line, as a quality indicator, not a per-measurement uncertainty.
+  `calibration_id` is the UUID the run recorded and `null` otherwise, so a report rebuilt from a
+  hand-made `run.json` may be calibrated with a `null` ID. Track rows whose point cannot be
+  projected are excluded from path length, speeds and activity and counted in a note; they are
+  never counted as malformed CSV rows.
 
 ## 9. Camera calibration file
 
@@ -350,5 +369,40 @@ court). The configured maximum check mean is at most 2.0 m. Saving anyway can ov
 check-mean threshold only, not these minimums, the point rules or the homography checks
 (finite, invertible, condition number at most 1e7, every point in front of the horizon). A loader
 recomputes the residuals, the mean errors and `forced` from the homography and the points and
-refuses a file where they disagree. The audit frame is the exact raw frame
-used to place the image points.
+refuses a file where they disagree. The audit frame is the JPEG-encoded copy (lossy, no
+overlays, at the capture size) of the frame the user saw when placing the image points; the
+Studio's later comparison decodes that JPEG, so it is the frame as shown, not the sensor's raw
+pixels.
+
+### Studio calibration API (local, not synced; no contract version of its own)
+
+All paths are served on loopback by `python -m services.app`.
+
+- `GET /api/court?kind=custom|fiba_full&length_m=&width_m=` returns `{kind, length_m, width_m,
+  landmarks: {name: [x, y]}, lines: [[[x, y], ...], ...]}` in metres: the landmarks the fit and
+  the saved file use and the lines the diagram draws. Markings with a fixed size (key 5.8 x 4.9 m,
+  basket 1.575 m from the baseline, centre circle radius 1.8 m) keep it on a custom court and are
+  left out when the court is too small for them. `422` for an invalid court.
+- `GET /api/cameras/{id}/calibration/frame` returns `image/jpeg` with headers `X-Frame-Token`
+  (send it back with fit and save), `X-Frame-Width` and `X-Frame-Height` (the real size of the
+  frame). A camera that is recording is read from its recording process; an idle camera is
+  opened with the recorder's own capture size (`DEFAULT_CAPTURE_SIZE`, 1280 x 720). `502` when no
+  frame arrives.
+- `POST /api/cameras/{id}/calibration/fit` and `PUT /api/cameras/{id}/calibration` take
+  `{frame_token, court_kind, length_m, width_m, custom_landmarks?, max_check_error_m (<= 2.0),
+  save_anyway?, points: [{image_px, court_m, role}]}`. `fit` previews and needs only four fit
+  points; `PUT` needs two check points, applies the error limit unless `save_anyway`, and saves.
+  Both return `homography_image_to_court`, `calibration_errors_m`, `check_errors_m`,
+  `calibration_mean_m`, `check_mean_m`, `check_max_m`, `forced`, `point_errors_m` (in the order
+  of the points sent), `projected_court_lines`, `court`, `ransac_threshold_m` and
+  `ransac_dropped_points` (indices of fit points RANSAC left out); `PUT` adds `calibration` (the
+  saved document) and `path`. A refusal is `422` with `{"detail": message}`: too few points, a
+  check point on a fit point, collinear or bunched fit points, a singular homography, a limit
+  above 2.0 m, a point outside the frame or court. `409` when the frame token is stale.
+- `GET /api/cameras/{id}/calibration` returns the active document, `null` when there is none, or
+  `422` when it cannot be read;
+  `GET /api/cameras/{id}/calibration/compare` returns `{audit_frame, fresh_frame,
+  difference_score, warning}` (base64 JPEGs) for the saved audit frame against a fresh one.
+- `GET /api/status` cameras carry `calibration` (`{calibration_id, check_error_m}` or `null`) and
+  `calibration_warning` (why a saved calibration was not used, or `null`). A camera whose frame
+  size differs from the calibration at its first frame fails with both sizes in `error`.

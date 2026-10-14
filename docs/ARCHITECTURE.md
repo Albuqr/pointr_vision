@@ -51,6 +51,9 @@ pointr/
   contracts/                 JSON Schemas written from DATA_CONTRACTS.md, checked by tests
   services/
     edge/
+      calibration/           court model, homography fit and projection, calibration file
+                             validation (pure: no camera, no file state beyond one JSON load);
+                             the session writer receives its projector as an injected PositionMap
       capture/               FrameSource implementations + health monitor
       perception/            Detector, Tracker implementations
       session/               session lifecycle, writers
@@ -59,7 +62,10 @@ pointr/
       reports/               post-session coverage and failure reports
       store/                 SQLite access (registrations, session index, outbox)
       ui/                    preview window (phase 1-5), local web UI (phase 6+)
+      contract.py            CONTRACT_VERSION, the one place the file-format version is written
       main.py                CLI entry point
+    app/                     Pointr Studio: local FastAPI + React UI (cameras, recording,
+                             per-camera calibration); starts the edge CLI once per camera
     sync_agent/
     api/                     cloud API (FastAPI)
     data/                    analytics, later
