@@ -228,11 +228,12 @@ def test_check_point_at_a_fit_points_court_position_is_refused():
         fit_calibration(source, save_anyway=True)
 
 
-def test_check_point_at_a_fit_points_pixel_is_refused_even_at_another_court_position():
+@pytest.mark.parametrize("offset", [0.5, 1.0])
+def test_check_point_within_one_fit_pixel_is_refused_even_at_another_court_position(offset):
     source = points()
     source[4] = {
         **source[4],
-        "image_px": [source[0]["image_px"][0] + 0.5, source[0]["image_px"][1]],
+        "image_px": [source[0]["image_px"][0] + offset, source[0]["image_px"][1]],
     }
     with pytest.raises(ValueError, match="same image position"):
         fit_calibration(source)

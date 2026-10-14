@@ -133,7 +133,7 @@ def check_point_set(points):
                     f"two points are at the same court position {tuple(a['court_m'])}: a check "
                     "point must be a different floor mark from every calibration point"
                 )
-            if math.dist(a["image_px"], b["image_px"]) < COINCIDENT_IMAGE_PX:
+            if math.dist(a["image_px"], b["image_px"]) <= COINCIDENT_IMAGE_PX:
                 raise ValueError(
                     f"two points are at the same image position {tuple(a['image_px'])}: a check "
                     "point must be a different floor mark from every calibration point"
