@@ -310,8 +310,10 @@ Contract 0.10.0 adds `fiba_half` (14 x 15 m, basket baseline x=0, midcourt x=14)
 `fiba_full` (28 x 15 m) and `custom`. Calibration and run/session/report metadata record the
 selected court type and dimensions. Its landmarks are the `fiba_full` landmarks at x <= 14 m,
 with identical coordinates, plus corners and centre on x=14 m. Out-of-bounds projected points
-remain in metres and have `in_court=false`. The existing fit spread threshold remains 0.1 in
-image and court coordinates.
+remain in metres and have `in_court=false`. The fit requires spread >= 0.1 in image and court
+coordinates and, for a half court, fit-point bounding-box coverage >= 20% of the 210 m² court
+area. This area threshold rejects fits clustered in a small region such as the key while allowing
+baseline and midcourt corners to span the floor.
 
 - **Position** of a person in a frame is the bottom-centre of the track's box,
   `((x1 + x2) / 2, y2)`, in the position function's unit. A sample is that point at the frame's
