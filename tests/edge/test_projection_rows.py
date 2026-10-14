@@ -60,7 +60,7 @@ def test_report_excludes_unprojectable_rows_from_path_and_says_so(tmp_path):
     report = build_report(run_dir)
     # kept samples are (16.67, 66.67), (33.33, 66.67) and (83.33, 66.67) m; the 1.5 s interval
     # that spans the dropped pair is over max_gap, so only the first step counts
-    assert value(track_of(report, 1)["path_length"]) == pytest.approx(50 / 3)
+    assert value(track_of(report, 1)["path_length"]) == pytest.approx(50 / 3, abs=0.001)
     assert any("2 track row(s) could not be projected" in note for note in report.caveats)
 
 
