@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:pointr:contracts:0.11.0:fusion",
+  "title": "fusion.json",
+  "description": "DATA_CONTRACTS.md section 15. Written by the post-session fusion (D-034).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version", "fusion_id", "group_id", "created_at", "cameras", "excluded", "params", "gaps", "counts"
+  ],
+  "properties": {
+    "contract_version": {"const": "0.11.0"},
+    "fusion_id": {"$ref": "#/$defs/uuid4"},
+    "group_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"},
+    "created_at": {"$ref": "#/$defs/utc"},
+    "cameras": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["camera_id", "session_id", "run_id", "t0_wall", "t0_mono", "latency_median_s"],
+        "properties": {
+          "camera_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,32}$"},
+          "session_id": {"$ref": "#/$defs/uuid4"},
+          "run_id": {"$ref": "#/$defs/uuid4"},
+          "t0_wall": {"$ref": "#/$defs/utc"},
+          "t0_mono": {"type": "number"},
+          "latency_median_s": {"type": ["number", "null"], "minimum": 0}
+        }
+      }
+    },
+    "excluded": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["camera_id", "reason"],
+        "properties": {
+          "camera_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,32}$"},
+          "reason": {"enum": ["calibration_failed", "operator"]}
+        }
+      }
+    },
+    "params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["match_distance_m", "max_offset_s", "step_s"],
+      "properties": {
+        "match_distance_m": {"type": "number", "exclusiveMinimum": 0},
+        "max_offset_s": {"type": "number", "minimum": 0},
+        "step_s": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
+    "gaps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["camera_id", "start_t", "end_t"],
+        "properties": {
+          "camera_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,32}$"},
+          "start_t": {"type": "number"},
+          "end_t": {"type": "number"}
+        }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["players", "merged_rows", "single_camera_rows", "differences"],
+      "properties": {
+        "players": {"type": "integer", "minimum": 0},
+        "merged_rows": {"type": "integer", "minimum": 0},
+        "single_camera_rows": {"type": "integer", "minimum": 0},
+        "differences": {"type": "integer", "minimum": 0}
+      }
+    }
+  },
+  "$defs": {
+    "uuid4": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "utc": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+    }
+  }
+}

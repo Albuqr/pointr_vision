@@ -32,6 +32,7 @@ structured test with one person. Later phases follow the scope's progression.
 | 12 | Movement recognition | pose, event definitions, manual validation | RF05 | 10, 11 |
 | 13 | Custom phone app (optional) | camera + device checks on the phone | RF01 (full) | 01 |
 | 14 | Analytics (pointr-data) | bronze/silver/gold over synced data | scope section 12 | 08 |
+| R | **Track R: December test rig** (own track, D-033) | ball and rim detection, rim sensor and clock model, shot layer, jersey identity, two-camera fusion, scored against hand labels | spec FR-001 to FR-015 | 03 running; recording and replay: open decision in `phases/PHASE_R.md` |
 
 Phases 10-14 have short specs only. Expand each into a full phase file when it becomes the
 current phase, using what the earlier tests showed.

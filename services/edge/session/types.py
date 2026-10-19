@@ -41,6 +41,11 @@ class RunMeta:
     runtime: dict  # python, platform, device, packages
     started_at: str  # UTC ISO-8601
     calibration: dict | None = None
+    checks: list | None = None  # startup check results, null until they have run (0.11.0)
+    clock: dict | None = None  # sensor offset and per-camera latency, null without them (0.11.0)
+    objects: dict | None = None  # ball and rim layer settings, null when it is off (0.11.0)
+    gaps: list | None = None  # null = not measured; SessionWriter.set_final fills it at the end
+    outages: list | None = None  # same for the rim sensor outages (0.11.0)
 
 
 @dataclass(frozen=True)
@@ -63,6 +68,7 @@ class FrameRecord:
     n_detections: int | None  # None when detection is off
     n_tracks: int | None
     dropped_total: int  # capture's drop count when this frame was taken for processing
+    t_video: float | None = None  # s in the source video, None when unknown (0.11.0)
 
     @property
     def app_delay_ms(self) -> float:
@@ -99,6 +105,10 @@ class SessionWriter(Protocol):
 
     def set_t0(self, t0: float, t0_wall: str) -> None:
         """The run's t0 (time.perf_counter()) and its wall clock, once capture has started."""
+        ...
+
+    def set_final(self, **blocks) -> None:
+        """run.json blocks known only at the end: gaps, outages, clock. Call before close()."""
         ...
 
     def frame(self, rec: FrameRecord) -> None: ...

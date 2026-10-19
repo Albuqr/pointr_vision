@@ -37,11 +37,11 @@ from services.edge.session.types import (
 
 FRAMES_COLUMNS = [
     "seq", "t_recv", "t_proc_start", "t_proc_end", "app_delay_ms",
-    "n_detections", "n_tracks", "dropped_total",
+    "n_detections", "n_tracks", "dropped_total", "t_video",
 ]  # fmt: skip
 TRACKS_COLUMNS = [
     "seq", "track_id", "x1", "y1", "x2", "y2", "confidence", "state", "athlete_id",
-    "x_m", "y_m", "calibration_id", "position_method", "in_court",
+    "player_number", "id_source", "x_m", "y_m", "calibration_id", "position_method", "in_court",
 ]  # fmt: skip
 FLUSH_SECS = 0.5  # flush period; under the contract's "at least once per second"
 METHOD = "box_bottom_center"
@@ -155,6 +155,7 @@ class FileSessionWriter:
         self._positions: PositionMap | None = None
         self.status: str | None = None  # final status written by close()
         self._t0: float | None = None
+        self._final: dict = {}
         self._q: queue.Queue = queue.Queue(maxsize)
         self._backlog = False  # inside a writer_backlog episode (ends when the queue empties)
         self._lock = threading.Lock()  # JSON writes: writer thread or close() fallback
@@ -226,6 +227,12 @@ class FileSessionWriter:
             "ended_at": None,
             "counts": None,
             "calibration": run.calibration,
+            "t0_mono": None,
+            "checks": run.checks,
+            "clock": run.clock,
+            "objects": run.objects,
+            "gaps": run.gaps,
+            "outages": run.outages,
         }
         self._frames_f = open(self._run_dir / "frames.csv", "w", newline="", encoding="utf-8")
         self._tracks_f = open(self._run_dir / "tracks.csv", "w", newline="", encoding="utf-8")
@@ -245,7 +252,17 @@ class FileSessionWriter:
 
     def set_t0(self, t0: float, t0_wall: str) -> None:
         self._t0 = t0
-        self._put(("t0", t0_wall))
+        self._put(("t0", t0_wall, t0))
+
+    def set_final(self, **blocks) -> None:
+        """Run.json blocks known only at the end (gaps, outages, clock); call before close()."""
+        unknown = set(blocks) - {"gaps", "outages", "clock"}
+        if unknown:
+            raise ValueError(f"unknown run.json blocks: {sorted(unknown)}")
+        if self.status is not None:
+            raise RuntimeError("set_final after close()")
+        with self._lock:
+            self._final.update(blocks)
 
     def frame(self, rec: FrameRecord) -> None:
         self._put(("frame", rec))
@@ -370,6 +387,7 @@ class FileSessionWriter:
                     _opt(r.n_detections),
                     _opt(r.n_tracks),
                     r.dropped_total,
+                    _num(r.t_video),
                 ]
             )
         elif kind == "tracks":
@@ -388,7 +406,8 @@ class FileSessionWriter:
                         changed |= self._note_unprojected(why)
                     row = [
                         seq, o.track_id, _num(x1, 2), _num(y1, 2), _num(x2, 2), _num(y2, 2),
-                        _num(o.confidence, 4), _opt(o.state), "", _num(x_m, 4), _num(y_m, 4),
+                        _num(o.confidence, 4), _opt(o.state), "", "", "",
+                        _num(x_m, 4), _num(y_m, 4),
                         calibration_id, position_method, in_court,
                     ]  # fmt: skip
                 except Exception as e:  # a bad track row is recorded as empty, never fatal
@@ -398,7 +417,7 @@ class FileSessionWriter:
                     except Exception:
                         track_id = ""
                     row = [
-                        seq, track_id, "", "", "", "", "", "", "", "", "",
+                        seq, track_id, "", "", "", "", "", "", "", "", "", "", "",
                         self._calibration_id(), METHOD if self._positions else "", "",
                     ]  # fmt: skip
                 self._tracks.writerow(row)
@@ -408,6 +427,7 @@ class FileSessionWriter:
             return True
         elif kind == "t0":
             self._run_doc["t0_wall"] = item[1]
+            self._run_doc["t0_mono"] = item[2]
             self._snapshot(self._run_dir / "run.json", self._run_doc)  # also in the final write
         return False
 
@@ -482,6 +502,7 @@ class FileSessionWriter:
 
     def _finish_json(self, status: str, counts: RunCounts, ended_at: str) -> None:
         with self._lock:
+            self._run_doc.update(self._final)
             self._run_doc["ended_at"] = ended_at
             self._run_doc["counts"] = asdict(counts)
             write_json(self._run_dir / "run.json", self._run_doc)

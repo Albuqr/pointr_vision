@@ -56,12 +56,12 @@ def doc_example(section: str) -> dict:
     return json.loads(m.group(1))
 
 
-@pytest.mark.parametrize("name", ["session", "run", "report", "calibration"])
+@pytest.mark.parametrize("name", ["session", "run", "report", "calibration", "fusion"])
 def test_example_validates(name):
     validator(name).validate(example(name))
 
 
-@pytest.mark.parametrize("name", ["session", "run", "report", "calibration"])
+@pytest.mark.parametrize("name", ["session", "run", "report", "calibration", "fusion"])
 def test_versions_agree(name):
     v = doc_version()
     assert schema(name)["properties"]["contract_version"]["const"] == v
@@ -103,6 +103,7 @@ def test_run_valid_while_running():
     """No end time, no counts and possibly no t0 yet: null, not absent and not 0 (D-020)."""
     doc = mutate(example("run"), ("ended_at",), None)
     doc = mutate(doc, ("counts",), None)
+    doc = mutate(doc, ("t0_mono",), None)
     validator("run").validate(mutate(doc, ("t0_wall",), None))
 
 
@@ -287,7 +288,7 @@ def _assert_matches(doc_node, schema_node, path=()):
         assert set(doc_node.split(" | ")) == set(schema_node["enum"]) - nullable, path
 
 
-@pytest.mark.parametrize("name", ["session", "run"])
+@pytest.mark.parametrize("name", ["session", "run", "fusion"])
 def test_schema_matches_doc(name):
     _assert_matches(doc_example(f"{name}.json"), schema(name))
 

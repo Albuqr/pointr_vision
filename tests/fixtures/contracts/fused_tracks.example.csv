@@ -1,0 +1,2 @@
+t,fused_id,player_number,x_m,y_m,in_court,cameras,source_tracks
+1.0,1,23,3.1,2.0,true,cam1;cam2,cam1:4;cam2:9
