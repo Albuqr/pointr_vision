@@ -103,6 +103,7 @@ def test_run_valid_while_running():
     """No end time, no counts and possibly no t0 yet: null, not absent and not 0 (D-020)."""
     doc = mutate(example("run"), ("ended_at",), None)
     doc = mutate(doc, ("counts",), None)
+    doc = mutate(doc, ("t0_mono",), None)
     validator("run").validate(mutate(doc, ("t0_wall",), None))
 
 

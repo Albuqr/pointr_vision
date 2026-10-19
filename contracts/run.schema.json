@@ -8,7 +8,7 @@
   "required": [
     "contract_version", "run_id", "session_id", "mode", "input", "detector", "tracker",
     "health", "runtime", "started_at", "t0_wall", "ended_at", "counts", "calibration",
-    "checks", "clock"
+    "checks", "clock", "t0_mono", "objects", "gaps", "outages"
   ],
   "properties": {
     "contract_version": {"const": "0.11.0"},
@@ -100,6 +100,7 @@
     },
     "started_at": {"$ref": "#/$defs/utc"},
     "t0_wall": {"anyOf": [{"$ref": "#/$defs/utc"}, {"type": "null"}]},
+    "t0_mono": {"type": ["number", "null"], "description": "perf_counter at t0 (D-041)"},
     "ended_at": {"anyOf": [{"$ref": "#/$defs/utc"}, {"type": "null"}]},
     "calibration": {
       "type": ["object", "null"],
@@ -142,7 +143,7 @@
         "properties": {
           "check": {"enum": ["cameras", "calibration", "identity", "id_persistence", "sensor"]},
           "result": {"enum": ["passed", "failed"]},
-          "detail": {"type": ["string", "null"]},
+          "detail": {"type": "string"},
           "t_wall": {"$ref": "#/$defs/utc"}
         }
       }
@@ -151,17 +152,23 @@
       "type": ["object", "null"],
       "description": "null when no sensor and no latency test were used (D-035)",
       "additionalProperties": false,
-      "required": ["domain", "sensor", "camera_latency"],
+      "required": ["domain", "sensors", "camera_latency"],
       "properties": {
         "domain": {"const": "perf_counter"},
-        "sensor": {
-          "type": ["object", "null"],
-          "additionalProperties": false,
-          "required": ["link", "offset_s", "estimates"],
-          "properties": {
-            "link": {"enum": ["espnow", "usb"]},
-            "offset_s": {"type": "number"},
-            "estimates": {"type": "integer", "minimum": 0}
+        "sensors": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["sensor_id", "link", "offset_start_s", "offset_end_s", "estimates"],
+            "properties": {
+              "sensor_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,32}$"},
+              "link": {"enum": ["espnow", "usb"]},
+              "offset_start_s": {"type": ["number", "null"]},
+              "offset_end_s": {"type": ["number", "null"]},
+              "estimates": {"type": "integer", "minimum": 0}
+            }
           }
         },
         "camera_latency": {
@@ -179,6 +186,47 @@
               "std_s": {"type": "number", "minimum": 0}
             }
           }
+        }
+      }
+    },
+    "objects": {
+      "type": ["object", "null"],
+      "description": "null when the ball and rim layer is off (D-037)",
+      "additionalProperties": false,
+      "required": ["classes"],
+      "properties": {
+        "classes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"enum": ["ball", "rim"]}
+        }
+      }
+    },
+    "gaps": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["start_t", "end_t", "detected_t"],
+        "properties": {
+          "start_t": {"type": "number", "minimum": 0},
+          "end_t": {"type": "number", "minimum": 0},
+      "detected_t": {"type": "number", "minimum": 0}
+        }
+      }
+    },
+    "outages": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sensor_id", "start_t", "end_t", "detected_t"],
+        "properties": {
+          "sensor_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,32}$"},
+          "start_t": {"type": "number", "minimum": 0},
+          "end_t": {"type": "number", "minimum": 0},
+      "detected_t": {"type": "number", "minimum": 0}
         }
       }
     },

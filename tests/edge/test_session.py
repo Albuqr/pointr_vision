@@ -690,6 +690,7 @@ def test_run_json_carries_the_track_r_blocks_as_null(tmp_path):
     w.close("ended", COUNTS)
     run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
     assert run["checks"] is None and run["clock"] is None
+    assert run["gaps"] is None and run["outages"] is None  # not measured is null, not []
     validate("run", run)
 
 
@@ -713,3 +714,54 @@ def test_a_bad_track_row_keeps_the_column_count(tmp_path):
     with open(run_dir / "tracks.csv", newline="", encoding="utf-8") as f:
         rows = list(csv.reader(f))
     assert len(rows[1]) == len(rows[0])
+
+
+def test_run_json_round_trips_filled_track_r_blocks_and_t0_mono(tmp_path):
+    """0.11.0: what the caller passes in RunMeta reaches run.json; t0_mono is set with t0."""
+    import dataclasses
+
+    filled = dataclasses.replace(
+        run_meta(),
+        checks=[
+            {
+                "check": "cameras",
+                "result": "passed",
+                "detail": "ok",
+                "t_wall": "2026-10-13T12:00:00Z",
+            }
+        ],
+        clock={"domain": "perf_counter", "sensors": [], "camera_latency": []},
+        objects={"classes": ["ball", "rim"]},
+    )
+    w = FileSessionWriter(tmp_path)
+    w.start(meta(), filled)
+    w.set_t0(1234.5, "2026-10-13T12:00:01Z")
+    w.set_final(gaps=[{"start_t": 1.0, "end_t": 2.0, "detected_t": 1.5}], outages=[])
+    w.frame(dataclasses.replace(rec(0), t_video=1.5))
+    w.close("ended", COUNTS)
+    run_dir = w.dir / "runs" / filled.run_id
+    run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+    assert run["checks"] == filled.checks and run["clock"] == filled.clock
+    assert (
+        run["objects"] == filled.objects
+        and run["gaps"] == [{"start_t": 1.0, "end_t": 2.0, "detected_t": 1.5}]
+        and run["outages"] == []
+    )
+    assert run["t0_mono"] == 1234.5
+    validate("run", run)
+    with open(run_dir / "frames.csv", newline="", encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    assert rows[0]["t_video"] == "1.500000"
+
+
+def test_set_final_replaces_the_clock_and_rejects_unknown_blocks(tmp_path):
+    w, run_dir = started(tmp_path)
+    clock = {"domain": "perf_counter", "sensors": [], "camera_latency": []}
+    w.set_final(clock=clock)
+    for unknown in ({"shots": []}, {"objects": None}):
+        with pytest.raises(ValueError):
+            w.set_final(**unknown)
+    w.close("ended", COUNTS)
+    run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+    assert run["clock"] == clock
+    validate("run", run)

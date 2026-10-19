@@ -34,6 +34,7 @@ EXPECTED = {
     SessionWriter: {
         "start": ["meta", "run", "positions"],
         "set_t0": ["t0", "t0_wall"],
+        "set_final": ["blocks"],
         "frame": ["rec"],
         "tracks": ["seq", "obs", "no_positions"],
         "event": ["ev"],
@@ -54,6 +55,7 @@ RETURNS = {
     (Tracker, "update"): list[TrackObs],
     (SessionWriter, "start"): NONE,
     (SessionWriter, "set_t0"): NONE,
+    (SessionWriter, "set_final"): NONE,
     (SessionWriter, "frame"): NONE,
     (SessionWriter, "tracks"): NONE,
     (SessionWriter, "event"): NONE,

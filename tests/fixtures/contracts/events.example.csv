@@ -1,0 +1,5 @@
+sensor_id,sensor_seq,kind,t_sensor,t_pc,t_wall,offset_s,link
+rim_a,7,make,61.2,5061.2004,2026-12-01T18:01:01.200Z,5000.0004,espnow
+rim_a,,sync,61.0,5061.0004,2026-12-01T18:01:01.000Z,5000.0004,espnow
+rim_b,3,make,61.9,5061.9006,2026-12-01T18:01:01.900Z,5000.0006,espnow
+rim_a,,outage_start,,5100.5,2026-12-01T18:01:40.500Z,,espnow
