@@ -967,3 +967,18 @@ ESP32 firmware tooling in a firmware folder (R4). Each slice's phase file names 
 models before they are installed.
 
 **Consequences.** PHASE_R.md records the decisions. The PC-to-rim distance (D-036) and spec CR-1 stay open.
+
+## D-041 · 2026-10-19 · Contract 0.11.0: Track R formats and conventions
+
+**Decision.** (Slice R0, from the fresh-context reviews.) `run.json` gains `t0_mono` (the run's t0 on the PC clock),
+`objects`, `gaps`, `outages`, and `clock.sensor` records `offset_start_s` and `offset_end_s` (offset = t_pc - t_sensor).
+`frames.csv` gains `t_video`, the key that joins hand labels to frames. The rim sensor log is one file per group,
+`sessions/sensor_<group_id>/events.csv`, on the raw PC clock, because one sensor serves every camera and only one
+process can open the gateway. Fusion writes `sessions/fusion_<group_id>/<fusion_id>/` (ADR 0001 said `fusion/` under the group).
+`events.csv` has a `sync` row per offset estimate and uses `t_pc` for the raw PC clock. `fusion.json` gains `excluded`,
+`params.step_s`, `cameras[].t0_mono`, nullable `latency_median_s`, and counts named `merged_rows` and `single_camera_rows`.
+`objects.csv` absence follows `run.json` `objects`. `gaps`/`outages` are `null` when not measured and are written at the
+run end. The log takes up to two sensors, one per rim (owner, 2026-10-19): `events.csv` and `shots.csv` carry a `sensor_id`, `clock.sensors` is a list and each outage names its sensor. Each interval also records `detected_t` (spec AC-014.1 asks for the detection time; the owner is asked to confirm this addition). `SessionWriter.set_final` carries them (in the Protocol and ARCHITECTURE.md section 4). CSV readers pick columns by header name. The startup checks (`run.json` `checks`) were first filed under D-040; this is their record.
+
+**Consequences.** DATA_CONTRACTS.md sections 3, 4, 11 to 15 define each field. The owner is asked to confirm the per-group
+sensor file and the `gaps`/`outages` fields (a small addition to spec FR-014/FR-015, which already say run.json holds the outage).

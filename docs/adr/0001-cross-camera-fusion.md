@@ -25,3 +25,5 @@ Decided (owner, 2026-10-19): **B1**. Fusion is a separate step that reads the pe
 - [TrackTacular: lifting tracking to BEV (Teepe et al., 2024)](https://arxiv.org/abs/2403.12573) · tier A, preprint · no 2-camera ablation
 - [GTA: global tracklet association for multi-object tracking in sports (Sun et al., 2024)](https://arxiv.org/abs/2411.08216) · tier A, preprint · post-processing improves IDF1 on a fixed camera
 - Research note: `.suite/research/identity-and-fusion.md`
+
+**Amendment (R0, D-041).** Fusion writes to `sessions/fusion_<group_id>/<fusion_id>/`, not `fusion/` under the group.

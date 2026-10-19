@@ -21,6 +21,6 @@ Status values: todo · doing · blocked · done · n/a (stage 0 is n/a for a new
 date: 2026-10-19 · agent: claude · what was done: stage 3 Dev model → done
 
 ## Next action
-Stage 3 done (owner approved ADRs 0001-0006 and D-034 to D-040 on 2026-10-19). Next: stage 4, Track R (docs/phases/PHASE_R.md). First slice R0: write the new formats into DATA_CONTRACTS.md and schemas, bump CONTRACT_VERSION to 0.11.0, before any code. Open: PC-to-rim distance (ESP-NOW assumed), spec CR-1.
+Stage 4, Track R slice R0 built on branch track-r-r0-contracts; review fixes are uncommitted in the working tree. Next: owner reads docs/phases/PHASE_R_REPORT.md, decides whether to commit, then tags track-r-R0; then R1 (recording and replay). Open: confirm the per-group sensor file and run.json gaps/outages (D-041), PC-to-rim distance (ESP-NOW assumed), spec CR-1.
 
 ## Open questions for the human

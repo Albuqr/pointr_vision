@@ -47,7 +47,7 @@ Still open:
 | # | Criterion | Test |
 |---|---|---|
 | R0-A1 | Every new file and field is in `DATA_CONTRACTS.md` and its schema; `CONTRACT_VERSION` bumped; sample files validate | contract tests |
-| R0-A2 | A `DECISIONS.md` entry exists for each accepted ADR before the code that needs it | review |
+| R0-A2 | A `DECISIONS.md` entry exists for each accepted ADR before the code that needs it | contract test (entry exists); review (written before the code) |
 | R1-A1 | A recorded session replays as a new run; the original is untouched (RF09) | integration |
 | R1-A2 | MP4 and MOV replay (RNF05) | integration |
 | R1-A3 | Given a hand-labelled session, the scoring tool prints H1, H3, H3b and H4 next to their thresholds (AC-013.1) | integration on a fixture |

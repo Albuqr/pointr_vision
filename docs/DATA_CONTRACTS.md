@@ -8,7 +8,9 @@ Conventions: UUIDv4 for every ID generated on the device. Wall times are UTC ISO
 Durations and offsets in seconds as floats. Monotonic times are seconds relative to the
 run's `t0`, the `time.perf_counter()` value taken when the run's capture thread starts (D-011;
 the clock is `perf_counter` since D-020, as `time.monotonic()` ticks every 15.6 ms on
-Windows), and only comparable within one run. Missing values are empty in CSV and
+Windows), and only comparable within one run. Three 0.11.0 fields hold raw `perf_counter` seconds instead, shared
+by every process on the PC: `run.json` `t0_mono`, `fusion.json` `cameras[].t0_mono` and `events.csv` `t_pc`. The fusion's `t` is a fourth base, group time (section 15).
+Missing values are empty in CSV and
 `null` in JSON, never `0`.
 
 ## 1. Session folder
@@ -22,12 +24,13 @@ sessions/<folder>/         <camera_id>_<session_id>, or <session_id> without a c
     frames.csv
     tracks.csv
     objects.csv          (0.11.0, Track R: ball and rim boxes, section 11)
-    events.csv           (0.11.0, Track R: rim sensor events, section 12)
     shots.csv            (0.11.0, Track R: shot attempts and calls, section 13)
     report.json          (section 8)
   labels.csv             (0.11.0, hand-made ground truth, section 14)
   video.mp4              (phase 4, raw, no annotations)
-sessions/fusion_<group_id>/   (0.11.0, Track R, section 15)
+sessions/sensor_<group_id>/   (0.11.0, Track R, section 12: one folder per group, not per camera)
+  events.csv
+sessions/fusion_<group_id>/<fusion_id>/   (0.11.0, Track R, section 15)
   fusion.json  fused_tracks.csv  fusion_diff.csv
 %LOCALAPPDATA%/pointr/calibrations/<camera_id>/<calibration_id>/calibration.json
 %LOCALAPPDATA%/pointr/calibrations/<camera_id>/<calibration_id>/frame.jpg (audit frame)
@@ -39,6 +42,10 @@ The calibrations root is the folder of the Studio's `cameras.json` (`%LOCALAPPDA
 default) plus `calibrations/`. A missing `active.json` means the camera records uncalibrated; an
 unreadable one, or one that points at a missing or invalid calibration, starts that camera
 uncalibrated with a session event (`calibration not used: ...`) and a warning in the Studio status.
+
+Readers of every CSV pick columns by header name, never by position: 0.11.0 adds columns.
+`shot_id` and `fused_id` are ordinals local to their file (a run, a fusion); they are not UUIDs and
+mean nothing across files.
 
 A live session produces one run. Each replay adds a run. Nothing is overwritten.
 `device_id` is created with an exclusive create: processes that start together on a fresh
@@ -96,6 +103,10 @@ Event `t_mono` is `null` for events that precede the run's `t0`, such as
 Event kinds: `source_open_failed`, `source_lost`, `source_recovered`,
 `frozen_frames`, `dark_frames`, `writer_backlog`, `recorder_backlog`, `interrupted`, `error`,
 `camera_gap`, `sensor_outage`, `startup_check_failed`, `rim_drift` (the last four are 0.11.0, Track R).
+`camera_gap` and `sensor_outage` are written when the camera stream or the rim sensor stops answering
+and again when it returns (`detail` says start or end and the seconds since t0); the final intervals are
+in `run.json` `gaps` and `outages`. `startup_check_failed` names the failed check in `detail`.
+`rim_drift` means the rim box moved from the session median by more than the limit named in `detail`.
 `calibration` is `null` when no calibration was active; otherwise it identifies the immutable
 calibration used by this session and records its mean held-out check residual in metres.
 
@@ -119,14 +130,18 @@ calibration used by this session and records its mean held-out check residual in
               "gpu": "NVIDIA ... | null",
               "packages": {"opencv": "x.y.z", "numpy": "x.y.z", "torch": "x.y.z",
                            "supervision": "x.y.z"}},
-  "started_at": "...", "t0_wall": "...", "ended_at": "...",
+  "started_at": "...", "t0_wall": "...", "t0_mono": 1234.5678, "ended_at": "...",
   "counts": {"captured": 0, "processed": 0, "dropped": 0, "unprocessed": 0, "rec_dropped": 0},
   "checks": [{"check": "cameras | calibration | identity | id_persistence | sensor",
               "result": "passed | failed", "detail": "...", "t_wall": "..."}],
   "clock": {"domain": "perf_counter",
-            "sensor": {"link": "espnow | usb", "offset_s": 0.0004, "estimates": 12},
+            "sensors": [{"sensor_id": "rim_a", "link": "espnow | usb", "offset_start_s": 5000.0004,
+                         "offset_end_s": 5000.0009, "estimates": 12}],
             "camera_latency": [{"camera_id": "cam1", "when": "start | end", "flashes": 40,
                                 "median_s": 0.08, "p95_s": 0.1, "std_s": 0.01}]},
+  "objects": {"classes": ["ball", "rim"]},
+  "gaps": [{"start_t": 12.0, "end_t": 32.0, "detected_t": 14.0}],
+  "outages": [{"sensor_id": "rim_a", "start_t": 40.0, "end_t": 100.0, "detected_t": 45.0}],
   "calibration": {"calibration_id": "uuid", "check_error_m": 0.12,
                   "homography_image_to_court": [[0.01,0,0],[0,0.01,0],[0,0,1]],
                   "court": {"type": "fiba_half", "length_m": 14.0, "width_m": 15.0},
@@ -156,15 +171,37 @@ capture dimensions. If a later frame has another size, the run logs an `error` e
 empty calibrated positions for its tracks; the homography is used again only when frames return to
 the saved dimensions. The HTTP preview also suppresses the court overlay on a differently sized
 frame.
-`checks` (0.11.0, D-040) is `null` until the startup checks have run, then one entry per check
-(spec FR-003): `cameras`, `calibration`, `identity`, `id_persistence`, `sensor`. A `failed` result never
-blocks the session; it is also written as a `startup_check_failed` session event. `clock` (0.11.0, D-035)
-is `null` when no sensor and no latency test were used. `clock.domain` is always `perf_counter`: every
-process on the PC shares it. `clock.sensor` is `null` without a sensor; its `offset_s` is the last
-sensor-to-PC offset estimate, re-estimated every 10 to 30 seconds, and `estimates` counts the estimates
-made. `clock.camera_latency` holds the per-camera capture-to-arrival latency measured with the LED test,
-one entry at `start` and one at `end`, with the median, the 95th percentile and the standard deviation
-over `flashes` flashes.
+`t0_mono` (0.11.0, D-041) is `time.perf_counter()` taken together with `t0_wall`: the run's `t0` on
+the PC clock, `null` until capture starts. A time `t` in this run's CSV files is `t0_mono + t` on the PC
+clock; sensor events (section 12) and the fusion (section 15) use that.
+`checks` (0.11.0, D-041) is `null` until the startup checks have run, then one entry per check
+(spec FR-003): `cameras`, `calibration`, `identity`, `id_persistence`, `sensor`. `detail` is a sentence
+(for `identity` it names the roster the operator typed). A `failed` result never blocks the session; it is
+also written as a `startup_check_failed` session event. `clock` (0.11.0, D-035) is `null` when no sensor
+and no latency test were used. `clock.domain` is always `perf_counter`: every process on the PC shares it.
+`clock.sensors` has one entry per rim sensor (up to two, one per rim) and is empty without a sensor. Their offsets are `t_pc - t_sensor` in seconds (add the offset to a
+sensor time to get PC time): `offset_start_s` is the first estimate of the run and `offset_end_s` the last;
+the estimate is renewed every 10 to 30 seconds and `estimates` counts them. Both offsets are `null` when `estimates` is 0. The difference between the two
+offsets is the drift over the run (AC-005.2). `clock.camera_latency` holds the capture-to-arrival latency
+per camera measured with the LED test, one entry at `start` and one at `end`, with the median, the 95th
+percentile and the standard deviation over `flashes` flashes. An empty list means no test was run.
+`objects` (0.11.0) is `null` when the ball and rim layer is off (then there is no objects.csv); otherwise
+`classes` lists what the detector looks for, and section 11 says what a missing row means. `gaps` and `outages` (0.11.0, FR-014, FR-015): `null` means not measured: this run had no gap detector or
+no rim sensor, or it crashed before the end (then the session events are the record, as with `counts`). An
+array, empty when nothing happened, is written when the run ends (the writer's `set_final`), together with
+the end-of-run values of `clock`. Each entry is `{start_t, end_t, detected_t}` (outages add the `sensor_id` of the sensor concerned) in seconds since t0 (the base
+of frames.csv) with `start_t <= detected_t` and `start_t <= end_t`; entries of one list (and of one sensor) are in time order without
+overlap, and `start_t` is clamped to 0 for an interval already under way at t0. A gap is the period from
+`source_lost` to `source_recovered` under the run's `health` thresholds (D-014): `start_t` is the `t_recv` of
+the last successful read (0 if there was none), `end_t` the `t_recv` of the first read after it, and
+`detected_t` the time the loss was declared (the `source_lost` event). The `camera_gap` session event is
+written with `source_recovered` (or at close if the gap is still open) and does not replace the `source_*`
+events. An outage: `start_t` is the `t_pc` of the last events.csv row of that sensor before its
+`outage_start`, minus `t0_mono`; `end_t` the `outage_end` row's `t_pc` minus `t0_mono`; `detected_t` the
+`outage_start` row's. The camera process reads events.csv during the run and writes its own
+`sensor_outage` session events. An interval still open at the end has `end_t` equal to `perf_counter` at
+close minus t0. These arrays are the copy used for scoring. `clock.camera_latency` holds only the entries
+of this run's own camera.
 For ByteTrack timestamp mode, `lost_track_buffer` is a count of 30 FPS frames and the
 effective lost-track duration is `lost_track_buffer / 30` seconds, rounded to the nearest
 frame when configured with `--track-lost-secs`.
@@ -183,6 +220,7 @@ One row per **processed** frame, including frames with zero detections.
 | n_detections | int/empty | person detections above threshold; empty when detection is off |
 | n_tracks | int/empty | tracks output by the tracker; empty when detection is off |
 | dropped_total | int | capture's drop count when this frame was taken for processing |
+| t_video | float/empty | the frame's time in the source video, s from its first frame (0.11.0): the container timestamp on a replay, the time in `video.mp4` for a live run that records (R1); empty otherwise |
 
 ## 5. `tracks.csv`
 
@@ -473,38 +511,65 @@ preserved as `cameras.json.bak`. An unreadable or invalid settings file loads as
 list and produces a visible warning; it is not silently replaced with the backup. The camera
 configuration is a local Studio setting and does not alter session, run, report, or calibration
 field meanings. This additive settings contract is recorded under contract version 0.10.0.
+
 ## 11. `objects.csv` (0.11.0, Track R)
 
 One row per ball or rim box per processed frame, written by the perception layer from slice R2
-(D-037, ADR 0004). A frame with no ball and no rim has no row here; `frames.csv` still has the
-frame, so absence is data. Person tracks stay in `tracks.csv`.
+(D-037, ADR 0004). The file exists only when `run.json` `objects` is not `null`. Then every row of
+`frames.csv` was searched for the classes in `objects.classes`: a processed frame with no `ball` row had
+no ball found, and the denominator for "ball visible" is the number of `frames.csv` rows. The rim box is
+also stored once per session (the median of the frames where it was found, D-037); from the first
+median on, every processed frame in which no rim was found gets a `rim` row with `source`
+`session_median`; R2 defines when the median is complete, and before that no such row is written. `rim` in
+`objects.classes` means the rim was searched for. When the layer is on the file always exists, with only
+the header row if nothing was found. Person tracks stay in `tracks.csv`, and `n_detections` in `frames.csv` counts persons only.
 
 | column | type | meaning |
 |---|---|---|
 | seq | int | frame seq |
-| class | str | `ball` or `rim` |
+| class | str | `ball` or `rim` (the values of `objects.classes`) |
 | x1, y1, x2, y2 | float | box in pixels |
 | confidence | float/empty | detector confidence; empty when `source` is `session_median` |
 | source | str | `detector`, or `session_median` for the rim box stored once per session and re-used (D-037) |
 
 ## 12. `events.csv` (0.11.0, Track R)
 
-One row per message from the rim sensor and one per outage boundary, written by the event source
-(D-035, D-036). Times are on the PC clock of the run (`perf_counter`, `t0` as in `run.json`).
+One row per message from a rim sensor and one per outage or restart of a sensor (up to two sensors, one per rim), written by the one process that
+owns the gateway (D-035, D-036): one extra process per group, started by the launcher (R4). There is one file per group, `sessions/sensor_<group_id>/events.csv`, because
+the sensors serve every camera of the group and only one process can open the gateway; each camera's
+run reads it. A session that uses a sensor must have a `group_id`. `t_pc` is the raw PC clock
+(`perf_counter`), not relative to any run: a run subtracts its own `run.json` `t0_mono`, and ignores rows
+before it. Only live runs are matched against this file: a replay's `t0_mono` is the time of the replay,
+so R1 defines the replay mapping through `t_video`. A camera run computes the `clock.sensors` offsets and
+`estimates` of each sensor from that sensor's `sync` rows inside its own time span.
 
 | column | type | meaning |
 |---|---|---|
-| sensor_seq | int/empty | sequence number from the sensor; gaps between rows = lost messages; empty on outage rows |
-| kind | str | `make`, `outage_start` or `outage_end` |
-| t_sensor | float/empty | the sensor's own timer in seconds; empty on outage rows |
-| t_mono | float | event time on the PC clock, s since t0, after applying `offset_s` |
+| sensor_id | str | which sensor wrote the row (a token, e.g. `rim_a`; one per rim); `sensor_seq`, offsets and `reset` rows are per sensor |
+| sensor_seq | int/empty | sequence number from that sensor; gaps between rows = lost messages; empty on outage, reset and sync rows |
+| kind | str | `make`; `sync` (one per offset estimate, every 10 to 30 s); `outage_start`, `outage_end`; or `reset` (the sensor restarted: `sensor_seq` and `t_sensor` start over) |
+| t_sensor | float/empty | the sensor's own timer in seconds; empty on outage and reset rows |
+| t_pc | float | event time on the PC clock, s: `t_sensor + offset_s`; for sync rows the time of the estimate, for outage and reset rows the PC time they were noticed |
 | t_wall | str | UTC ISO-8601 |
-| offset_s | float/empty | sensor-to-PC clock offset estimate in use when the row was written; empty on outage rows |
+| offset_s | float/empty | the offset `t_pc - t_sensor` in use when the row was written; empty on outage and reset rows |
 | link | str | `espnow` or `usb` |
+
+Rows are appended as they arrive. A reader keeps the first `make` row per `sensor_id` and `sensor_seq` since that sensor's last `reset`
+row, so a message repeated by the link counts once (rows with an empty `sensor_seq` are not de-duplicated). With a sensor in the group the file always exists,
+with only the header row until the first message. A restarted gateway appends to the file and
+`sensor_seq` continues unless the sensor itself restarted (then there is a `reset` row). The scorer counts
+sensor makes from this file, so a make with no video attempt is a miss of the video, not a missing row.
 
 ## 13. `shots.csv` (0.11.0, Track R)
 
-One row per shot attempt, written by the shot layer (D-038, ADR 0005). The matching window is
+One row per shot attempt, written by the shot layer (D-038, ADR 0005), in the run folder of the camera that saw it. Frames join through `seq`, sensor events
+through `sensor_id` and `sensor_seq` (section 12). Times in this file are the raw frame times (`t_recv`, which include the
+camera's capture-to-arrival latency); the matcher subtracts the start median of the camera's
+`clock.camera_latency` (0 when there is none) before comparing with a sensor event's `t_pc - t0_mono`, the
+same correction the fusion uses. A shot seen by two cameras is one row in each camera's file; shots are
+scored per camera run and the fusion does not merge them. The margin `a` and the `flight_max` bands are
+recorded by slice R3 when it adds its run block. With the shot layer on, the file exists with only the header
+row if there were no shots. The matching window is
 `[release - a, release + flight_max(d) + a]` with `d` the shooter's distance to the rim; when `d` is
 unknown the window uses the longest flight band.
 
@@ -517,9 +582,10 @@ unknown the window uses the longest flight band.
 | player_number | int/empty | the shooter's number when known |
 | call | str | `make`, `miss` or `uncertain` |
 | call_source | str | `video`, `sensor` or `video+sensor` |
+| sensor_id | str/empty | the sensor of the matched event (the rim the shot was at); empty when none |
 | sensor_seq | int/empty | the matched sensor event; empty when none |
-| x_m, y_m | float/empty | the shooter's position at release in court metres; empty without calibration |
-| distance_m | float/empty | the shooter's distance to the rim; empty without calibration |
+| x_m, y_m | float/empty | the shooter's position at release in court metres; empty without calibration or when the shooter is unknown |
+| distance_m | float/empty | the shooter's distance to the rim; empty without calibration or when the shooter is unknown |
 | window_start, window_end | float | the matching window, s since t0 |
 | flags | str/empty | `;`-separated: `no_sensor`, `shooter_unknown`, `ball_hidden`, `gap` |
 
@@ -527,7 +593,7 @@ unknown the window uses the longest flight band.
 
 Hand-made ground truth for H1, H3, H3b and H4, one file per session folder (spec FR-013). It is not
 written by the system; the scoring tool reads it. `time_s` counts seconds from the first frame of the
-recorded video; a replay run sets `t0` at the first frame, so `t_mono` equals `time_s` in a replay (R1).
+recorded video and is compared with `frames.csv` `t_video`; shots and tracks join through `seq`.
 
 | column | type | meaning |
 |---|---|---|
@@ -545,21 +611,29 @@ recorded video; a replay run sets `t0` at the first frame, so `t_mono` equals `t
   "group_id": "token",
   "created_at": "2026-12-01T18:50:00Z",
   "cameras": [{"camera_id": "cam1", "session_id": "uuid", "run_id": "uuid",
-               "t0_wall": "2026-12-01T18:00:00Z", "latency_median_s": 0.08}],
-  "params": {"match_distance_m": 0.5, "max_offset_s": 0.033},
+               "t0_wall": "2026-12-01T18:00:00Z", "t0_mono": 1234.5678,
+               "latency_median_s": 0.08}],
+  "excluded": [{"camera_id": "cam3", "reason": "calibration_failed | operator"}],
+  "params": {"match_distance_m": 0.5, "max_offset_s": 0.033, "step_s": 0.1},
   "gaps": [{"camera_id": "cam1", "start_t": 12.0, "end_t": 32.0}],
-  "counts": {"players": 3, "merged_frames": 0, "single_camera_frames": 0, "differences": 0}
+  "counts": {"players": 3, "merged_rows": 0, "single_camera_rows": 0, "differences": 0}
 }
 ```
 
 The post-session fusion of the per-camera sessions of one group (D-034, ADR 0001), written to
-`sessions/fusion_<group_id>/` with `fused_tracks.csv` and `fusion_diff.csv`. It reads the per-camera
+`sessions/fusion_<group_id>/<fusion_id>/` with `fused_tracks.csv` and `fusion_diff.csv` (a new
+folder per fusion; nothing is overwritten). It reads the per-camera
 folders and never changes them. Slice R6 implements it; the formats are fixed here first.
 
-`t` in the two CSV files is seconds since the earliest `t0_wall` of the group, on the PC clock, with
-each camera's measured start latency (`run.json` `clock.camera_latency`, `when` = `start`)
-subtracted from its frame times. `gaps` lists the periods when a camera's stream was down; they are
-left out of the H3b and H6 scoring (FR-014). `params` records the thresholds the run used.
+`cameras` lists the cameras that were fused; `excluded` lists the ones left out and why (`reason` is `calibration_failed` or `operator`; spec FR-002:
+a camera that failed calibration is not fused). `latency_median_s` is the `start` entry of the camera's
+`clock.camera_latency`, or `null` when no test was run, in which case 0 is used. Group time zero is the
+smallest `t0_mono` among `cameras`. Only live runs are fused. A frame of camera `c` at `t_recv` is at `t0_mono_c + t_recv - latency_c` on
+the PC clock, so `t` in the two CSV files is that minus the zero. The CSV files have one row per fused
+player every `params.step_s` seconds. `gaps` lists the periods, in group time, when a camera's stream was
+down (from each run's `gaps`, converted as a frame time is: `t0_mono_c + t - latency_c - zero`); they are left out of the H3b and H6 scoring (FR-014). `params` records the thresholds the run used. `counts`: `players` is the number of distinct `fused_id`;
+`merged_rows` and `single_camera_rows` count `fused_tracks.csv` rows built from two or more cameras and from
+one; `differences` is the number of rows in `fusion_diff.csv`.
 
 `fused_tracks.csv`: one row per fused player per time step.
 
@@ -568,7 +642,7 @@ left out of the H3b and H6 scoring (FR-014). `params` records the thresholds the
 | t | float | group time, s |
 | fused_id | int | the fused player within this fusion, from 1 |
 | player_number | int/empty | the number when known |
-| x_m, y_m | float/empty | position in court metres |
+| x_m, y_m | float/empty | position in court metres; empty when it cannot be projected |
 | in_court | bool/empty | `true` or `false`, lowercase |
 | cameras | str | `;`-separated camera_ids that saw the player at `t` |
 | source_tracks | str | `;`-separated `camera_id:track_id` pairs merged into this row |
@@ -581,5 +655,5 @@ left out of the H3b and H6 scoring (FR-014). `params` records the thresholds the
 | fused_id | int | the fused player |
 | field | str | `position`, `player_number` or `presence` |
 | camera_a, camera_b | str | the two camera_ids |
-| value_a, value_b | str | each camera's reading, as text |
+| value_a, value_b | str | each camera's reading as text: `x_m;y_m` for position, `true` or `false` for presence, the number for player_number; empty when that camera has none |
 | delta | float/empty | the difference in metres for `position`; empty for the other fields |
