@@ -1,6 +1,6 @@
 # Data contracts
 
-Contract version: **0.10.0**. Any change bumps the version (minor for additive fields, major
+Contract version: **0.11.0**. Any change bumps the version (minor for additive fields, major
 for removals or meaning changes) and needs a `DECISIONS.md` entry. JSON Schemas in
 `contracts/` are written from this file and tests check them against it (D-009).
 
@@ -21,8 +21,14 @@ sessions/<folder>/         <camera_id>_<session_id>, or <session_id> without a c
     run.json
     frames.csv
     tracks.csv
+    objects.csv          (0.11.0, Track R: ball and rim boxes, section 11)
+    events.csv           (0.11.0, Track R: rim sensor events, section 12)
+    shots.csv            (0.11.0, Track R: shot attempts and calls, section 13)
     report.json          (section 8)
+  labels.csv             (0.11.0, hand-made ground truth, section 14)
   video.mp4              (phase 4, raw, no annotations)
+sessions/fusion_<group_id>/   (0.11.0, Track R, section 15)
+  fusion.json  fused_tracks.csv  fusion_diff.csv
 %LOCALAPPDATA%/pointr/calibrations/<camera_id>/<calibration_id>/calibration.json
 %LOCALAPPDATA%/pointr/calibrations/<camera_id>/<calibration_id>/frame.jpg (audit frame)
 %LOCALAPPDATA%/pointr/calibrations/<camera_id>/active.json  ({"calibration_id": "uuid"}: the
@@ -50,7 +56,7 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
 
 ```json
 {
-  "contract_version": "0.10.0",
+  "contract_version": "0.11.0",
   "session_id": "uuid",
   "device_id": "uuid",
   "camera_id": "cam1 | null",
@@ -73,7 +79,8 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
 (D-022): `camera_id` is a label chosen by the user (`--camera-id`, 1-32 characters of
 `A-Za-z0-9_-`), `group_id` is shared by every session started together (`--group-id`, 1-64
 characters of `A-Za-z0-9_-`; the launcher writes a UUIDv4). Both are `null` when not given. Each
-camera is its own session with its own clock; nothing links frames across cameras. The folder is
+camera is its own session with its own clock; nothing links frames across cameras while the session
+runs (0.11.0: the post-session fusion of section 15 links them afterwards, D-034). The folder is
 `<camera_id>_<session_id>` when `camera_id` is set, else `<session_id>`; the folder name is
 never parsed, `session_id` inside the file is the identity.
 `registration` is filled from phase 6 and is `null` before that. `ended_at` is `null` while
@@ -87,7 +94,8 @@ from stream URLs before writing (D-020). `recording` is `{"enabled": false, "pat
 Event `t_mono` is `null` for events that precede the run's `t0`, such as
 `source_open_failed` (D-014).
 Event kinds: `source_open_failed`, `source_lost`, `source_recovered`,
-`frozen_frames`, `dark_frames`, `writer_backlog`, `recorder_backlog`, `interrupted`, `error`.
+`frozen_frames`, `dark_frames`, `writer_backlog`, `recorder_backlog`, `interrupted`, `error`,
+`camera_gap`, `sensor_outage`, `startup_check_failed`, `rim_drift` (the last four are 0.11.0, Track R).
 `calibration` is `null` when no calibration was active; otherwise it identifies the immutable
 calibration used by this session and records its mean held-out check residual in metres.
 
@@ -95,7 +103,7 @@ calibration used by this session and records its mean held-out check residual in
 
 ```json
 {
-  "contract_version": "0.10.0",
+  "contract_version": "0.11.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "mode": "live | replay",
@@ -113,6 +121,12 @@ calibration used by this session and records its mean held-out check residual in
                            "supervision": "x.y.z"}},
   "started_at": "...", "t0_wall": "...", "ended_at": "...",
   "counts": {"captured": 0, "processed": 0, "dropped": 0, "unprocessed": 0, "rec_dropped": 0},
+  "checks": [{"check": "cameras | calibration | identity | id_persistence | sensor",
+              "result": "passed | failed", "detail": "...", "t_wall": "..."}],
+  "clock": {"domain": "perf_counter",
+            "sensor": {"link": "espnow | usb", "offset_s": 0.0004, "estimates": 12},
+            "camera_latency": [{"camera_id": "cam1", "when": "start | end", "flashes": 40,
+                                "median_s": 0.08, "p95_s": 0.1, "std_s": 0.01}]},
   "calibration": {"calibration_id": "uuid", "check_error_m": 0.12,
                   "homography_image_to_court": [[0.01,0,0],[0,0.01,0],[0,0,1]],
                   "court": {"type": "fiba_half", "length_m": 14.0, "width_m": 15.0},
@@ -142,6 +156,15 @@ capture dimensions. If a later frame has another size, the run logs an `error` e
 empty calibrated positions for its tracks; the homography is used again only when frames return to
 the saved dimensions. The HTTP preview also suppresses the court overlay on a differently sized
 frame.
+`checks` (0.11.0, D-040) is `null` until the startup checks have run, then one entry per check
+(spec FR-003): `cameras`, `calibration`, `identity`, `id_persistence`, `sensor`. A `failed` result never
+blocks the session; it is also written as a `startup_check_failed` session event. `clock` (0.11.0, D-035)
+is `null` when no sensor and no latency test were used. `clock.domain` is always `perf_counter`: every
+process on the PC shares it. `clock.sensor` is `null` without a sensor; its `offset_s` is the last
+sensor-to-PC offset estimate, re-estimated every 10 to 30 seconds, and `estimates` counts the estimates
+made. `clock.camera_latency` holds the per-camera capture-to-arrival latency measured with the LED test,
+one entry at `start` and one at `end`, with the median, the 95th percentile and the standard deviation
+over `flashes` flashes.
 For ByteTrack timestamp mode, `lost_track_buffer` is a count of 30 FPS frames and the
 effective lost-track duration is `lost_track_buffer / 30` seconds, rounded to the nearest
 frame when configured with `--track-lost-secs`.
@@ -171,6 +194,8 @@ One row per **processed** frame, including frames with zero detections.
 | confidence | float/empty | detector confidence if the tracker exposes it |
 | state | str | `observed` or `predicted`, when the tracker exposes it, else empty |
 | athlete_id | uuid/empty | empty until the assignment phase |
+| player_number | int/empty | the jersey number read by the identity layer (0.11.0, D-039); empty until that layer runs |
+| id_source | str/empty | how the number was decided: `jersey_vote`, `jersey_gated` or `operator`; empty when `player_number` is empty |
 | x_m, y_m | float/empty | projected box bottom-centre in court metres; empty without calibration, and empty when the point cannot be projected (on or beyond the horizon, or not finite): never 0 |
 | calibration_id | uuid/empty | calibration used for the projection; empty without calibration |
 | position_method | str/empty | `box_bottom_center` when calibrated; empty without calibration |
@@ -248,7 +273,7 @@ One report per run, one per camera: there is no fusion across cameras.
 
 ```json
 {
-  "contract_version": "0.10.0",
+  "contract_version": "0.11.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "camera_id": "cam1 | null",
@@ -448,3 +473,113 @@ preserved as `cameras.json.bak`. An unreadable or invalid settings file loads as
 list and produces a visible warning; it is not silently replaced with the backup. The camera
 configuration is a local Studio setting and does not alter session, run, report, or calibration
 field meanings. This additive settings contract is recorded under contract version 0.10.0.
+## 11. `objects.csv` (0.11.0, Track R)
+
+One row per ball or rim box per processed frame, written by the perception layer from slice R2
+(D-037, ADR 0004). A frame with no ball and no rim has no row here; `frames.csv` still has the
+frame, so absence is data. Person tracks stay in `tracks.csv`.
+
+| column | type | meaning |
+|---|---|---|
+| seq | int | frame seq |
+| class | str | `ball` or `rim` |
+| x1, y1, x2, y2 | float | box in pixels |
+| confidence | float/empty | detector confidence; empty when `source` is `session_median` |
+| source | str | `detector`, or `session_median` for the rim box stored once per session and re-used (D-037) |
+
+## 12. `events.csv` (0.11.0, Track R)
+
+One row per message from the rim sensor and one per outage boundary, written by the event source
+(D-035, D-036). Times are on the PC clock of the run (`perf_counter`, `t0` as in `run.json`).
+
+| column | type | meaning |
+|---|---|---|
+| sensor_seq | int/empty | sequence number from the sensor; gaps between rows = lost messages; empty on outage rows |
+| kind | str | `make`, `outage_start` or `outage_end` |
+| t_sensor | float/empty | the sensor's own timer in seconds; empty on outage rows |
+| t_mono | float | event time on the PC clock, s since t0, after applying `offset_s` |
+| t_wall | str | UTC ISO-8601 |
+| offset_s | float/empty | sensor-to-PC clock offset estimate in use when the row was written; empty on outage rows |
+| link | str | `espnow` or `usb` |
+
+## 13. `shots.csv` (0.11.0, Track R)
+
+One row per shot attempt, written by the shot layer (D-038, ADR 0005). The matching window is
+`[release - a, release + flight_max(d) + a]` with `d` the shooter's distance to the rim; when `d` is
+unknown the window uses the longest flight band.
+
+| column | type | meaning |
+|---|---|---|
+| shot_id | int | per run, from 1 |
+| seq | int | frame seq of the release |
+| t_release | float | release time, s since t0 |
+| track_id | int/empty | the shooter's track; empty when the shooter is unknown |
+| player_number | int/empty | the shooter's number when known |
+| call | str | `make`, `miss` or `uncertain` |
+| call_source | str | `video`, `sensor` or `video+sensor` |
+| sensor_seq | int/empty | the matched sensor event; empty when none |
+| x_m, y_m | float/empty | the shooter's position at release in court metres; empty without calibration |
+| distance_m | float/empty | the shooter's distance to the rim; empty without calibration |
+| window_start, window_end | float | the matching window, s since t0 |
+| flags | str/empty | `;`-separated: `no_sensor`, `shooter_unknown`, `ball_hidden`, `gap` |
+
+## 14. `labels.csv` (0.11.0, Track R)
+
+Hand-made ground truth for H1, H3, H3b and H4, one file per session folder (spec FR-013). It is not
+written by the system; the scoring tool reads it. `time_s` counts seconds from the first frame of the
+recorded video; a replay run sets `t0` at the first frame, so `t_mono` equals `time_s` in a replay (R1).
+
+| column | type | meaning |
+|---|---|---|
+| time_s | float | video time of the event |
+| event | str | `attempt`, `make`, `miss`, `leave` or `return` |
+| player_number | int/empty | the player the event belongs to; empty when unknown |
+| note | str/empty | free text |
+
+## 15. `fusion.json`
+
+```json
+{
+  "contract_version": "0.11.0",
+  "fusion_id": "uuid",
+  "group_id": "token",
+  "created_at": "2026-12-01T18:50:00Z",
+  "cameras": [{"camera_id": "cam1", "session_id": "uuid", "run_id": "uuid",
+               "t0_wall": "2026-12-01T18:00:00Z", "latency_median_s": 0.08}],
+  "params": {"match_distance_m": 0.5, "max_offset_s": 0.033},
+  "gaps": [{"camera_id": "cam1", "start_t": 12.0, "end_t": 32.0}],
+  "counts": {"players": 3, "merged_frames": 0, "single_camera_frames": 0, "differences": 0}
+}
+```
+
+The post-session fusion of the per-camera sessions of one group (D-034, ADR 0001), written to
+`sessions/fusion_<group_id>/` with `fused_tracks.csv` and `fusion_diff.csv`. It reads the per-camera
+folders and never changes them. Slice R6 implements it; the formats are fixed here first.
+
+`t` in the two CSV files is seconds since the earliest `t0_wall` of the group, on the PC clock, with
+each camera's measured start latency (`run.json` `clock.camera_latency`, `when` = `start`)
+subtracted from its frame times. `gaps` lists the periods when a camera's stream was down; they are
+left out of the H3b and H6 scoring (FR-014). `params` records the thresholds the run used.
+
+`fused_tracks.csv`: one row per fused player per time step.
+
+| column | type | meaning |
+|---|---|---|
+| t | float | group time, s |
+| fused_id | int | the fused player within this fusion, from 1 |
+| player_number | int/empty | the number when known |
+| x_m, y_m | float/empty | position in court metres |
+| in_court | bool/empty | `true` or `false`, lowercase |
+| cameras | str | `;`-separated camera_ids that saw the player at `t` |
+| source_tracks | str | `;`-separated `camera_id:track_id` pairs merged into this row |
+
+`fusion_diff.csv`: one row per disagreement between two cameras about the same fused player.
+
+| column | type | meaning |
+|---|---|---|
+| t | float | group time, s |
+| fused_id | int | the fused player |
+| field | str | `position`, `player_number` or `presence` |
+| camera_a, camera_b | str | the two camera_ids |
+| value_a, value_b | str | each camera's reading, as text |
+| delta | float/empty | the difference in metres for `position`; empty for the other fields |
