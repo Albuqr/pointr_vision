@@ -389,7 +389,11 @@ class Studio:
                 continue
             try:
                 values = next(csv.reader([line.decode("utf-8")]))
-                state["rows"].append(dict(zip(FRAME_COLUMNS, values, strict=True)))
+                if len(values) < len(
+                    FRAME_COLUMNS
+                ):  # a half-written row; later columns are ignored
+                    continue
+                state["rows"].append(dict(zip(FRAME_COLUMNS, values, strict=False)))
             except (UnicodeDecodeError, ValueError):
                 continue
         return list(state["rows"])

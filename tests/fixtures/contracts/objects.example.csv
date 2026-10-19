@@ -1,0 +1,3 @@
+seq,class,x1,y1,x2,y2,confidence,source
+12,ball,100.0,200.0,130.0,230.0,0.81,detector
+12,rim,500.0,80.0,560.0,110.0,,session_median
