@@ -52,8 +52,7 @@ def half_calibration_for(points):
     document["homography_image_to_court"] = fitted["homography_image_to_court"]
     residuals = point_residuals(document["homography_image_to_court"], points)
     document["points"] = [
-        {**point, "residual_m": residual}
-        for point, residual in zip(points, residuals, strict=True)
+        {**point, "residual_m": residual} for point, residual in zip(points, residuals, strict=True)
     ]
     document["errors"] = {
         "calibration_mean_m": fitted["calibration_mean_m"],
@@ -131,6 +130,13 @@ def test_older_calibration_with_kind_only_remains_valid(kind):
     validated = validate_calibration(legacy)
     assert validated["court"]["type"] == kind
     assert "type" not in legacy["court"]  # reading never rewrites the saved input object
+
+
+def test_a_calibration_saved_under_0_10_0_still_loads():
+    """0.11.0 changes no calibration format, so files saved under 0.10.0 stay usable."""
+    saved = copy.deepcopy(EXAMPLE)
+    saved["contract_version"] = "0.10.0"
+    assert validate_calibration(saved)["calibration_id"] == EXAMPLE["calibration_id"]
 
 
 def test_half_court_calibration_schema_accepts_type_and_bounds():

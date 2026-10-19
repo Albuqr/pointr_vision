@@ -141,7 +141,8 @@ def test_frame_record_matches_frames_csv_columns():
 
 
 def test_track_obs_matches_tracks_csv_columns():
-    """seq comes from SessionWriter.tracks(); athlete_id is filled in a later phase."""
+    """seq comes from SessionWriter.tracks(); athlete_id, player_number and id_source are filled
+    in later phases."""
     fields = field_names(TrackObs)
     i = fields.index("xyxy")
     fields[i : i + 1] = ["x1", "y1", "x2", "y2"]
@@ -149,6 +150,8 @@ def test_track_obs_matches_tracks_csv_columns():
         "seq",
         *fields,
         "athlete_id",
+        "player_number",
+        "id_source",
         "x_m",
         "y_m",
         "calibration_id",

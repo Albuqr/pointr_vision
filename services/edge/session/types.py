@@ -41,6 +41,8 @@ class RunMeta:
     runtime: dict  # python, platform, device, packages
     started_at: str  # UTC ISO-8601
     calibration: dict | None = None
+    checks: list | None = None  # startup check results, null until they have run (0.11.0)
+    clock: dict | None = None  # sensor offset and per-camera latency, null without them (0.11.0)
 
 
 @dataclass(frozen=True)

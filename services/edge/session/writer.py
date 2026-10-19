@@ -41,7 +41,7 @@ FRAMES_COLUMNS = [
 ]  # fmt: skip
 TRACKS_COLUMNS = [
     "seq", "track_id", "x1", "y1", "x2", "y2", "confidence", "state", "athlete_id",
-    "x_m", "y_m", "calibration_id", "position_method", "in_court",
+    "player_number", "id_source", "x_m", "y_m", "calibration_id", "position_method", "in_court",
 ]  # fmt: skip
 FLUSH_SECS = 0.5  # flush period; under the contract's "at least once per second"
 METHOD = "box_bottom_center"
@@ -226,6 +226,8 @@ class FileSessionWriter:
             "ended_at": None,
             "counts": None,
             "calibration": run.calibration,
+            "checks": run.checks,
+            "clock": run.clock,
         }
         self._frames_f = open(self._run_dir / "frames.csv", "w", newline="", encoding="utf-8")
         self._tracks_f = open(self._run_dir / "tracks.csv", "w", newline="", encoding="utf-8")
@@ -388,7 +390,8 @@ class FileSessionWriter:
                         changed |= self._note_unprojected(why)
                     row = [
                         seq, o.track_id, _num(x1, 2), _num(y1, 2), _num(x2, 2), _num(y2, 2),
-                        _num(o.confidence, 4), _opt(o.state), "", _num(x_m, 4), _num(y_m, 4),
+                        _num(o.confidence, 4), _opt(o.state), "", "", "",
+                        _num(x_m, 4), _num(y_m, 4),
                         calibration_id, position_method, in_court,
                     ]  # fmt: skip
                 except Exception as e:  # a bad track row is recorded as empty, never fatal
@@ -398,7 +401,7 @@ class FileSessionWriter:
                     except Exception:
                         track_id = ""
                     row = [
-                        seq, track_id, "", "", "", "", "", "", "", "", "",
+                        seq, track_id, "", "", "", "", "", "", "", "", "", "", "",
                         self._calibration_id(), METHOD if self._positions else "", "",
                     ]  # fmt: skip
                 self._tracks.writerow(row)

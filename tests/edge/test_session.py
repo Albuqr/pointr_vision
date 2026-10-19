@@ -178,9 +178,7 @@ def test_calibrated_run_writes_metre_positions_and_provenance(monkeypatch, tmp_p
     validate("session", session)
     validate("run", run)
     assert session["calibration"]["calibration_id"] == calibration["calibration_id"]
-    assert session["calibration"]["court"] == {
-        "type": "custom", "length_m": 3.0, "width_m": 2.0
-    }
+    assert session["calibration"]["court"] == {"type": "custom", "length_m": 3.0, "width_m": 2.0}
     assert run["calibration"]["check_error_m"] == calibration["errors"]["check_mean_m"]
     assert run["calibration"]["court"]["type"] == "custom"
     assert tracks[0]["x_m"] == "0.6000" and tracks[0]["y_m"] == "2.2000"
@@ -684,3 +682,34 @@ def test_ctrl_c_pressed_again_during_shutdown_still_saves(monkeypatch, tmp_path,
     validate("run", run)
     assert session["status"] == "interrupted" and session["ended_at"]
     assert len(frames) == run["counts"]["processed"]
+
+
+def test_run_json_carries_the_track_r_blocks_as_null(tmp_path):
+    """0.11.0: checks and clock stay null until the startup checks and the clock model fill them."""
+    w, run_dir = started(tmp_path)
+    w.close("ended", COUNTS)
+    run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+    assert run["checks"] is None and run["clock"] is None
+    validate("run", run)
+
+
+def test_tracks_csv_has_empty_identity_columns_until_the_identity_layer_runs(tmp_path):
+    """0.11.0: player_number and id_source follow athlete_id and are empty (D-039)."""
+    w, run_dir = started(tmp_path)
+    w.tracks(0, [TrackObs(1, (1.0, 2.0, 3.0, 4.0), 0.9, None)])
+    w.close("ended", COUNTS)
+    with open(run_dir / "tracks.csv", newline="", encoding="utf-8") as f:
+        rows = list(csv.reader(f))
+    header, row = rows[0], rows[1]
+    assert header[8:11] == ["athlete_id", "player_number", "id_source"]
+    assert row[8:11] == ["", "", ""] and len(row) == len(header)
+
+
+def test_a_bad_track_row_keeps_the_column_count(tmp_path):
+    """The error-path row has the same width as the header, new columns included."""
+    w, run_dir = started(tmp_path)
+    w.tracks(0, [TrackObs(1, (1.0, 2.0), 0.9, None)])  # a box with two coordinates
+    w.close("ended", COUNTS)
+    with open(run_dir / "tracks.csv", newline="", encoding="utf-8") as f:
+        rows = list(csv.reader(f))
+    assert len(rows[1]) == len(rows[0])

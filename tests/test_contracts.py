@@ -56,12 +56,12 @@ def doc_example(section: str) -> dict:
     return json.loads(m.group(1))
 
 
-@pytest.mark.parametrize("name", ["session", "run", "report", "calibration"])
+@pytest.mark.parametrize("name", ["session", "run", "report", "calibration", "fusion"])
 def test_example_validates(name):
     validator(name).validate(example(name))
 
 
-@pytest.mark.parametrize("name", ["session", "run", "report", "calibration"])
+@pytest.mark.parametrize("name", ["session", "run", "report", "calibration", "fusion"])
 def test_versions_agree(name):
     v = doc_version()
     assert schema(name)["properties"]["contract_version"]["const"] == v
@@ -287,7 +287,7 @@ def _assert_matches(doc_node, schema_node, path=()):
         assert set(doc_node.split(" | ")) == set(schema_node["enum"]) - nullable, path
 
 
-@pytest.mark.parametrize("name", ["session", "run"])
+@pytest.mark.parametrize("name", ["session", "run", "fusion"])
 def test_schema_matches_doc(name):
     _assert_matches(doc_example(f"{name}.json"), schema(name))
 

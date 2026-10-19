@@ -1,16 +1,17 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:pointr:contracts:0.10.0:run",
+  "$id": "urn:pointr:contracts:0.11.0:run",
   "title": "run.json",
   "description": "DATA_CONTRACTS.md section 3. Missing values are null, never 0.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "contract_version", "run_id", "session_id", "mode", "input", "detector", "tracker",
-    "health", "runtime", "started_at", "t0_wall", "ended_at", "counts", "calibration"
+    "health", "runtime", "started_at", "t0_wall", "ended_at", "counts", "calibration",
+    "checks", "clock"
   ],
   "properties": {
-    "contract_version": {"const": "0.10.0"},
+    "contract_version": {"const": "0.11.0"},
     "run_id": {"$ref": "#/$defs/uuid4"},
     "session_id": {"$ref": "#/$defs/uuid4"},
     "mode": {"enum": ["live", "replay"]},
@@ -127,6 +128,56 @@
           "properties": {
             "width": {"type": "integer", "minimum": 1},
             "height": {"type": "integer", "minimum": 1}
+          }
+        }
+      }
+    },
+    "checks": {
+      "type": ["array", "null"],
+      "description": "null until the startup checks have run (FR-003, D-040)",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["check", "result", "detail", "t_wall"],
+        "properties": {
+          "check": {"enum": ["cameras", "calibration", "identity", "id_persistence", "sensor"]},
+          "result": {"enum": ["passed", "failed"]},
+          "detail": {"type": ["string", "null"]},
+          "t_wall": {"$ref": "#/$defs/utc"}
+        }
+      }
+    },
+    "clock": {
+      "type": ["object", "null"],
+      "description": "null when no sensor and no latency test were used (D-035)",
+      "additionalProperties": false,
+      "required": ["domain", "sensor", "camera_latency"],
+      "properties": {
+        "domain": {"const": "perf_counter"},
+        "sensor": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["link", "offset_s", "estimates"],
+          "properties": {
+            "link": {"enum": ["espnow", "usb"]},
+            "offset_s": {"type": "number"},
+            "estimates": {"type": "integer", "minimum": 0}
+          }
+        },
+        "camera_latency": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["camera_id", "when", "flashes", "median_s", "p95_s", "std_s"],
+            "properties": {
+              "camera_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,32}$"},
+              "when": {"enum": ["start", "end"]},
+              "flashes": {"type": "integer", "minimum": 1},
+              "median_s": {"type": "number", "minimum": 0},
+              "p95_s": {"type": "number", "minimum": 0},
+              "std_s": {"type": "number", "minimum": 0}
+            }
           }
         }
       }
