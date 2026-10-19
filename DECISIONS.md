@@ -851,4 +851,119 @@ distance and speed regardless of whether the bounds are full or half court.
 court type/bounds. The report diagram follows the stored type. A half-court setup can use baseline
 and midcourt points visible from phones placed along the sideline; verify known floor marks with
 a tape measure before treating movement values as accepted measurements.
+## D-033 · 2026-10-19 · The December test rig is its own track (Track R)
 
+**Context.** Suite stage 2 produced a signed spec (`.scratch/pointr-vision/spec.md`) for a December
+test rig: two phones with fusion, a rim sensor, ball and rim detection, shot calls and jersey-number
+identity, to decide hypotheses H1 to H4, H3b, H6 and H7 of `.scratch/pointr-vision/decision-record.md`.
+It touches D-022 (no fusion across cameras), the person-only detector, athlete assignment (phase 11)
+and the recorder (phase 04).
+
+**Decision.** (Owner, 2026-10-19.) Track the rig as its own track, Track R, with its own phase file
+`docs/phases/PHASE_R.md` and its own gate, separate from phases 03 to 09. It is not a scope
+exception. Phases 03 to 09 keep their scope and order. The decisions the rig forces are proposed as
+`docs/adr/0001` to `0006` and are recorded here as D-0NN entries when the owner accepts each.
+
+**Consequences.** `docs/PHASES.md` gets a Track R row and no phase pointer changes. The rig needs
+recording and replay, which are phase 04 deliverables: whether Track R builds them or waits for
+phase 04 is an open owner decision in the phase file. Contracts change first: slice R0 writes the new
+files and fields into `DATA_CONTRACTS.md` and bumps the version before any code reads or writes them.
+## D-034 · 2026-10-19 · Cross-camera fusion is a post-session step (ADR 0001)
+
+**Context.** Spec FR-004 needs one record per player from two phones. D-022 runs one process per
+camera with no fusion across cameras, and the cameras of a group are not aligned (BACKLOG).
+
+**Decision.** (Owner, 2026-10-19.) Fusion is a separate post-session step that reads the per-camera
+session folders of one group and writes its own outputs under the group. It matches by court-plane
+distance and time inside the overlap zone, then by player number and colour, keeps both cameras'
+readings and writes a difference report. The capture and perception processes are unchanged, so
+D-022 still holds on the live path. Fusion results are trusted only after the clock test of D-035.
+Near-live fusion waits until this works; no fusion with a manual merge is the fallback.
+
+**Consequences.** A new contract section for the fusion outputs, and a version bump from 0.10.0,
+defined in DATA_CONTRACTS.md before the code. Gap periods (FR-014) are marked and left out of the H3b
+and H6 scoring. Accuracy evidence is low; H6 is decided in the first two-phone session.
+
+## D-035 · 2026-10-19 · One PC clock domain with measured per-camera latency (ADR 0002)
+
+**Context.** Spec FR-005 needs frames and sensor events on one timeline. Every camera process runs
+on the same PC and Frame.t_recv is perf_counter on that PC; phones give no timestamps.
+
+**Decision.** (Owner, 2026-10-19.) All timing uses the PC perf_counter domain (Windows, Python 3.10
+or later). The sensor stamps events with its own timer and its offset to the PC clock is estimated by
+ping-pong with a minimum-RTT filter and a drift fit, re-estimated every 10 to 30 seconds. Each
+camera's capture-to-arrival latency is measured with the LED test at session start and checked again
+at the end. The run records median, 95th percentile and standard deviation per camera.
+
+**Consequences.** run.json gets a clock block (contract bump). FR-005's drift limit of 1.2 ms per
+minute is replaced by the periodic offset estimate (spec CR-2). If per-frame stream jitter exceeds
+about 10 ms per camera the phone-to-phone limit of 33 ms may fail; the fallbacks are USB capture, no
+fusion, or the custom phone app (phase 13).
+
+## D-036 · 2026-10-19 · Rim sensor link: ESP-NOW with a USB gateway (ADR 0003)
+
+**Context.** Spec FR-009 and FR-015 need make events and outage detection from a rim sensor. The PC's
+distance to the rim is not known yet.
+
+**Decision.** (Owner, 2026-10-19.) The rim ESP32 sends over ESP-NOW to a gateway ESP32 on the PC's
+USB port, with sequence numbers, repeats and an application-level acknowledgement. If the PC stands
+about 5 m or less from the rim, a direct USB serial cable replaces the radio link. Wi-Fi UDP and BLE
+are rejected for v1. The make-detection hardware itself is not decided here.
+
+**Consequences.** A new EventSource Protocol, a new events.csv, outage events and a firmware folder
+(contract and this log first). The distance is still to be given by the owner; ESP-NOW is assumed
+until then. A dry run with rim hits, net sway and hand passes counts false triggers (spec CR-4).
+
+## D-037 · 2026-10-19 · Ball and rim detection: one multi-class detector, rim fixed per session (ADR 0004)
+
+**Context.** Spec FR-008 needs ball and rim boxes. The detector keeps only the COCO person class and
+changing a Protocol needs an entry here (ARCHITECTURE section 4).
+
+**Decision.** (Owner, 2026-10-19.) Fine-tune the existing RF-DETR as one detector for person, ball and
+rim, and store the rim as a median box over the first frames of a session, re-detected periodically with
+a drift flag. ByteTrack stays person-only; ball and rim boxes go to the shot layer. Measure first: ball
+pixel size and a subsample test at 2, 5, 10 and 15 fps before any fine-tuning. A separate temporal ball
+model is the fallback if ball recall is too low.
+
+**Consequences.** A new objects.csv for ball and rim boxes (contract bump). A labelling and
+fine-tuning workflow is approved as a dependency (D-040). Person quality is re-checked after
+fine-tuning. Dataset licences must be read before use.
+
+## D-038 · 2026-10-19 · Shot inference is a separate layer over the logged streams (ADR 0005)
+
+**Context.** Spec FR-010 to FR-012 and FR-013 need attempts, calls and scoring against hand labels,
+at 2 to 15 fps.
+
+**Decision.** (Owner, 2026-10-19.) A separate layer reads the logged streams (person, ball and rim
+boxes, sensor events, timestamps). It runs live by tailing the log and afterwards by replay. A
+post-session full-rate pass on recorded video decides H1. The rules are those of the decision record and
+spec FR-010 and FR-011.
+
+**Consequences.** A new shots.csv (contract bump). Live calls lag the shot by about 1 to 2 seconds and
+are outside the December pass criteria. Recording and replay are needed first (D-040).
+
+## D-039 · 2026-10-19 · Identity layer: number voting, then colour and position gating (ADR 0006)
+
+**Context.** Spec FR-006 and FR-007 need the track ID to follow the jersey number, and NFR-003 needs a
+replaceable method. athlete_id is empty until the assignment phase.
+
+**Decision.** (Owner, 2026-10-19.) An IdentityResolver interface after the tracker returns a player
+number with a confidence. Build number voting over the legible frames of a track first, add team colour
+and position-and-time gating as the target, and keep operator correction at the end of a drill as the
+fallback. The method is chosen by IDENTITY_METHOD. The 80% target of H3 is read per track after voting,
+not per player frame (spec CR-3).
+
+**Consequences.** tracks.csv gains player_number and id_source (contract bump); athlete_id stays empty.
+H3b (8 of 10 returns) is unproven for same-kit players and is met by construction only with the
+fallback.
+
+## D-040 · 2026-10-19 · Track R: recording in R1, spec amendments, new dependencies
+
+**Decision.** (Owner, 2026-10-19.) (1) Recording and replay are built inside Track R as slice R1,
+following the phase 04 contract so they merge into phase 04 later. (2) Spec changes CR-2 (FR-005),
+CR-3 (FR-006) and CR-4 (FR-009) are accepted and the spec is amended in place. (3) These dependencies
+are approved by category: a labelling and fine-tuning workflow (R2), a number-recognition model (R5),
+ESP32 firmware tooling in a firmware folder (R4). Each slice's phase file names the exact packages or
+models before they are installed.
+
+**Consequences.** PHASE_R.md records the decisions. The PC-to-rim distance (D-036) and spec CR-1 stay open.
