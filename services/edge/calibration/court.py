@@ -99,20 +99,13 @@ def court_lines(court: Court) -> list[list[tuple[float, float]]]:
         low = court.width_m / 2 - KEY_WIDTH_M / 2
         high = court.width_m / 2 + KEY_WIDTH_M / 2
         return [
-            [
-                (0.0, 0.0),
-                (court.length_m, 0.0),
-                (court.length_m, court.width_m),
-                (0.0, court.width_m),
-                (0.0, 0.0),
-            ],
+            [(0.0, 0.0), (court.length_m, 0.0), (court.length_m, court.width_m),
+             (0.0, court.width_m), (0.0, 0.0)],
             [(court.length_m, 0.0), (court.length_m, court.width_m)],
             [(0.0, low), (KEY_DEPTH_M, low), (KEY_DEPTH_M, high), (0.0, high)],
             [
-                (
-                    court.length_m + CIRCLE_RADIUS_M * math.cos(i * math.tau / 128),
-                    court.width_m / 2 + CIRCLE_RADIUS_M * math.sin(i * math.tau / 128),
-                )
+                (court.length_m + CIRCLE_RADIUS_M * math.cos(i * math.tau / 128),
+                 court.width_m / 2 + CIRCLE_RADIUS_M * math.sin(i * math.tau / 128))
                 for i in range(32, 97)
             ],
         ]
