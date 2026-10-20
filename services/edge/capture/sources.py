@@ -7,6 +7,7 @@ ended raises SourceEnded instead, so the end of a file is not reported as source
 import os
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import cv2
@@ -192,7 +193,8 @@ class FileSource(_CvSource):
         frame = self._grab()
         if frame is None:  # a file has no transient failures: a failed read is the end
             raise SourceEnded(self.ref)
-        return frame
+        # the container timestamp of the frame just read (OpenCV: 0.0 for the first)
+        return replace(frame, t_video=self._cap.get(cv2.CAP_PROP_POS_MSEC) / 1000)
 
 
 def open_source(ref: str, size: tuple[int, int] | None = None) -> FrameSource:

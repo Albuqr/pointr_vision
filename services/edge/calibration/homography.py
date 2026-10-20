@@ -149,8 +149,8 @@ def check_point_set(points, court_dimensions=None):
             )
     if court_dimensions is not None and tuple(map(float, court_dimensions)) == (14.0, 15.0):
         court_points = np.asarray([point["court_m"] for point in fit], dtype=np.float64)
-        area_fraction = (
-            float(np.ptp(court_points[:, 0]) * np.ptp(court_points[:, 1])) / (14.0 * 15.0)
+        area_fraction = float(np.ptp(court_points[:, 0]) * np.ptp(court_points[:, 1])) / (
+            14.0 * 15.0
         )
         if area_fraction < MIN_HALF_COURT_COVERAGE:
             raise ValueError(
@@ -161,7 +161,11 @@ def check_point_set(points, court_dimensions=None):
 
 
 def fit_calibration(
-    points, max_check_error_m=0.5, save_anyway=False, enforce_limit=True, require_checks=True,
+    points,
+    max_check_error_m=0.5,
+    save_anyway=False,
+    enforce_limit=True,
+    require_checks=True,
     court_dimensions=None,
 ):
     if not isinstance(points, list):

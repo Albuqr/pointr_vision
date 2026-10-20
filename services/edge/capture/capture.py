@@ -27,10 +27,14 @@ class Capture:
         health: SourceHealth,
         on_event: Callable[[HealthEvent], None],
         fail_backoff: float = 0.01,  # pause after a failed read, so a dead device is not spun on
+        on_frame: Callable[[Frame], None] | None = None,
+        lossless: bool = False,
     ):
         self.source = source
         self.health = health
         self.on_event = on_event  # called on the capture thread
+        self.on_frame = on_frame  # every captured frame, before proc_queue; must not block
+        self.lossless = lossless  # a replay waits for the consumer instead of dropping (A3)
         self.fail_backoff = fail_backoff
         self.proc_queue: queue.Queue[Frame] = queue.Queue(maxsize=1)
         # written by the capture thread only; other threads read them for display
@@ -68,6 +72,14 @@ class Capture:
         return not self._thread.is_alive()
 
     def _put(self, frame: Frame) -> None:
+        if self.lossless:
+            while not self._stop.is_set():
+                try:
+                    self.proc_queue.put(frame, timeout=0.1)
+                    return
+                except queue.Full:
+                    continue
+            return
         # single producer: only this thread puts, so after a get the put cannot fail
         try:
             self.proc_queue.put_nowait(frame)
@@ -102,6 +114,8 @@ class Capture:
                 self._times.append(frame.t_recv)
                 span = self._times[-1] - self._times[0]
                 self.fps = (len(self._times) - 1) / span if span > 0 else None
+                if self.on_frame is not None:  # the recorder sees every frame, not only the kept
+                    self.on_frame(frame)
                 self._put(frame)
         except Exception as e:  # any failure ends capture as an event, never silently
             self.error = e

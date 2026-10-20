@@ -34,12 +34,15 @@ from services.edge.capture.health import HealthConfig, HealthMonitor
 from services.edge.capture.sources import (
     DEFAULT_CAPTURE_SIZE,
     CameraSource,
+    FileSource,
     SourceOpenError,
     open_source,
 )
 from services.edge.capture.types import Frame, HealthEvent, utc_now
 from services.edge.perception.detector import DET_SIZE_MULTIPLE
 from services.edge.perception.loop import Processor, delay_stats, rates
+from services.edge.recording.recorder import FileRecorder
+from services.edge.replay.resolve import ReplayError, resolve_replay
 from services.edge.reports.build import format_summary, write_report
 from services.edge.session.types import (
     CAMERA_ID_RE,
@@ -107,7 +110,13 @@ def token(pattern: re.Pattern):
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     d = HealthConfig()
     p = argparse.ArgumentParser(prog="python -m services.edge.main", description=__doc__)
-    p.add_argument("--source", required=True, help="webcam index, stream URL or .mp4/.mov path")
+    p.add_argument("--source", help="webcam index, stream URL or .mp4/.mov path")
+    p.add_argument(
+        "--replay",
+        metavar="TARGET",
+        help="process a recorded video again as a new run, at file speed, every frame: a session "
+        "id or folder (adds a run to it) or an .mp4/.mov file (starts a new session)",
+    )
     p.add_argument("--preview", action="store_true", help="show the preview window")
     p.add_argument("--http-preview", type=int, help="serve annotated loopback preview on this port")
     p.add_argument("--calibration", help="calibration JSON file for metre positions")
@@ -176,6 +185,11 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     p.add_argument("--no-detect", action="store_true", help="capture only, no detection")
     p.add_argument(
+        "--no-record",
+        action="store_true",
+        help="do not keep the raw video; by default video.mp4 is written in the session folder",
+    )
+    p.add_argument(
         "--camera-id",
         type=token(CAMERA_ID_RE),
         help="label of this camera in a multi-camera recording, e.g. cam1 (D-022)",
@@ -197,7 +211,10 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--frozen-secs", type=positive(float), default=d.frozen_secs)
     p.add_argument("--dark-level", type=positive(float), default=d.dark_level)
     p.add_argument("--dark-secs", type=positive(float), default=d.dark_secs)
-    return p.parse_args(argv)
+    args = p.parse_args(argv)
+    if (args.source is None) == (args.replay is None):
+        p.error("give exactly one of --source and --replay")
+    return args
 
 
 def print_event(ev: HealthEvent, t0: float | None) -> None:
@@ -279,16 +296,16 @@ def normalise_device(device: str) -> str:
     return "cuda:0" if device == "cuda" else device
 
 
-def run_meta(args, info, config: HealthConfig, detector, tracker, gpu) -> RunMeta:
+def run_meta(args, info, config: HealthConfig, detector, tracker, gpu, replay=None) -> RunMeta:
     """run.json fields known at start: input, detector, tracker, thresholds, versions."""
     camera = info.kind == "camera"
     return RunMeta(
         run_id=str(uuid.uuid4()),
-        mode="live",
+        mode="replay" if replay else "live",
         input={
             "kind": info.kind,
             "ref": info.ref,
-            "sha256": None,
+            "sha256": replay.sha256 if replay else None,
             "requested_width": args.width if camera else None,
             "requested_height": args.height if camera else None,
         },
@@ -442,11 +459,19 @@ def run(args: argparse.Namespace) -> int:
             events[ev.kind] += 1
             print_event(ev, capture.t0 if capture else None)
 
+    ref = args.replay or args.source
+    replay = None
     try:
-        source = open_source(args.source, (args.width, args.height))
+        if args.replay:
+            replay = resolve_replay(args.replay, args.out)
+            args.link = "file"
+            args.camera_id = args.camera_id or replay.camera_id
+            source = FileSource(replay.video, realtime=False)  # as fast as processing allows
+        else:
+            source = open_source(args.source, (args.width, args.height))
         source.fps_cap = args.fps_cap
-    except SourceOpenError as e:
-        return open_failed(args.source, e)
+    except (SourceOpenError, ReplayError) as e:
+        return open_failed(ref, e)
     conflict = args.link and link_conflict(source.kind, args.link)
     if conflict:  # before the slow model load
         print(f"error: {conflict}", file=sys.stderr)
@@ -471,7 +496,7 @@ def run(args: argparse.Namespace) -> int:
     try:
         info = source.open()
     except (SourceOpenError, cv2.error) as e:
-        return open_failed(args.source, e)
+        return open_failed(ref, e)
 
     info = dataclasses.replace(info, link=args.link)
     calibration = positions = None
@@ -511,39 +536,53 @@ def run(args: argparse.Namespace) -> int:
     stop_early = threading.Event()
     held = hold_ctrl_c(stop_early)
     writer = FileSessionWriter(args.out)
+    record = not args.no_record and replay is None  # a replay already has its video
+    session_replay = replay is not None and replay.session_dir is not None
     try:
         session_id = str(uuid.uuid4())
-        meta = SessionMeta(
-            session_id,
-            device_id(args.out),
-            utc_now(),
-            info,
-            False,
-            args.camera_id,
-            args.group_id,
+        meta = (
             None
-            if calibration is None
-            else {
-                "calibration_id": calibration["calibration_id"],
-                "check_error_m": calibration["errors"]["check_mean_m"],
-                "court": {
-                    "type": calibration["court"].get("type", calibration["court"]["kind"]),
-                    "length_m": calibration["court"]["length_m"],
-                    "width_m": calibration["court"]["width_m"],
+            if session_replay
+            else SessionMeta(
+                session_id,
+                device_id(args.out),
+                utc_now(),
+                info,
+                record,
+                args.camera_id,
+                args.group_id,
+                None
+                if calibration is None
+                else {
+                    "calibration_id": calibration["calibration_id"],
+                    "check_error_m": calibration["errors"]["check_mean_m"],
+                    "court": {
+                        "type": calibration["court"].get("type", calibration["court"]["kind"]),
+                        "length_m": calibration["court"]["length_m"],
+                        "width_m": calibration["court"]["width_m"],
+                    },
                 },
-            },
+            )
         )
-        run = run_meta(args, info, config, detector, tracker, gpu)
+        run = run_meta(args, info, config, detector, tracker, gpu, replay)
         if calibration is not None:
             run = dataclasses.replace(run, calibration=run_calibration(calibration))
         # positions only for a calibrated run: an uncalibrated run keeps the two-argument call
-        writer.start(meta, run, positions) if positions else writer.start(meta, run)
+        if session_replay:
+            writer.start_run(replay.session_dir, run, positions)
+        elif positions:
+            writer.start(meta, run, positions)
+        else:
+            writer.start(meta, run)
     except OSError as e:
         release_ctrl_c(held)
         source.close()
         print(f"error: cannot write session data under {args.out!r}: {e}", file=sys.stderr)
         return EXIT_CAPTURE_ERROR
     print(f"session: {writer.dir}")
+    recorder = FileRecorder() if record else None
+    if recorder:
+        recorder.start(writer.dir / "video.mp4", info)
 
     def rel(t: float | None) -> float | None:
         """time.perf_counter() to s since the run's t0; None before t0 (D-011, D-014)."""
@@ -598,6 +637,7 @@ def run(args: argparse.Namespace) -> int:
             n_dets,
             n_tracks,
             p.dropped_total,
+            recorder.t_video(p.frame.seq) if recorder else p.frame.t_video if replay else None,
         )
         no_positions, first_size_mismatch = (
             frame_size_problem(p) if calibration is not None else (None, False)
@@ -612,7 +652,13 @@ def run(args: argparse.Namespace) -> int:
             raise RuntimeError(f"calibration cannot be used: the first {no_positions}")
 
     monitor = HealthMonitor(config)
-    capture = Capture(source, monitor, log_event)
+    capture = Capture(
+        source,
+        monitor,
+        log_event,
+        on_frame=recorder.write if recorder else None,
+        lossless=replay is not None,
+    )
     processor = Processor(
         capture.proc_queue,
         capture.done,
@@ -717,9 +763,25 @@ def run(args: argparse.Namespace) -> int:
             )
             detail = f"{which} did not stop in time; counts may be short"
             log_event(HealthEvent("error", utc_now(), time.perf_counter(), detail))
+        rec_dropped = None
+        if recorder:  # after capture has stopped: every frame it offered is queued
+            rec = recorder.stop()
+            rec_dropped = rec.frames_dropped
+            if rec.frames_dropped:
+                detail = (
+                    f"{rec.frames_dropped} frame(s) not recorded (recorder queue full or failed)"
+                )
+                log_event(HealthEvent("recorder_backlog", utc_now(), time.perf_counter(), detail))
+            if recorder.error:
+                detail = f"recording stopped: {recorder.error!r}"
+                log_event(HealthEvent("error", utc_now(), time.perf_counter(), detail))
+                session_status = "error"
+            if rec.sha256:
+                writer.set_recording_sha256(rec.sha256)
         counts = RunCounts(
-            capture.captured, processor.processed, capture.dropped, processor.unprocessed
-        )
+            capture.captured, processor.processed, capture.dropped, processor.unprocessed,
+            rec_dropped,
+        )  # fmt: skip
         try:
             writer.close(session_status, counts)
         except Exception as e:  # cannot write at all: say so, keep shutting down

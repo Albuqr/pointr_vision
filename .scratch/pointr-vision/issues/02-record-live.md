@@ -1,5 +1,5 @@
 # 02 Record in the live run (R1)
-Status: todo
+Status: done
 Delivers: RF08 (video), RNF04; Phase 04 A1 end to end; `frames.csv` `t_video` for a live run (contract 0.11.0).
 Blocked by: 01
 

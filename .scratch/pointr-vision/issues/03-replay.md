@@ -1,5 +1,5 @@
 # 03 Replay as a new run (R1)
-Status: todo
+Status: done
 Delivers: RF09 / Phase 04 replay; RNF05 (MP4 and MOV); R1-A1, R1-A2; Phase 04 A3, A4.
 Blocked by: 02
 

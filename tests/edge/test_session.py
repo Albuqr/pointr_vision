@@ -126,7 +126,7 @@ def test_fixture_clip_produces_valid_files(monkeypatch, tmp_path, clips):
     assert run["health"]["dark_secs"] == 1.0
     c = run["counts"]
     assert c["captured"] == 30 == c["processed"] + c["dropped"] + c["unprocessed"]
-    assert c["rec_dropped"] is None
+    assert c["rec_dropped"] == 0 and session["recording"]["enabled"]  # on by default (D-042)
     assert len(frames) == c["processed"] > 0
     seqs = [int(r["seq"]) for r in frames]
     assert seqs == sorted(set(seqs))

@@ -14,6 +14,7 @@ class Frame:
     t_wall: str  # UTC ISO-8601 wall clock at read time
     image: np.ndarray  # BGR, HxWx3
     source_id: str
+    t_video: float | None = None  # s in the video file, from its first frame; files only
 
 
 @dataclass(frozen=True)

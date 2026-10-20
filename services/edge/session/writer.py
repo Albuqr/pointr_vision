@@ -154,6 +154,7 @@ class FileSessionWriter:
         self._last_unprojected_event: float | None = None
         self._positions: PositionMap | None = None
         self.status: str | None = None  # final status written by close()
+        self._replay = False  # a replay adds a run and leaves the rest of session.json alone
         self._t0: float | None = None
         self._final: dict = {}
         self._q: queue.Queue = queue.Queue(maxsize)
@@ -181,8 +182,6 @@ class FileSessionWriter:
             raise ValueError(f"invalid group_id {meta.group_id!r}")
         folder = f"{meta.camera_id}_{meta.session_id}" if meta.camera_id else meta.session_id
         self.dir = self.out_dir / folder
-        self._run_dir = self.dir / "runs" / run.run_id
-        self._run_dir.mkdir(parents=True)
         src = meta.source
         self._session = {
             "contract_version": CONTRACT_VERSION,
@@ -212,10 +211,32 @@ class FileSessionWriter:
             "events": [],
             "calibration": meta.calibration,
         }
+        self._begin_run(run)
+
+    def start_run(
+        self, session_dir: Path | str, run: RunMeta, positions: PositionMap | None = None
+    ) -> None:
+        """A replay: add `run` to the session already in session_dir. Only session.json `runs`
+        changes; the session's status, events and recording stay as the live run left them (D-042),
+        so events of the replay (health, unprojected rows) are not written to session.json."""
+        if (positions is None) != (run.calibration is None):
+            raise ValueError("a calibrated run needs positions, and positions need a calibration")
+        self._positions = positions
+        self.dir = Path(session_dir)
+        self._session = json.loads((self.dir / "session.json").read_text(encoding="utf-8"))
+        self._session["runs"].append(run.run_id)
+        self._replay = True
+        self._begin_run(run)
+
+    def _begin_run(self, run: RunMeta) -> None:
+        """Create the run folder and its files, write session.json and run.json, start the
+        thread. FileExistsError if the run folder exists (A5)."""
+        self._run_dir = self.dir / "runs" / run.run_id
+        self._run_dir.mkdir(parents=True)
         self._run_doc = {
             "contract_version": CONTRACT_VERSION,
             "run_id": run.run_id,
-            "session_id": meta.session_id,
+            "session_id": self._session["session_id"],
             "mode": run.mode,
             "input": {**run.input, "ref": redact(run.input["ref"])},
             "detector": run.detector,
@@ -264,6 +285,13 @@ class FileSessionWriter:
         with self._lock:
             self._final.update(blocks)
 
+    def set_recording_sha256(self, sha256: str) -> None:
+        """The sha256 of video.mp4, known when the recorder has stopped; call before close()."""
+        if self.status is not None:
+            raise RuntimeError("set_recording_sha256 after close()")
+        with self._lock:
+            self._session["recording"]["sha256"] = sha256
+
     def frame(self, rec: FrameRecord) -> None:
         self._put(("frame", rec))
 
@@ -290,16 +318,18 @@ class FileSessionWriter:
                 self.done.wait(0.1)
             except KeyboardInterrupt:  # a second Ctrl+C must not cut the final write short
                 pass
-        if self.error is None and not self._running() and self._session["ended_at"]:
-            self.status = self._session["status"]
+        if (
+            self.error is None
+            and not self._running()
+            and (self._replay or self._session["ended_at"])
+        ):
+            self.status = status if self._replay else self._session["status"]
             return
         # ponytail: the fallback writes JSON only; a writer stuck past join_timeout may still
         # rewrite session.json later with its own status.
         why = repr(self.error) if self.error else f"did not finish in {self.join_timeout} s"
         detail = f"session writer: {why}; {self.lost + self._q.qsize()} items not written"
-        self._session["events"].append(
-            asdict(SessionEvent(utc_now(), self._rel(), "error", detail))
-        )
+        self._add_event(SessionEvent(utc_now(), self._rel(), "error", detail))
         self._finish_json("error", counts, ended_at)
         self.status = "error"
 
@@ -423,8 +453,7 @@ class FileSessionWriter:
                 self._tracks.writerow(row)
             return changed
         elif kind == "event":
-            self._session["events"].append(asdict(item[1]))
-            return True
+            return self._add_event(item[1])
         elif kind == "t0":
             self._run_doc["t0_wall"] = item[1]
             self._run_doc["t0_mono"] = item[2]
@@ -473,9 +502,14 @@ class FileSessionWriter:
             f"{self.unprojected} track row(s) so far have no metre position ({why}); "
             "x_m, y_m and in_court are left empty"
         )
-        self._session["events"].append(
-            asdict(SessionEvent(utc_now(), self._rel(), "error", detail))
-        )
+        self._add_event(SessionEvent(utc_now(), self._rel(), "error", detail))
+
+    def _add_event(self, ev: SessionEvent) -> bool:
+        """Append to session.json events; True when session.json changed (never in a replay)."""
+        if self._replay:
+            return False
+        self._session["events"].append(asdict(ev))
+        return True
 
     def _snapshot(self, path: Path, doc: dict) -> bool:
         """A mid-run JSON write. A failure (file held by OneDrive or an editor) is printed and
@@ -506,6 +540,7 @@ class FileSessionWriter:
             self._run_doc["ended_at"] = ended_at
             self._run_doc["counts"] = asdict(counts)
             write_json(self._run_dir / "run.json", self._run_doc)
-            self._session["ended_at"] = ended_at
-            self._session["status"] = status
+            if not self._replay:
+                self._session["ended_at"] = ended_at
+                self._session["status"] = status
             write_json(self.dir / "session.json", self._session)

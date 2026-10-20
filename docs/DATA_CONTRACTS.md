@@ -96,8 +96,13 @@ the user with `--link` (the notebook cannot detect it, D-010); `null` when not g
 `link` and `kind` must agree: `link` is `file` exactly when `kind` is `file` (or `link` is
 `null`); the CLI rejects a contradiction and the schema enforces it (D-020).
 `source.ref` and `run.json` `input.ref` never hold credentials: `user:password@` is removed
-from stream URLs before writing (D-020). `recording` is `{"enabled": false, "path": null,
-"sha256": null, "locked": false}` until phase 4.
+from stream URLs before writing (D-020). `recording` is `{"enabled": true, "path":
+"video.mp4", "sha256": null, "locked": false}` while a live run records (the default; `--no-record`
+gives `{"enabled": false, "path": null, "sha256": null, "locked": false}`). `sha256` is set when the
+recorder stops, and stays `null` if no frame was recorded. The video is raw (no annotations) at a
+constant frame rate, the source's reported fps or 30; frame k is at k / fps, which is `frames.csv`
+`t_video`. A replay run (`mode: replay`) adds a run to the session and leaves `recording` alone
+(D-042).
 Event `t_mono` is `null` for events that precede the run's `t0`, such as
 `source_open_failed` (D-014).
 Event kinds: `source_open_failed`, `source_lost`, `source_recovered`,

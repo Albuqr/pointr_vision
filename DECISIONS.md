@@ -982,3 +982,21 @@ run end. The log takes up to two sensors, one per rim (owner, 2026-10-19): `even
 
 **Consequences.** DATA_CONTRACTS.md sections 3, 4, 11 to 15 define each field. The owner is asked to confirm the per-group
 sensor file and the `gaps`/`outages` fields (a small addition to spec FR-014/FR-015, which already say run.json holds the outage).
+
+## D-042 · 2026-10-20 · R1: recording is on by default; t_video from the recorder (Phase 04 contract)
+
+**Context.** Slice R1 builds Phase 04's recording and replay inside Track R (D-040). `frames.csv` `t_video` (D-041)
+needs a defined source for a live run, and `session.json` `recording.sha256` needs a writer.
+
+**Decision.** (Agent, slice R1; the owner confirms at the R1 gate.) A live run records `video.mp4` unless
+`--no-record` is given (REQUIREMENTS C-02). The recorder is fed from the capture thread, never blocks, drops and
+counts when its queue is full (`counts.rec_dropped`, event `recorder_backlog`), and writes raw frames at a constant
+rate, the source's reported fps or 30. `t_video` of a frame is its position in the video divided by that rate. Two
+Protocol additions (ARCHITECTURE.md section 4): `Recorder.t_video(seq)` and `SessionWriter.set_recording_sha256`.
+No new contract field and no version bump: `recording.sha256` and `t_video` already exist in 0.11.0.
+
+**Replay.** `--replay <session id | session folder | .mp4/.mov file>`. A session adds a run (`mode: replay`, `input.sha256` of the video) and leaves the original run untouched; only `runs` changes in `session.json`, so events of the replay (health, unprojected rows) are printed, not written there. A bare file starts a new session. A replay reads at file speed and waits for processing instead of dropping frames, so every frame is processed. `t_video` is the container timestamp. A session video whose sha256 differs from `session.json` is refused, because labels and runs refer to its frames.
+
+**Consequences.** The Studio now keeps video by default: disk use is the video bitrate times the duration, to be
+measured on the real setup (Phase 04 A6). A phone that reports a wrong fps gives a wrong `t_video` scale; the
+recorded video then plays at the wrong speed too, so labels made on it still join through `t_video`.
