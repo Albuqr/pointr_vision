@@ -18,9 +18,9 @@ idea: <one line>
 Status values: todo · doing · blocked · done · n/a (stage 0 is n/a for a new product)
 
 ## Last session
-date: 2026-10-19 · agent: claude · what was done: stage 3 Dev model → done
+date: 2026-10-20 · agent: claude · what was done: synced this board and docs/phases/PHASE_R_REPORT.md with origin/main (R0 merged via PR #1; 725 tests pass locally)
 
 ## Next action
-Stage 4, Track R slice R0 built on branch track-r-r0-contracts; review fixes are uncommitted in the working tree. Next: owner reads docs/phases/PHASE_R_REPORT.md, decides whether to commit, then tags track-r-R0; then R1 (recording and replay). Open: confirm the per-group sensor file and run.json gaps/outages (D-041), PC-to-rim distance (ESP-NOW assumed), spec CR-1.
+Stage 4, Track R slice R0 is merged to main (PR #1, 5b309b3) with its review fixes; the track-r-R0 tag is not created yet. Next: owner reads docs/phases/PHASE_R_REPORT.md and tags track-r-R0; then R1 (recording and replay, hand-label file, scoring tool). Open: confirm the per-group sensor file and run.json gaps/outages (D-041), PC-to-rim distance (ESP-NOW assumed), spec CR-1.
 
 ## Open questions for the human
