@@ -1,0 +1,64 @@
+# Trigger an agent run from the GitHub mobile app: Actions -> "Agent run" -> Run workflow.
+# The agent works on a branch and opens a PR; it never pushes to main.
+# Setup: repository variable SUITE_REPO (owner/name of your ai-production-suite fork),
+# secrets for the providers you use, and optionally NTFY_TOPIC (treat it as a secret).
+name: Agent run
+on:
+  workflow_dispatch:
+    inputs:
+      skill:
+        description: Skill (ideation, requirements, dev-model, build, e2e-ux, review, docs, media-kit)
+        required: true
+      provider:
+        description: Provider (claude, codex, gemini, kimi) — empty = routing table
+        required: false
+      task:
+        description: Task for the agent
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.SUITE_REPO }}
+          path: .suite-kit
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Install only the CLI you route to; adjust package names to the vendors' current docs.
+      - run: npm i -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli
+      # Inputs reach the shell only through env vars, never interpolated into the script.
+      - name: Run agent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SKILL: ${{ inputs.skill }}
+          PROVIDER: ${{ inputs.provider }}
+          TASK: ${{ inputs.task }}
+        run: |
+          rm -rf .suite-kit/.git
+          node .suite-kit/scripts/suite.mjs run "$SKILL" ${PROVIDER:+--provider "$PROVIDER"} --cwd . "$TASK" | tee "$RUNNER_TEMP/run.log"
+          rm -rf .suite-kit
+      - name: Notify when the agent waits for a human
+        if: always()
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          SKILL: ${{ inputs.skill }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -n "$NTFY_TOPIC" ] && grep -q "^status: needs-human" "$RUNNER_TEMP/run.log" 2>/dev/null; then
+            curl -s -H "Title: Agent waiting for human" -d "$SKILL: $RUN_URL" "https://ntfy.sh/$NTFY_TOPIC"
+          fi
+      - uses: peter-evans/create-pull-request@v6
+        with:
+          branch: agent/${{ github.run_id }}
+          title: "agent run ${{ github.run_id }}"
+          body: Automated run via the Agent run workflow. Review the diff before merging.

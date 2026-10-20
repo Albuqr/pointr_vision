@@ -69,3 +69,5 @@ synced to a server when one is reachable. Basketball first. This is a TCC projec
 See `docs/GATES.md`. Code that runs is not done. Done means tests green, subagent reviews
 passed, manual acceptance recorded in `docs/phases/PHASE_XX_REPORT.md`, `DECISIONS.md`
 updated, tag created.
+
+@AGENTS.md

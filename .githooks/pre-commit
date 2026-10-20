@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Provider-agnostic gate: runs for every commit, whichever agent (or human) made it.
+set -euo pipefail
+
+# 1. Never commit secrets files.
+if git diff --cached --name-only | grep -E '(^|/)\.env(\.testkit)?$' >/dev/null; then
+  echo "pre-commit: refusing to commit .env / .env.testkit" >&2
+  exit 1
+fi
+
+# 2. Fast testkit checks once the project has configured testkit.
+if [[ -f testkit.config.json ]]; then
+  checks=$(bash testkit/bin/run-all.sh --detect | tr -d '[]",' )
+  fast=()
+  for c in $checks; do [[ $c == node || $c == python ]] && fast+=("$c"); done
+  if [[ ${#fast[@]} -gt 0 ]]; then
+    bash testkit/bin/run-all.sh "${fast[@]}"
+  fi
+fi
+
+# 3. In the suite's own repo: its unit tests (node:test, zero deps, < 2 s).
+if [[ -f scripts/suite.mjs && -d tests ]]; then
+  node --test "tests/*.test.mjs" > /tmp/suite-tests.log 2>&1 || { cat /tmp/suite-tests.log >&2; echo "pre-commit: suite tests failed" >&2; exit 1; }
+fi

@@ -25,3 +25,9 @@ tests/fixtures/downloads/
 
 # Local copy of the docs bundle
 pointr-docs.zip
+.env
+.env.testkit
+testkit-reports/
+.claude/skills/
+.suite/media/auth/
+.suite/media/recordings/

@@ -1,0 +1,15 @@
+{
+  "$comment": "Single source of MCP servers. `suite sync` writes .mcp.json (Claude), .gemini/settings.json (Gemini), .codex/config.toml (Codex) and .suite/mcp.kimi.json (Kimi: kimi --mcp-config-file). Pin versions you have tested.",
+  "servers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"],
+      "why": "e2e-ux exploratory testing: drive a real browser, snapshots, screenshots"
+    },
+    "chrome-devtools": {
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest"],
+      "why": "performance traces, console and network inspection during e2e-ux and diagnosing-bugs"
+    }
+  }
+}
