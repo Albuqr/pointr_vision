@@ -1000,3 +1000,24 @@ No new contract field and no version bump: `recording.sha256` and `t_video` alre
 **Consequences.** The Studio now keeps video by default: disk use is the video bitrate times the duration, to be
 measured on the real setup (Phase 04 A6). A phone that reports a wrong fps gives a wrong `t_video` scale; the
 recorded video then plays at the wrong speed too, so labels made on it still join through `t_video`.
+
+## D-043 · 2026-10-20 · R1: how the scoring tool reads labels.csv (FR-013)
+
+**Context.** FR-013 says a detected event matches a label "inside the tolerance from the research note", but that
+note gives no matching tolerance. `labels.csv` (section 14) has only `time_s`, `event`, `player_number`, `note`, which
+cannot carry what H3 (a jersey number per labelled frame) and H4 (the taped mark's court position) need.
+
+**Decision.** (Agent, slice R1; the owner confirms at the R1 gate.) `python -m services.edge.score <session>` scores H1
+and H3b and prints H3 and H4 as "not scorable" beside their thresholds, instead of changing the contract. Chosen, not
+measured: a shot matches an attempt label within 1.0 s (`--tolerance`, one-to-one, nearest first); the make or miss label
+of an attempt is the first one within 6 s after it and before the next attempt; the ID of a returning player is read in
+the 5 s before the leave and the 5 s after the return, and is kept when the same track carries the number in both.
+An uncertain call counts as wrong for "called right". The verdict follows the decision record: both thresholds met
+means continue; the worse of the two rates in 70 to 85% means add the rim sensor; under 70% means stop vision-only. Fewer
+than 30 attempts (10 returns for H3b) is printed as not decisive. H1 on video alone decides; a run whose shots carry a
+sensor call is labelled "video + sensor, reported only".
+
+**Consequences.** H3 and H4 stay unscored until the owner adds label fields (for example optional `x_m` and `y_m` on
+attempt rows for H4, and per-frame `number` rows for H3): that is a contract bump and the owner's call. H1 and H3b show
+"not scorable" until slice R3 writes `shots.csv` and slice R5 puts numbers in `tracks.csv`. `shots.csv` holds only the
+final call, so video-alone and video-plus-sensor scores need two runs, one without the sensor.

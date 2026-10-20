@@ -17,3 +17,21 @@
 - PC-to-rim distance (ESP-NOW assumed) and spec CR-1 are still open.
 - Tag `track-r-R0` after reading this report.
 - R0-A2: the "entry written before the code" half stays a review item.
+
+## R1 Recording, replay and scoring (branch track-r-r1)
+
+**Status:** built and tested on the branch; not merged, not reviewed, not tagged. Slice gate steps 3 and 4 are open (below).
+
+**What R1 delivers.** (1) `FileRecorder`: raw frames to `video.mp4` on its own thread, a bounded queue that drops and counts, sha256 on stop; on by default, `--no-record` to skip (tickets 01, 02). (2) `frames.csv` `t_video` for live runs. (3) `--replay <session id | folder | .mp4/.mov>`: a new run in the session (original run untouched) or a new session from a video file; every frame processed; a changed video is refused (ticket 03). (4) `python -m services.edge.score <session>`: reads `labels.csv`, prints H1 and H3b beside their thresholds, and H3 and H4 as not scorable (ticket 04). Decisions: D-042, D-043.
+
+**Automated.** On the branch, project `.venv` (Python 3.11.9, torch 2.14.1 CPU), `pytest -q`: 769 passed, 3 deselected, none failed. New tests: `test_recorder.py` (Phase 04 A1, A2, A5), `test_record_live.py`, `test_replay.py` (A3, A4, R1-A1, R1-A2) and `test_score.py` (R1-A3, results worked out by hand in the test). `ruff check` is clean for `services` and `tests`; `ruff check .` reports 5 E501 in `testkit/` (the suite's scaffolding, not R1).
+
+**One real run (2026-10-20, CPU, RF-DETR Nano, the synthetic 30-frame clip).** Live: captured 30, processed 5, dropped 25, `rec_dropped` 0, video has all 30 frames. Replay of that session: captured 30, processed 30, dropped 0; `input.sha256` equals the session's `recording.sha256`. This is a synthetic clip with no people, so it shows the plumbing, not detection quality.
+
+**Open for the developer.**
+- Phase 04 A6 and R1-A4 are manual and not done: a live 5-minute session with recording (playable video, size per minute recorded), and the scoring tool against a hand calculation on one real session.
+- D-043: the matching tolerance (1.0 s) and the window rules are chosen, not measured. H3 and H4 cannot be scored with the current `labels.csv`; extending it is a contract bump and your call.
+- H1 is "not scorable" until slice R3 writes `shots.csv`; H3b until R5 puts numbers in `tracks.csv`. The scorer was tested on built fixtures, not on a real shot layer.
+- Gate step 3 not run: `code-reviewer`, `test-auditor`, `reliability-reviewer` (and `contract-guardian`, since `recording.sha256` and `t_video` are now written) in fresh contexts.
+- Recording is now on by default in Studio too: measure disk use per minute on the real setup.
+- A phone that reports a wrong fps gives a wrong `t_video` scale (D-042).

@@ -1,5 +1,5 @@
 # 04 Hand labels and the scoring tool (R1)
-Status: todo
+Status: done
 Delivers: FR-013, AC-013.1; R1-A3 (fixture), R1-A4 (manual).
 Blocked by: none (reads files; uses t_video from 02/03 when present)
 

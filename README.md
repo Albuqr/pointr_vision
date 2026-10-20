@@ -108,6 +108,27 @@ python -m services.edge.main --help
 `--source` is a webcam index, a stream URL or an `.mp4`/`.mov` file. Press `q` in the preview
 window or Ctrl+C to stop.
 
+## Recording, replay and scoring
+
+A live run keeps the raw video as `video.mp4` in its session folder (`--no-record` to skip it);
+`frames.csv` `t_video` is each frame's time in that video. Process a recorded video again, as a
+new run that leaves the original untouched, with a session id, a session folder or a `.mp4`/`.mov`
+file (every frame is processed, at file speed):
+
+```bash
+python -m services.edge.main --replay <session id | session folder | video file> --out C:/pointr_sessions
+```
+
+To score a session, write `labels.csv` in its folder (columns `time_s,event,player_number,note`;
+`time_s` is the time in `video.mp4`; events `attempt`, `make`, `miss`, `leave`, `return`), then:
+
+```bash
+python -m services.edge.score C:/pointr_sessions/<session folder>
+```
+
+It prints H1 and H3b next to their thresholds; H3 and H4 are "not scorable" with this label
+format (DECISIONS D-043), and H1 needs the shot layer (slice R3).
+
 ## DroidCam setup
 
 The phone runs the DroidCam app; the notebook runs the DroidCam Client, which exposes the
