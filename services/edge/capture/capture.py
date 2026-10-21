@@ -79,6 +79,7 @@ class Capture:
                     return
                 except queue.Full:
                     continue
+            self.dropped += 1  # stopped while waiting: this frame was captured and never processed
             return
         # single producer: only this thread puts, so after a get the put cannot fail
         try:

@@ -5,6 +5,11 @@ tests/test_contracts.py compares them. Change it here and nowhere else."""
 
 CONTRACT_VERSION = "0.11.0"
 
+# The raw recording of a live session (D-042). MKV, not MP4: an MP4 written by
+# OpenCV has no index until it is closed, so a killed session leaves an unreadable file (measured
+# 2026-10-20); an MKV stays readable up to the last few seconds.
+VIDEO_FILE = "video.mkv"
+
 # CSV column names of the Track R formats (DATA_CONTRACTS.md sections 11 to 15, D-034 to D-039).
 # tests/test_contracts_track_r.py compares each tuple with its table in the doc. The code that
 # writes these files arrives in the slice named next to each one (docs/phases/PHASE_R.md).

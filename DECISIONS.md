@@ -983,23 +983,39 @@ run end. The log takes up to two sensors, one per rim (owner, 2026-10-19): `even
 **Consequences.** DATA_CONTRACTS.md sections 3, 4, 11 to 15 define each field. The owner is asked to confirm the per-group
 sensor file and the `gaps`/`outages` fields (a small addition to spec FR-014/FR-015, which already say run.json holds the outage).
 
-## D-042 · 2026-10-20 · R1: recording is on by default; t_video from the recorder (Phase 04 contract)
+## D-042 · 2026-10-20 · R1: recording is on by default, as an MKV; t_video from the recorder (Phase 04 contract)
 
-**Context.** Slice R1 builds Phase 04's recording and replay inside Track R (D-040). `frames.csv` `t_video` (D-041)
-needs a defined source for a live run, and `session.json` `recording.sha256` needs a writer.
+**Context.** Slice R1 builds Phase 04's recording and replay inside Track R (D-040). `frames.csv` `t_video`
+(D-041) needs a defined source for a live run, and `session.json` `recording.sha256` needs a writer. The R1 gate
+review (reliability-reviewer) showed that an MP4 written by OpenCV has no index until it is closed: a session killed
+mid-recording left a 82 MB `video.mp4` that no player or OpenCV could open (NFR-004, R-A1).
 
-**Decision.** (Agent, slice R1; the owner confirms at the R1 gate.) A live run records `video.mp4` unless
-`--no-record` is given (REQUIREMENTS C-02). The recorder is fed from the capture thread, never blocks, drops and
-counts when its queue is full (`counts.rec_dropped`, event `recorder_backlog`), and writes raw frames at a constant
-rate, the source's reported fps or 30. `t_video` of a frame is its position in the video divided by that rate. Two
-Protocol additions (ARCHITECTURE.md section 4): `Recorder.t_video(seq)` and `SessionWriter.set_recording_sha256`.
-No new contract field and no version bump: `recording.sha256` and `t_video` already exist in 0.11.0.
+**Decision.** (Agent, slice R1; the owner confirms at the R1 gate.) A live run records unless `--no-record` is given
+(REQUIREMENTS C-02), **as `video.mkv`, not `video.mp4`**. Measured on this build (opencv 5.0, mp4v, 30 fps, killed
+after 6 s): MKV and AVI stay readable (about 480 of 570 written frames; the last seconds are lost), MP4 and MOV do not
+open at all, and the fragmented-MP4 option of FFmpeg has no effect through OpenCV. `VIDEO_FILE` in
+`services/edge/contract.py` is the one place the name lives. Replay still accepts `.mp4` and `.mov` files (RNF05). The
+recorder is fed from the capture thread, never blocks, and drops and counts when its queue is full
+(`counts.rec_dropped`, event `recorder_backlog`). It writes raw frames at a constant rate, the source's reported fps or
+30; `t_video` of a frame is its position in the video divided by that rate, and only a frame that is really in the file
+has one (a frame of another size, which OpenCV skips silently, or one a failed writer never wrote, is counted as
+dropped). `stop()` waits at most 10 s and never prevents the final `session.json` write. Three interface additions
+(ARCHITECTURE.md section 4): `Recorder.t_video`, `SessionWriter.set_recording_sha256` and `SessionWriter.start_run`.
+No new contract field and no version bump: `recording.sha256`, `recording.path` and `t_video` exist in 0.11.0.
 
-**Replay.** `--replay <session id | session folder | .mp4/.mov file>`. A session adds a run (`mode: replay`, `input.sha256` of the video) and leaves the original run untouched; only `runs` changes in `session.json`, so events of the replay (health, unprojected rows) are printed, not written there. A bare file starts a new session. A replay reads at file speed and waits for processing instead of dropping frames, so every frame is processed. `t_video` is the container timestamp. A session video whose sha256 differs from `session.json` is refused, because labels and runs refer to its frames.
+**Replay.** `--replay <session id | session folder | .mp4/.mov file>`. A session adds a run (`mode: replay`,
+`input.sha256` of the video) and leaves the original run untouched; in `session.json` only `runs` grows, plus an
+`interrupted` or `error` event tagged `replay <run_id>:` when the replay does not end cleanly, because `run.json` has no
+status of its own. A bare file starts a new session. A replay reads at file speed and waits for processing instead of
+dropping frames. `t_video` is the container timestamp. A session video whose sha256 differs from `session.json` is
+refused; a session with no hash (a killed one) is replayed with a warning. Two replays of one session merge their run ids
+(a read-merge-write, not a lock).
 
 **Consequences.** The Studio now keeps video by default: disk use is the video bitrate times the duration, to be
-measured on the real setup (Phase 04 A6). A phone that reports a wrong fps gives a wrong `t_video` scale; the
-recorded video then plays at the wrong speed too, so labels made on it still join through `t_video`.
+measured on the real setup (Phase 04 A6). The MKV plays in VLC; the Windows default player may need a codec: if the owner
+prefers `video.mp4` and accepts losing a killed session's video, change `VIDEO_FILE`. A phone that reports a wrong fps
+gives a wrong `t_video` scale; the video then plays at the wrong speed too, so labels made on it still join through
+`t_video`. A truncated video file is read as a normal end: the scorer warns when the labels run past the run's frames.
 
 ## D-043 · 2026-10-20 · R1: how the scoring tool reads labels.csv (FR-013)
 
@@ -1011,7 +1027,9 @@ cannot carry what H3 (a jersey number per labelled frame) and H4 (the taped mark
 and H3b and prints H3 and H4 as "not scorable" beside their thresholds, instead of changing the contract. Chosen, not
 measured: a shot matches an attempt label within 1.0 s (`--tolerance`, one-to-one, nearest first); the make or miss label
 of an attempt is the first one within 6 s after it and before the next attempt; the ID of a returning player is read in
-the 5 s before the leave and the 5 s after the return, and is kept when the same track carries the number in both.
+the 5 s before the leave and the 5 s after the return, and is kept when the number is on some track in the 5 s after
+(the ID of a player is their number, FR-006; the tracker's own id is temporary and changes after a long absence, so
+the same track id would score a correct identity layer as a failure).
 An uncertain call counts as wrong for "called right". The verdict follows the decision record: both thresholds met
 means continue; the worse of the two rates in 70 to 85% means add the rim sensor; under 70% means stop vision-only. Fewer
 than 30 attempts (10 returns for H3b) is printed as not decisive. H1 on video alone decides; a run whose shots carry a

@@ -33,6 +33,7 @@ EXPECTED = {
     Tracker: {"update": ["dets", "frame"]},
     SessionWriter: {
         "start": ["meta", "run", "positions"],
+        "start_run": ["session_dir", "run", "positions"],
         "set_t0": ["t0", "t0_wall"],
         "set_final": ["blocks"],
         "set_recording_sha256": ["sha256"],
@@ -55,6 +56,7 @@ RETURNS = {
     (Detector, "detect"): Detections,
     (Tracker, "update"): list[TrackObs],
     (SessionWriter, "start"): NONE,
+    (SessionWriter, "start_run"): NONE,
     (SessionWriter, "set_t0"): NONE,
     (SessionWriter, "set_final"): NONE,
     (SessionWriter, "set_recording_sha256"): NONE,

@@ -6,6 +6,7 @@ needs (D-008, completed by D-020).
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from services.edge.capture.types import SourceInfo
@@ -101,6 +102,12 @@ class PositionMap(Protocol):
 class SessionWriter(Protocol):
     def start(self, meta: SessionMeta, run: RunMeta, positions: PositionMap | None = None) -> None:
         """positions is required exactly when run.calibration is set."""
+        ...
+
+    def start_run(
+        self, session_dir: Path | str, run: RunMeta, positions: PositionMap | None = None
+    ) -> None:
+        """A replay: add `run` to the session in session_dir instead of starting a session."""
         ...
 
     def set_t0(self, t0: float, t0_wall: str) -> None:

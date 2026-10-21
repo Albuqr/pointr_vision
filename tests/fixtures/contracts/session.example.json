@@ -10,7 +10,7 @@
   "source": {"kind": "camera", "ref": "1", "width": 1280, "height": 720, "reported_fps": 30.0,
              "link": "usb"},
   "registration": {"date": "2026-10-07", "team_ids": ["5e8a1b2c-3d4f-4a5b-9c6d-7e8f9a0b1c2d"]},
-  "recording": {"enabled": true, "path": "video.mp4", "sha256": null, "locked": true},
+  "recording": {"enabled": true, "path": "video.mkv", "sha256": null, "locked": false},
   "runs": ["c2b9e6f4-1d3a-4c8e-9f7b-5a0d2e4c6b81"],
   "calibration": null,
   "events": [

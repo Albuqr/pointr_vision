@@ -9,7 +9,8 @@ RF08 (video), RF09, RNF04, RNF05.
 
 ## Scope
 - Recorder fed from the capture thread through `rec_queue`. Raw frames only, no annotations.
-  Counts `rec_frames_dropped`. Writes `video.mp4` in the session folder; sha256 computed on
+  Counts `rec_frames_dropped`. Writes `video.mkv` in the session folder (the first plan said
+  `video.mp4`; an MP4 killed mid-recording does not open, D-042); sha256 computed on
   stop and written to `session.json`.
 - Recording on by default, `--no-record` to disable (see conflict C-02 in REQUIREMENTS.md).
 - Frame-to-time mapping recorded so a video frame can be matched to `frames.csv` seq.

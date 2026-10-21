@@ -39,6 +39,7 @@ from services.edge.capture.sources import (
     open_source,
 )
 from services.edge.capture.types import Frame, HealthEvent, utc_now
+from services.edge.contract import VIDEO_FILE
 from services.edge.perception.detector import DET_SIZE_MULTIPLE
 from services.edge.perception.loop import Processor, delay_stats, rates
 from services.edge.recording.recorder import FileRecorder
@@ -187,7 +188,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument(
         "--no-record",
         action="store_true",
-        help="do not keep the raw video; by default video.mp4 is written in the session folder",
+        help=f"do not keep the raw video; by default {VIDEO_FILE} is written in the session folder",
     )
     p.add_argument(
         "--camera-id",
@@ -464,6 +465,12 @@ def run(args: argparse.Namespace) -> int:
     try:
         if args.replay:
             replay = resolve_replay(args.replay, args.out)
+            if not replay.verified:
+                print(
+                    "warning: the session has no video hash (its recording did not finish), so "
+                    "the video cannot be checked against it",
+                    file=sys.stderr,
+                )
             args.link = "file"
             args.camera_id = args.camera_id or replay.camera_id
             source = FileSource(replay.video, realtime=False)  # as fast as processing allows
@@ -582,7 +589,7 @@ def run(args: argparse.Namespace) -> int:
     print(f"session: {writer.dir}")
     recorder = FileRecorder() if record else None
     if recorder:
-        recorder.start(writer.dir / "video.mp4", info)
+        recorder.start(writer.dir / VIDEO_FILE, info)
 
     def rel(t: float | None) -> float | None:
         """time.perf_counter() to s since the run's t0; None before t0 (D-011, D-014)."""
@@ -765,19 +772,22 @@ def run(args: argparse.Namespace) -> int:
             log_event(HealthEvent("error", utc_now(), time.perf_counter(), detail))
         rec_dropped = None
         if recorder:  # after capture has stopped: every frame it offered is queued
-            rec = recorder.stop()
-            rec_dropped = rec.frames_dropped
-            if rec.frames_dropped:
-                detail = (
-                    f"{rec.frames_dropped} frame(s) not recorded (recorder queue full or failed)"
-                )
-                log_event(HealthEvent("recorder_backlog", utc_now(), time.perf_counter(), detail))
+            try:  # bounded, and never in the way of the final write below
+                rec = recorder.stop()
+                rec_dropped = rec.frames_dropped
+                if rec.frames_dropped:
+                    detail = f"{rec.frames_dropped} frame(s) not recorded (queue full or failed)"
+                    log_event(
+                        HealthEvent("recorder_backlog", utc_now(), time.perf_counter(), detail)
+                    )
+                if rec.sha256:
+                    writer.set_recording_sha256(rec.sha256)
+            except Exception as e:
+                recorder.error = recorder.error or e
             if recorder.error:
                 detail = f"recording stopped: {recorder.error!r}"
                 log_event(HealthEvent("error", utc_now(), time.perf_counter(), detail))
                 session_status = "error"
-            if rec.sha256:
-                writer.set_recording_sha256(rec.sha256)
         counts = RunCounts(
             capture.captured, processor.processed, capture.dropped, processor.unprocessed,
             rec_dropped,

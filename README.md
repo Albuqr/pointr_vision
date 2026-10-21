@@ -110,7 +110,7 @@ window or Ctrl+C to stop.
 
 ## Recording, replay and scoring
 
-A live run keeps the raw video as `video.mp4` in its session folder (`--no-record` to skip it);
+A live run keeps the raw video as `video.mkv` in its session folder (`--no-record` to skip it);
 `frames.csv` `t_video` is each frame's time in that video. Process a recorded video again, as a
 new run that leaves the original untouched, with a session id, a session folder or a `.mp4`/`.mov`
 file (every frame is processed, at file speed):
@@ -120,7 +120,7 @@ python -m services.edge.main --replay <session id | session folder | video file>
 ```
 
 To score a session, write `labels.csv` in its folder (columns `time_s,event,player_number,note`;
-`time_s` is the time in `video.mp4`; events `attempt`, `make`, `miss`, `leave`, `return`), then:
+`time_s` is the time in `video.mkv`; events `attempt`, `make`, `miss`, `leave`, `return`), then:
 
 ```bash
 python -m services.edge.score C:/pointr_sessions/<session folder>

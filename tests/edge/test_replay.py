@@ -67,7 +67,7 @@ def test_A3_replay_adds_a_run_and_leaves_the_original_untouched(clips, tmp_path)
     run_dir = new_run(folder, {original.name})
     run = json.loads((run_dir / "run.json").read_text())
     assert run["mode"] == "replay"
-    assert run["input"]["sha256"] == hashlib.sha256((folder / "video.mp4").read_bytes()).hexdigest()
+    assert run["input"]["sha256"] == hashlib.sha256((folder / "video.mkv").read_bytes()).hexdigest()
     session = json.loads((folder / "session.json").read_text())
     assert session["runs"] == [*session_before["runs"], run["run_id"]]
     session_before["runs"] = session["runs"]
@@ -89,7 +89,7 @@ def test_replay_processes_every_frame_with_container_times(clips, tmp_path):
     run_dir = new_run(folder, {original.name})
     counts = json.loads((run_dir / "run.json").read_text())["counts"]
     assert counts["dropped"] == 0 and counts["processed"] == counts["captured"] == 30
-    fps = cv2.VideoCapture(str(folder / "video.mp4")).get(cv2.CAP_PROP_FPS)
+    fps = cv2.VideoCapture(str(folder / "video.mkv")).get(cv2.CAP_PROP_FPS)
     rows = frames(run_dir)
     assert [float(r["t_video"]) for r in rows] == pytest.approx(
         [i / fps for i in range(30)], abs=1e-3
@@ -111,7 +111,7 @@ def test_A4_mp4_and_mov_replay(clips, tmp_path, clip):
 
 def test_changed_video_is_refused(clips, tmp_path):
     folder = record(clips, tmp_path)
-    video = folder / "video.mp4"
+    video = folder / "video.mkv"
     video.write_bytes(video.read_bytes() + b"x")
     result = run_cli(tmp_path, "--replay", str(folder))
     assert result.returncode == EXIT_OPEN_FAILED
@@ -125,7 +125,7 @@ def test_session_without_video_is_refused(clips, tmp_path):
     (folder,) = [p for p in tmp_path.iterdir() if p.is_dir()]
     result = run_cli(tmp_path, "--replay", str(folder))
     assert result.returncode == EXIT_OPEN_FAILED
-    assert "video.mp4" in result.stderr
+    assert "video.mkv" in result.stderr
 
 
 def test_unknown_target_is_refused(tmp_path):
@@ -139,3 +139,104 @@ def test_source_and_replay_are_exclusive(clips, tmp_path):
     assert result.returncode != 0
     result = run_cli(tmp_path)
     assert result.returncode != 0
+
+
+def validate(name: str, doc: dict) -> None:
+    from jsonschema import Draft202012Validator
+
+    schema = json.loads((ROOT / "contracts" / f"{name}.schema.json").read_text(encoding="utf-8"))
+    Draft202012Validator(schema).validate(doc)
+
+
+def test_live_and_replay_files_match_the_schemas(clips, tmp_path):
+    folder = record(clips, tmp_path)
+    run_cli(tmp_path, "--replay", str(folder))
+    run_cli(tmp_path, "--replay", str(clips["moving_mov"]))  # a bare file: a new session
+    sessions = [p for p in tmp_path.iterdir() if p.is_dir()]
+    assert len(sessions) == 2
+    for session_dir in sessions:
+        validate("session", json.loads((session_dir / "session.json").read_text()))
+        for run_dir in (session_dir / "runs").iterdir():
+            validate("run", json.loads((run_dir / "run.json").read_text()))
+
+
+def test_session_without_a_video_hash_still_replays_with_a_warning(clips, tmp_path):
+    folder = record(clips, tmp_path)
+    doc = json.loads((folder / "session.json").read_text())
+    doc["recording"]["sha256"] = None  # what a killed session leaves
+    (folder / "session.json").write_text(json.dumps(doc))
+    result = run_cli(tmp_path, "--replay", str(folder))
+    assert result.returncode == 0, result.stderr
+    assert "no video hash" in result.stderr
+    assert len(list((folder / "runs").iterdir())) == 2
+
+
+def replay_meta(run_id: str):
+    from services.edge.session.types import RunMeta
+
+    return RunMeta(
+        run_id=run_id,
+        mode="replay",
+        input={"kind": "file", "ref": "x", "sha256": "0" * 64,
+               "requested_width": None, "requested_height": None},
+        detector=None,
+        tracker=None,
+        health={},
+        runtime={"python": "3", "platform": "p", "device": None, "gpu": None, "packages": {}},
+        started_at="2026-10-20T00:00:00Z",
+    )  # fmt: skip
+
+
+def counts():
+    from services.edge.session.types import RunCounts
+
+    return RunCounts(0, 0, 0, 0)
+
+
+def test_interrupted_replay_is_visible_in_session_json(clips, tmp_path):
+    """The replay's own status lives nowhere else: an interrupted replay must not look complete."""
+    from services.edge.session.types import SessionEvent
+    from services.edge.session.writer import FileSessionWriter
+
+    folder = record(clips, tmp_path)
+    before = json.loads((folder / "session.json").read_text())
+    w = FileSessionWriter(tmp_path)
+    run_id = "22222222-2222-4222-8222-222222222222"
+    w.start_run(folder, replay_meta(run_id))
+    w.event(SessionEvent("2026-10-20T00:00:01Z", 1.0, "source_lost", "noise: not kept"))
+    w.event(SessionEvent("2026-10-20T00:00:02Z", 2.0, "interrupted", "Ctrl+C"))
+    w.close("interrupted", counts())
+    after = json.loads((folder / "session.json").read_text())
+    assert after["status"] == "ended" and after["recording"] == before["recording"]
+    assert after["runs"] == [*before["runs"], run_id]
+    assert after["events"] == [
+        {"t_wall": "2026-10-20T00:00:02Z", "t_mono": 2.0, "kind": "interrupted",
+         "detail": f"replay {run_id}: Ctrl+C"}
+    ]  # fmt: skip
+
+
+def test_replay_that_ends_badly_without_an_event_gets_one(clips, tmp_path):
+    from services.edge.session.writer import FileSessionWriter
+
+    folder = record(clips, tmp_path)
+    w = FileSessionWriter(tmp_path)
+    run_id = "33333333-3333-4333-8333-333333333333"
+    w.start_run(folder, replay_meta(run_id))
+    w.close("error", counts())
+    (event,) = json.loads((folder / "session.json").read_text())["events"]
+    assert event["kind"] == "error" and event["detail"].startswith(f"replay {run_id}:")
+
+
+def test_two_replays_of_one_session_keep_both_run_ids(clips, tmp_path):
+    from services.edge.session.writer import FileSessionWriter
+
+    folder = record(clips, tmp_path)
+    a, b = FileSessionWriter(tmp_path), FileSessionWriter(tmp_path)
+    ids = ["44444444-4444-4444-8444-444444444444", "55555555-5555-4555-8555-555555555555"]
+    a.start_run(folder, replay_meta(ids[0]))
+    b.start_run(folder, replay_meta(ids[1]))  # started while a is still open
+    b.close("ended", counts())
+    a.close("ended", counts())  # a's stale copy must not drop b's run
+    runs = json.loads((folder / "session.json").read_text())["runs"]
+    assert set(ids) <= set(runs) and len(runs) == len(set(runs)) == 3
+    assert {p.name for p in (folder / "runs").iterdir()} == set(runs)

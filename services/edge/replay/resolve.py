@@ -6,8 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from services.edge.capture.sources import FILE_SUFFIXES
-
-VIDEO_NAME = "video.mp4"  # DATA_CONTRACTS.md section 1
+from services.edge.contract import VIDEO_FILE
 
 
 class ReplayError(Exception):
@@ -20,6 +19,7 @@ class ReplayTarget:
     sha256: str
     session_dir: Path | None  # the session the replay adds a run to; None for a bare video file
     camera_id: str | None  # of that session
+    verified: bool = True  # False when the video could not be checked against session.json
 
 
 def sha256_file(path: Path) -> str:
@@ -57,9 +57,9 @@ def resolve_replay(target: str, out_dir: Path | str) -> ReplayTarget:
         session = json.loads((folder / "session.json").read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
         raise ReplayError(f"{folder} has no readable session.json: {e}") from e
-    video = (folder / VIDEO_NAME).resolve()
+    video = (folder / VIDEO_FILE).resolve()
     if not video.is_file():
-        raise ReplayError(f"{folder} has no {VIDEO_NAME} (was it recorded with --no-record?)")
+        raise ReplayError(f"{folder} has no {VIDEO_FILE} (was it recorded with --no-record?)")
     sha = sha256_file(video)
     expected = (session.get("recording") or {}).get("sha256")
     if expected and expected != sha:
@@ -67,4 +67,4 @@ def resolve_replay(target: str, out_dir: Path | str) -> ReplayTarget:
             f"{video} changed since it was recorded: sha256 {sha[:12]}... differs from "
             f"session.json {expected[:12]}..."
         )
-    return ReplayTarget(video, sha, folder.resolve(), session.get("camera_id"))
+    return ReplayTarget(video, sha, folder.resolve(), session.get("camera_id"), bool(expected))

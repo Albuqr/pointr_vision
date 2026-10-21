@@ -27,7 +27,7 @@ sessions/<folder>/         <camera_id>_<session_id>, or <session_id> without a c
     shots.csv            (0.11.0, Track R: shot attempts and calls, section 13)
     report.json          (section 8)
   labels.csv             (0.11.0, hand-made ground truth, section 14)
-  video.mp4              (phase 4, raw, no annotations)
+  video.mkv              (phase 4, raw, no annotations; MKV so a killed session stays readable, D-042)
 sessions/sensor_<group_id>/   (0.11.0, Track R, section 12: one folder per group, not per camera)
   events.csv
 sessions/fusion_<group_id>/<fusion_id>/   (0.11.0, Track R, section 15)
@@ -74,7 +74,7 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
   "source": {"kind": "camera | stream | file", "ref": "1", "width": 1280, "height": 720,
              "reported_fps": 30.0, "link": "usb | wifi | builtin | file"},
   "registration": {"date": "2026-10-07", "team_ids": ["uuid"]},
-  "recording": {"enabled": true, "path": "video.mp4", "sha256": null, "locked": true},
+  "recording": {"enabled": true, "path": "video.mkv", "sha256": null, "locked": false},
   "runs": ["uuid"],
   "events": [{"t_wall": "...", "t_mono": 12.3, "kind": "source_lost", "detail": "..."}],
   "calibration": {"calibration_id": "uuid", "check_error_m": 0.12,
@@ -97,12 +97,16 @@ the user with `--link` (the notebook cannot detect it, D-010); `null` when not g
 `null`); the CLI rejects a contradiction and the schema enforces it (D-020).
 `source.ref` and `run.json` `input.ref` never hold credentials: `user:password@` is removed
 from stream URLs before writing (D-020). `recording` is `{"enabled": true, "path":
-"video.mp4", "sha256": null, "locked": false}` while a live run records (the default; `--no-record`
+"video.mkv", "sha256": null, "locked": false}` while a live run records (the default; `--no-record`
 gives `{"enabled": false, "path": null, "sha256": null, "locked": false}`). `sha256` is set when the
-recorder stops, and stays `null` if no frame was recorded. The video is raw (no annotations) at a
-constant frame rate, the source's reported fps or 30; frame k is at k / fps, which is `frames.csv`
-`t_video`. A replay run (`mode: replay`) adds a run to the session and leaves `recording` alone
-(D-042).
+recorder stops, and stays `null` if no frame was recorded or the recorder did not finish (a killed
+session). The video is raw (no annotations) at a constant frame rate, the source's reported fps or 30;
+frame k is at k / fps, which is `frames.csv` `t_video`. A frame the recorder did not write (a full
+queue, a failed writer, a frame of another size) has an empty `t_video`. A replay run
+(`mode: replay`) adds a run to the session and leaves `recording` alone: in `session.json` only
+`runs` grows, plus an `interrupted` or `error` event whose `detail` starts with `replay <run_id>:`
+when the replay did not end cleanly (D-042); the replay's other events are printed, not written.
+A replay of a bare video file starts a new session with `recording` disabled.
 Event `t_mono` is `null` for events that precede the run's `t0`, such as
 `source_open_failed` (D-014).
 Event kinds: `source_open_failed`, `source_lost`, `source_recovered`,
@@ -154,7 +158,8 @@ calibration used by this session and records its mean held-out check residual in
 }
 ```
 
-`counts.rec_dropped` is `null` when recording is disabled. `ended_at` is `null` while the
+`counts.rec_dropped` is `null` when recording is disabled and for a replay run, which records nothing.
+`input.sha256` is the sha256 of the replayed video in a replay run and `null` in a live run. `ended_at` is `null` while the
 run is in progress; `counts` is `null` until the run ends, so a crashed run never shows
 counts that were not measured. `t0_wall` is the UTC wall clock taken with the run's `t0`
 (D-011), `null` until capture starts; `t0_wall + t_mono` aligns frames.csv to wall time.

@@ -57,6 +57,7 @@ class H1:
     false_attempts: int  # shots no attempt label matches
     no_outcome: int  # found attempts with no make or miss label (not scored for the call)
     source: str  # video | video+sensor
+    unplaced: int = 0  # shots on a frame with no t_video: not matched, not counted as false
 
     @property
     def found_rate(self) -> float:
@@ -98,7 +99,7 @@ class H3b:
 
 def load_labels(path: Path) -> list[Label]:
     try:
-        f = open(path, newline="", encoding="utf-8")
+        f = open(path, newline="", encoding="utf-8-sig")  # an Excel "CSV UTF-8" save has a BOM
     except OSError as e:
         raise ScoreError(f"cannot read {path}: {e.strerror or e}") from e
     with f:
@@ -202,11 +203,13 @@ def score_h1(folder: Path, run_id: str | None = None, tolerance: float = TOLERAN
         return None
     times = frame_times(run)
     shots = []
+    unplaced = 0
     for r in shot_rows:
         seq = int(r["seq"])
-        if seq not in times:
-            raise ScoreError(f"shots.csv shot {r['shot_id']}: frame seq {seq} is not in frames.csv")
-        shots.append((times[seq], r["call"]))
+        if seq in times:
+            shots.append((times[seq], r["call"]))
+        else:  # the recorder dropped that frame: it has no time in the video
+            unplaced += 1
     matched = _match([a.time_s for a in attempts], [t for t, _ in shots], tolerance)
     outcomes = sorted(
         (lab for lab in labels if lab.event in ("make", "miss")), key=lambda x: x.time_s
@@ -231,12 +234,16 @@ def score_h1(folder: Path, run_id: str | None = None, tolerance: float = TOLERAN
         else "video"
     )
     return H1(len(attempts), len(matched), scored, right, uncertain,
-              len(shots) - len(matched), no_outcome, source)  # fmt: skip
+              len(shots) - len(matched), no_outcome, source, unplaced)  # fmt: skip
 
 
 def score_h3b(folder: Path, run_id: str | None = None) -> H3b | None:
     """H3b from the leave and return labels and the player numbers in tracks.csv; None when there
-    are no returns or no track carries a number yet (the identity layer is slice R5)."""
+    are no returns or no track carries a number yet (the identity layer is slice R5).
+
+    The ID of a player is their number (spec FR-006), so a return is kept when the number is on
+    some track in the IDENTITY_WINDOW_S after it: the tracker's own ID is temporary and changes
+    after a long absence (D-043)."""
     run = run_dir(folder, run_id)
     labels = load_labels(folder / "labels.csv")
     returns = sorted((lab for lab in labels if lab.event == "return"), key=lambda x: x.time_s)
@@ -261,14 +268,16 @@ def score_h3b(folder: Path, run_id: str | None = None) -> H3b | None:
         )  # fmt: skip
         if ret.player_number is None or leave is None:
             continue
-        before = {tid for t, tid, n in seen if n == ret.player_number
-                  and leave.time_s - IDENTITY_WINDOW_S <= t <= leave.time_s}  # fmt: skip
+        before = any(n == ret.player_number
+                     and leave.time_s - IDENTITY_WINDOW_S <= t <= leave.time_s
+                     for t, _, n in seen)  # fmt: skip
         if not before:
-            continue
-        after = {tid for t, tid, n in seen if n == ret.player_number
-                 and ret.time_s <= t < ret.time_s + IDENTITY_WINDOW_S}  # fmt: skip
+            continue  # the number was never on a track before the leave: nothing to keep
+        after = any(n == ret.player_number
+                    and ret.time_s <= t < ret.time_s + IDENTITY_WINDOW_S
+                    for t, _, n in seen)  # fmt: skip
         assessed += 1
-        kept += bool(before & after)
+        kept += after
     return H3b(len(returns), assessed, kept, len(returns) - assessed)
 
 
@@ -285,6 +294,15 @@ def format_report(folder: Path, run_id: str | None = None, tolerance: float = TO
     h3b = score_h3b(folder, run.name)
     out = [f"scoring {folder.name} run {run.name}; a shot matches a label within {tolerance:g} s "
            "(a chosen value, not a measured one)"]  # fmt: skip
+    ends, last_label = (
+        max(frame_times(run).values()),
+        max((lab.time_s for lab in load_labels(folder / "labels.csv")), default=0.0),
+    )
+    if last_label > ends + tolerance:
+        out.append(
+            f"note: labels run to {last_label:g} s but the run's frames end at {ends:g} s: "
+            "the run may be partial (an interrupted replay, or a different video)"
+        )
     if h1 is None:
         out.append("H1   not scorable: needs shots.csv in the run (slice R3) and attempt labels")
     else:
@@ -302,7 +320,8 @@ def format_report(folder: Path, run_id: str | None = None, tolerance: float = TO
         )
         out.append(
             f"       uncertain {h1.uncertain} (counted wrong), false attempts {h1.false_attempts}, "
-            f"found attempts with no make/miss label {h1.no_outcome}"
+            f"found attempts with no make/miss label {h1.no_outcome}, "
+            f"shots on a frame with no video time {h1.unplaced}"
         )
         if h1.attempts < MIN_ATTEMPTS:
             out.append(
