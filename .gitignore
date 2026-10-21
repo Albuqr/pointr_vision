@@ -31,3 +31,5 @@ testkit-reports/
 .claude/skills/
 .suite/media/auth/
 .suite/media/recordings/
+testkit/web/node_modules/
+testkit/.bin/
