@@ -11,7 +11,7 @@ requirements in `REQUIREMENTS.md`.
  │ camera app   │   video stream     │                                                                     │
  └──────────────┘                    │  capture ─▶ perception ─▶ session writer ─▶ sessions/<id>/*         │
                                      │     │        (detect+track)      │                  │               │
-                                     │     └──▶ recorder ─▶ video.mp4   └──▶ SQLite ◀──────┘ outbox        │
+                                     │     └──▶ recorder ─▶ video.mkv   └──▶ SQLite ◀──────┘ outbox        │
                                      │                                     (pointr.db)  ─▶ sync agent ──┐  │
                                      │  local UI (preview, registrations, reports)                      │  │
                                      └───────────────────────────────────────────────────────────────── │ ─┘
@@ -122,8 +122,12 @@ class SessionWriter(Protocol):  # run metadata, t0 and counts added by D-020
     def start(
         self, meta: SessionMeta, run: RunMeta, positions: PositionMap | None = None
     ) -> None: ...
+    def start_run(
+        self, session_dir: Path | str, run: RunMeta, positions: PositionMap | None = None
+    ) -> None: ...  # a replay adds a run to a session (D-042)
     def set_t0(self, t0: float, t0_wall: str) -> None: ...
     def set_final(self, **blocks) -> None: ...  # gaps, outages, clock; before close (D-041)
+    def set_recording_sha256(self, sha256: str) -> None: ...  # video.mkv hash; before close (D-042)
     def frame(self, rec: FrameRecord) -> None: ...
     def tracks(self, seq: int, obs: list[TrackObs], no_positions: str | None = None) -> None: ...
     def event(self, ev: SessionEvent) -> None: ...
@@ -132,7 +136,8 @@ class SessionWriter(Protocol):  # run metadata, t0 and counts added by D-020
 
 class Recorder(Protocol):
     def start(self, path: Path, info: SourceInfo) -> None: ...
-    def write(self, frame: Frame) -> None: ...
+    def write(self, frame: Frame) -> None: ...  # never blocks; a full queue drops and counts
+    def t_video(self, seq: int) -> float | None: ...  # frame's time in video.mkv (D-042)
     def stop(self) -> RecordingInfo: ...  # path, frames written, frames dropped, sha256
 ```
 
@@ -179,7 +184,7 @@ Two stores with different jobs:
 
 | Store | Holds | Why |
 |---|---|---|
-| `sessions/<folder>/` files (`<camera_id>_<session_id>`) | `session.json`, `frames.csv`, `tracks.csv`, `video.mp4`, `report.json` | Append-only raw record of a run. Readable without the app, easy to replay and diff. |
+| `sessions/<folder>/` files (`<camera_id>_<session_id>`) | `session.json`, `frames.csv`, `tracks.csv`, `video.mkv`, `report.json` | Append-only raw record of a run. Readable without the app, easy to replay and diff. |
 | `pointr.db` (SQLite) | players, teams, session index, outbox, entitlement cache | Relational data edited by the user, and the durable send queue. |
 
 Files are the source of truth for frame and track data; SQLite indexes them. A replay

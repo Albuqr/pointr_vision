@@ -7,13 +7,18 @@ ended raises SourceEnded instead, so the end of a file is not reported as source
 import os
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import cv2
 
 from services.edge.capture.types import Frame, FrameSource, SourceEnded, SourceInfo, utc_now
 
-FILE_SUFFIXES = (".mp4", ".mov")
+FILE_SUFFIXES = (
+    ".mp4",
+    ".mov",
+    ".mkv",
+)  # .mkv: what Pointr records (D-042); RNF05 asks for the first two
 STREAM_SCHEMES = ("http://", "https://", "rtsp://")
 # What the recorder requests from a camera. Anything that must see the recorder's frames (the
 # Studio's calibration frame) opens the camera with this size too.
@@ -192,7 +197,8 @@ class FileSource(_CvSource):
         frame = self._grab()
         if frame is None:  # a file has no transient failures: a failed read is the end
             raise SourceEnded(self.ref)
-        return frame
+        # the container timestamp of the frame just read (OpenCV: 0.0 for the first)
+        return replace(frame, t_video=self._cap.get(cv2.CAP_PROP_POS_MSEC) / 1000)
 
 
 def open_source(ref: str, size: tuple[int, int] | None = None) -> FrameSource:
@@ -210,7 +216,9 @@ def open_source(ref: str, size: tuple[int, int] | None = None) -> FrameSource:
             raise SourceOpenError(f"file not found: {ref}")
         return FileSource(path)
     if path.is_file():
-        raise SourceOpenError(f"unsupported file type {path.suffix!r} (use .mp4 or .mov): {ref}")
+        raise SourceOpenError(
+            f"unsupported file type {path.suffix!r} (use .mp4, .mov or .mkv): {ref}"
+        )
     raise SourceOpenError(
-        f"not a camera index, stream URL (http, https, rtsp) or .mp4/.mov file: {ref!r}"
+        f"not a camera index, stream URL (http, https, rtsp) or .mp4/.mov/.mkv file: {ref!r}"
     )

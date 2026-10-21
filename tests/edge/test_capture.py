@@ -111,3 +111,43 @@ def test_put_race_is_not_counted_as_a_drop():
     capture._put(frame)
     assert capture.dropped == 0
     assert capture.proc_queue.get(timeout=1) is frame
+
+
+def consume_slowly(capture) -> list[int]:
+    consumed = []
+    deadline = time.perf_counter() + 30
+    while not (capture.done.is_set() and capture.proc_queue.empty()):
+        assert time.perf_counter() < deadline, "capture never finished"
+        try:
+            consumed.append(capture.proc_queue.get(timeout=0.1).seq)
+        except queue.Empty:
+            continue
+        time.sleep(0.01)  # slower than the source
+    return consumed
+
+
+def test_lossless_capture_waits_for_a_slow_consumer():
+    """A replay (D-042): the same slow consumer as above loses nothing, where the default drops."""
+    n = 60
+    capture, _ = run_capture(FakeSource((image(i) for i in range(n)), delay=0.001), lossless=True)
+    consumed = consume_slowly(capture)
+    assert capture.stop()
+    assert capture.dropped == 0 and consumed == list(range(n))
+
+
+def test_default_capture_drops_for_the_same_slow_consumer():
+    n = 60
+    capture, _ = run_capture(FakeSource((image(i) for i in range(n)), delay=0.001))
+    consumed = consume_slowly(capture)
+    assert capture.stop()
+    assert capture.dropped > 0 and len(consumed) < n
+
+
+def test_lossless_frame_given_up_at_stop_is_counted():
+    """Stopped while waiting for the consumer: that frame was captured and never processed."""
+    capture, _ = run_capture(FakeSource(image(i) for i in range(10)), lossless=True)
+    deadline = time.perf_counter() + 5
+    while capture.captured < 2 and time.perf_counter() < deadline:
+        time.sleep(0.01)  # nobody consumes: capture is waiting on a full proc_queue
+    assert capture.stop()
+    assert capture.captured == capture.proc_queue.qsize() + capture.dropped

@@ -6,6 +6,7 @@ needs (D-008, completed by D-020).
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from services.edge.capture.types import SourceInfo
@@ -103,12 +104,22 @@ class SessionWriter(Protocol):
         """positions is required exactly when run.calibration is set."""
         ...
 
+    def start_run(
+        self, session_dir: Path | str, run: RunMeta, positions: PositionMap | None = None
+    ) -> None:
+        """A replay: add `run` to the session in session_dir instead of starting a session."""
+        ...
+
     def set_t0(self, t0: float, t0_wall: str) -> None:
         """The run's t0 (time.perf_counter()) and its wall clock, once capture has started."""
         ...
 
     def set_final(self, **blocks) -> None:
         """run.json blocks known only at the end: gaps, outages, clock. Call before close()."""
+        ...
+
+    def set_recording_sha256(self, sha256: str) -> None:
+        """session.json recording.sha256, once the recorder has stopped. Call before close()."""
         ...
 
     def frame(self, rec: FrameRecord) -> None: ...

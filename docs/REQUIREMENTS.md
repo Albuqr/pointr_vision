@@ -52,7 +52,7 @@ foi acrescentada para o desenvolvimento; o texto dos requisitos não foi alterad
 | RF05 | 12 | estimativa de pose + validação manual | Não deduzir saltos/arremessos de deslocamento de caixa (escopo v2) |
 | RF06 | 03 | início/fim de sessão | |
 | RF07 | 03 | tracks.csv | |
-| RF08 | 03 (dados), 04 (vídeo) | frames.csv, video.mp4 | Ver conflito C-02 |
+| RF08 | 03 (dados), 04 (vídeo) | frames.csv, video.mkv (D-042) | Ver conflito C-02 |
 | RF09 | 04 | vídeo sem anotações | |
 | RF10 | 05 | report.json + tela | |
 | RF11 | 05 | report.json + tela | |

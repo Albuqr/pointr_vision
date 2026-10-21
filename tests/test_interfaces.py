@@ -33,14 +33,16 @@ EXPECTED = {
     Tracker: {"update": ["dets", "frame"]},
     SessionWriter: {
         "start": ["meta", "run", "positions"],
+        "start_run": ["session_dir", "run", "positions"],
         "set_t0": ["t0", "t0_wall"],
         "set_final": ["blocks"],
+        "set_recording_sha256": ["sha256"],
         "frame": ["rec"],
         "tracks": ["seq", "obs", "no_positions"],
         "event": ["ev"],
         "close": ["status", "counts"],
     },
-    Recorder: {"start": ["path", "info"], "write": ["frame"], "stop": []},
+    Recorder: {"start": ["path", "info"], "write": ["frame"], "t_video": ["seq"], "stop": []},
 }
 PROTOCOLS = list(EXPECTED)
 CASES = [(p, m) for p, methods in EXPECTED.items() for m in methods]
@@ -54,14 +56,17 @@ RETURNS = {
     (Detector, "detect"): Detections,
     (Tracker, "update"): list[TrackObs],
     (SessionWriter, "start"): NONE,
+    (SessionWriter, "start_run"): NONE,
     (SessionWriter, "set_t0"): NONE,
     (SessionWriter, "set_final"): NONE,
+    (SessionWriter, "set_recording_sha256"): NONE,
     (SessionWriter, "frame"): NONE,
     (SessionWriter, "tracks"): NONE,
     (SessionWriter, "event"): NONE,
     (SessionWriter, "close"): NONE,
     (Recorder, "start"): NONE,
     (Recorder, "write"): NONE,
+    (Recorder, "t_video"): float | None,
     (Recorder, "stop"): RecordingInfo,
 }
 
