@@ -339,7 +339,11 @@ def test_group_lifecycle_stays_running_until_explicit_stop(client):
     started = client.post("/api/recording/start")
     assert started.status_code == 200
     assert started.json()["running"] is True
-    preview_port = started.json()["cameras"][0]["preview_port"]
+    # the port Studio chose is reported only once the camera confirms it is listening
+    assert started.json()["cameras"][0]["preview_port"] is None
+    child = FakeLauncher.instances[-1].children[0]
+    child.preview_ready = True
+    preview_port = client.get("/api/status").json()["cameras"][0]["preview_port"]
     assert 1 <= preview_port <= 65535
     assert preview_port == FakeLauncher.instances[-1].cameras[0].http_preview_port
     time.sleep(0.02)
