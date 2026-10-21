@@ -1,0 +1,15 @@
+{
+  "project": { "name": "pointr_vision" },
+  "auth": { "strategy": "none", "roles": [] },
+  "links": { "checkExternal": false },
+  "python": {
+    "excludePaths": [".venv", "venv", "node_modules", "build", "dist", "testkit", ".jupyter_runtime"],
+    "commands": {
+      "install": "pip install --extra-index-url https://download.pytorch.org/whl/cpu -e '.[dev]'",
+      "lint": "ruff check --extend-exclude testkit {src}",
+      "format": null,
+      "typecheck": null,
+      "test": "python -m pytest -q --ignore=testkit --junitxml={reports}/python-junit.xml"
+    }
+  }
+}

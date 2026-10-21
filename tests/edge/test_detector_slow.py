@@ -8,7 +8,8 @@ committed, CLAUDE.md rule 9). Sources and licences: tests/fixtures/README.md.
 """
 
 import hashlib
-import urllib.request
+import http.client
+import urllib.parse
 from pathlib import Path
 
 import cv2
@@ -44,10 +45,16 @@ def fetch(name: str) -> Path:
     path = DOWNLOADS / name
     if not path.exists():
         DOWNLOADS.mkdir(parents=True, exist_ok=True)
-        request = urllib.request.Request(url, headers={"User-Agent": "pointr-test-fixtures/0.1"})
-        with urllib.request.urlopen(request, timeout=60) as response:
-            path.write_bytes(response.read())
-    digest = hashlib.sha1(path.read_bytes()).hexdigest()
+        parts = urllib.parse.urlsplit(url)
+        # http.client over TLS only: no file:/ftp: schemes. Commons serves these files directly.
+        conn = http.client.HTTPSConnection(parts.netloc, timeout=60)
+        conn.request("GET", parts.path, headers={"User-Agent": "pointr-test-fixtures/0.1"})
+        response = conn.getresponse()
+        assert response.status == 200, f"{url}: HTTP {response.status}"
+        path.write_bytes(response.read())
+        conn.close()
+    # Commons publishes SHA-1 digests; this only checks the download, nothing depends on it.
+    digest = hashlib.sha1(path.read_bytes(), usedforsecurity=False).hexdigest()
     assert digest == sha1, f"{name}: sha1 {digest}, expected {sha1}; delete it and re-run"
     return path
 

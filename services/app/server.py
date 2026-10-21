@@ -2,13 +2,13 @@ import base64
 import csv
 import dataclasses
 import datetime as dt
+import http.client
 import ipaddress
 import json
 import os
 import socket
 import threading
 import time
-import urllib.request
 import uuid
 import webbrowser
 from collections import deque
@@ -311,9 +311,7 @@ class Studio:
             live = {}
             if preview_port:
                 try:
-                    with urllib.request.urlopen(
-                        f"http://127.0.0.1:{preview_port}/status.json", timeout=0.1
-                    ) as response:
+                    with preview_get(preview_port, "status.json", timeout=0.1) as response:
                         live = json.loads(response.read())
                     health = live.get("health", health)
                     fps = live.get("processed_fps", fps)
@@ -476,9 +474,7 @@ class Studio:
             port = child.preview_port if child else None
         try:
             if port:
-                with urllib.request.urlopen(
-                    f"http://127.0.0.1:{port}/raw-snapshot.jpg", timeout=3
-                ) as r:
+                with preview_get(port, "raw-snapshot.jpg", timeout=3) as r:
                     jpeg = r.read()
                 image = cv2.imdecode(np.frombuffer(jpeg, dtype=np.uint8), cv2.IMREAD_COLOR)
                 if image is None:
@@ -843,9 +839,8 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
         port = item.get("preview_port")
         if port is None:
             raise HTTPException(503, "preview not ready: the camera is still starting")
-        url = f"http://127.0.0.1:{port}/{kind}"
         try:  # connect before answering: an empty 200 is never retried by an <img>
-            response = urllib.request.urlopen(url, timeout=5)
+            response = preview_get(port, kind, timeout=5)
         except OSError as exc:
             raise HTTPException(503, "preview unavailable") from exc
         if kind == "snapshot.jpg":
@@ -877,6 +872,22 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
         return {"message": "Build the UI with npm run build in services/app/ui"}
 
     return app
+
+
+def preview_get(port: int, path: str, timeout: float) -> http.client.HTTPResponse:
+    """GET a camera's local preview server. http.client only speaks HTTP, so unlike urlopen it
+    cannot be pointed at file: or ftp: URLs. An error status raises OSError, as urlopen did."""
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
+    try:
+        conn.request("GET", f"/{path}", headers={"Connection": "close"})
+        response = conn.getresponse()
+    except BaseException:
+        conn.close()
+        raise
+    if response.status >= 400:
+        response.close()
+        raise OSError(f"preview server answered {response.status} for /{path}")
+    return response
 
 
 def session_duration(value):
