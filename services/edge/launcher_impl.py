@@ -312,7 +312,10 @@ class Child:
         self.tail: deque[str] = deque(maxlen=TAIL_LINES)  # last output lines, credentials masked
         self.killed = False
         self.stop_sent = False
-        self.preview_port = cam.http_preview_port
+        self.preview_port = cam.http_preview_port  # the port Studio asked for
+        self.preview_ready = (
+            False  # the camera printed its own "preview_port:" line: it is listening
+        )
 
     @property
     def running(self) -> bool:
@@ -386,6 +389,7 @@ class Launcher:
             elif line.startswith("preview_port: "):
                 try:
                     child.preview_port = int(line.split(":", 1)[1].strip())
+                    child.preview_ready = True
                 except ValueError:
                     child.failure = "invalid preview port reported"
             elif line.startswith("error: ") and child.failure is None:

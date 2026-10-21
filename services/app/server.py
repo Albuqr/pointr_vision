@@ -267,7 +267,6 @@ class Studio:
     def status(self):
         with self.lock:
             launcher = self.launcher
-            ports = dict(self.preview_ports)
             active = self.recording()
             finals = dict(self.final)
         cameras = []
@@ -306,7 +305,9 @@ class Studio:
                     "frozen_frames": "FROZEN",
                     "dark_frames": "DARK",
                 }.get(event.get("kind"), health)
-            preview_port = child.preview_port or ports.get(child.cam.camera_id)
+            # only a port the camera has confirmed: it may still be loading its model, and it picks
+            # another port when the one Studio chose is busy. Until then the UI shows a placeholder.
+            preview_port = child.preview_port if getattr(child, "preview_ready", False) else None
             live = {}
             if preview_port:
                 try:
@@ -837,20 +838,23 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
             raise HTTPException(404, "preview not found")
         status = studio.status()
         item = next((cam for cam in status["cameras"] if cam["camera_id"] == camera_id), None)
-        port = item.get("preview_port") if item else studio.preview_ports.get(camera_id)
-        if port is None:
+        if item is None:
             raise HTTPException(404, "preview not available")
+        port = item.get("preview_port")
+        if port is None:
+            raise HTTPException(503, "preview not ready: the camera is still starting")
         url = f"http://127.0.0.1:{port}/{kind}"
+        try:  # connect before answering: an empty 200 is never retried by an <img>
+            response = urllib.request.urlopen(url, timeout=5)
+        except OSError as exc:
+            raise HTTPException(503, "preview unavailable") from exc
         if kind == "snapshot.jpg":
-            try:
-                with urllib.request.urlopen(url, timeout=5) as response:
-                    return StreamingResponse(iter([response.read()]), media_type="image/jpeg")
-            except OSError as exc:
-                raise HTTPException(503, "preview unavailable") from exc
+            with response:
+                return StreamingResponse(iter([response.read()]), media_type="image/jpeg")
 
         def stream():
             try:
-                with urllib.request.urlopen(url, timeout=5) as response:
+                with response:
                     while chunk := response.read(8192):
                         yield chunk
             except OSError:
