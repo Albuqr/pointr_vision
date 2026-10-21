@@ -16,7 +16,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from services.edge.contract import LABEL_EVENTS, LABELS_COLUMNS
+from services.edge.contract import LABEL_EVENTS, LABELS_COLUMNS, VIDEO_FILE
 
 # Placeholders: no source gives a matching tolerance (spec FR-013 points to the research note, which
 # has none), so these are chosen, not measured. D-043.
@@ -168,7 +168,7 @@ def frame_times(run: Path) -> dict[int, float]:
     if not times:
         raise ScoreError(
             f"{run / 'frames.csv'} has no t_video values, so labels cannot be joined to frames: "
-            "record the session (video.mp4) or replay its video"
+            f"record the session ({VIDEO_FILE}) or replay its video"
         )
     return times
 

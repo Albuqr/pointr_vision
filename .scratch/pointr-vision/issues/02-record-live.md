@@ -8,5 +8,5 @@ Capture feeds the recorder from its own thread (`Capture(on_frame=...)`). Record
 stop. `run.json` `counts.rec_dropped` is set when recording is on, null otherwise. `frames.csv`
 `t_video` is the recorder's time for that frame's seq.
 
-Tests: a file source run writes video.mp4 with frames = captured - rec_dropped; sha256 in session.json
+Tests: a file source run writes video.mkv with frames = captured - rec_dropped; sha256 in session.json
 matches; `--no-record` leaves no video and null rec_dropped; t_video present for processed frames.

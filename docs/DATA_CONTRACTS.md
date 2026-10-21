@@ -230,7 +230,7 @@ One row per **processed** frame, including frames with zero detections.
 | n_detections | int/empty | person detections above threshold; empty when detection is off |
 | n_tracks | int/empty | tracks output by the tracker; empty when detection is off |
 | dropped_total | int | capture's drop count when this frame was taken for processing |
-| t_video | float/empty | the frame's time in the source video, s from its first frame (0.11.0): the container timestamp on a replay, the time in `video.mp4` for a live run that records (R1); empty otherwise |
+| t_video | float/empty | the frame's time in the source video, s from its first frame (0.11.0): the container timestamp on a replay, the time in `video.mkv` for a live run that records (R1); empty otherwise |
 
 ## 5. `tracks.csv`
 
