@@ -2,11 +2,11 @@ import queue
 import socket
 import threading
 import time
-import urllib.request
 
 import cv2
 import numpy as np
 
+from services.app.server import preview_get
 from services.edge.capture.types import Frame
 from services.edge.perception.loop import Processed, Processor
 from services.edge.perception.types import Detections
@@ -38,7 +38,7 @@ def test_preview_endpoint_encodes_fake_frame_and_falls_back_on_busy_port():
         deadline = time.monotonic() + 3
         while preview._jpeg is None and time.monotonic() < deadline:
             time.sleep(0.02)
-        with urllib.request.urlopen(f"http://127.0.0.1:{preview.port}/snapshot.jpg") as response:
+        with preview_get(preview.port, "snapshot.jpg", timeout=5) as response:
             assert response.headers["Content-Type"] == "image/jpeg"
             assert response.read().startswith(b"\xff\xd8")
     finally:
@@ -52,9 +52,7 @@ def test_raw_snapshot_endpoint_uses_a_copy_from_the_capture_provider():
     )
     preview.start()
     try:
-        with urllib.request.urlopen(
-            f"http://127.0.0.1:{preview.port}/raw-snapshot.jpg"
-        ) as response:
+        with preview_get(preview.port, "raw-snapshot.jpg", timeout=5) as response:
             assert response.headers["Content-Type"] == "image/jpeg"
             decoded = cv2.imdecode(np.frombuffer(response.read(), np.uint8), cv2.IMREAD_COLOR)
         assert decoded.shape[:2] == (42, 64)
