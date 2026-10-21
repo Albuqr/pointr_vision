@@ -374,3 +374,25 @@ def test_report_warns_when_the_run_ends_before_the_labels(tmp_path):
     out = run_report(folder)
     assert "note: labels run to 50.8 s but the run's frames end at 24.9 s" in out
     assert "note: labels run to" not in run_report(make_session(tmp_path / "b", H1_LABELS))
+
+
+def test_attempt_does_not_take_the_outcome_of_the_next_attempt(tmp_path):
+    """Attempt A (10 s) has no make or miss label; attempt B (12 s) has one at 12.8 s, inside A's
+    6 s window. A must not be scored with it."""
+    labels = [(10.0, "attempt", ""), (12.0, "attempt", ""), (12.8, "make", "")]
+    shots = [(10.0, "make", "video"), (12.0, "make", "video")]
+    h1 = score.score_h1(make_session(tmp_path, labels, shots=shots), RUN)
+    assert (h1.found, h1.scored, h1.right, h1.no_outcome) == (2, 1, 1, 1)
+
+
+def test_h3b_passes_at_exactly_80_percent(tmp_path):
+    labels, tracks = [], []
+    for n in range(1, 6):  # five players leave at 100 s * n and come back 30 s later
+        leave = 100.0 * n
+        labels += [(leave, "leave", n), (leave + 30, "return", n)]
+        tracks.append((leave - 1, n, n))  # numbered before the leave
+        if n != 5:
+            tracks.append((leave + 31, n, n))  # the number is back after the return
+    h3b = score.score_h3b(make_session(tmp_path, labels, tracks=tracks, n_frames=6000), RUN)
+    assert (h3b.assessed, h3b.kept) == (5, 4)
+    assert h3b.rate == pytest.approx(0.8) and h3b.passed

@@ -42,7 +42,7 @@ def _find_session(target: str, out_dir: Path) -> Path | None:
 
 
 def resolve_replay(target: str, out_dir: Path | str) -> ReplayTarget:
-    """target: a .mp4/.mov file, a session folder, or a session id found under out_dir.
+    """target: a .mp4/.mov/.mkv file, a session folder, or a session id found under out_dir.
 
     A bare file starts a new session. A session adds a run to it and its video must still be the
     one that was recorded (sha256 of session.json), because labels and runs refer to its frames."""
@@ -57,9 +57,11 @@ def resolve_replay(target: str, out_dir: Path | str) -> ReplayTarget:
         session = json.loads((folder / "session.json").read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
         raise ReplayError(f"{folder} has no readable session.json: {e}") from e
-    video = (folder / VIDEO_FILE).resolve()
-    if not video.is_file():
-        raise ReplayError(f"{folder} has no {VIDEO_FILE} (was it recorded with --no-record?)")
+    # the file the session says it recorded (an older session may be a video.mp4), inside its folder
+    name = (session.get("recording") or {}).get("path") or VIDEO_FILE
+    video = (folder / name).resolve()
+    if folder.resolve() not in video.parents or not video.is_file():
+        raise ReplayError(f"{folder} has no {name} (was it recorded with --no-record?)")
     sha = sha256_file(video)
     expected = (session.get("recording") or {}).get("sha256")
     if expected and expected != sha:

@@ -776,7 +776,17 @@ def run(args: argparse.Namespace) -> int:
                 rec = recorder.stop()
                 rec_dropped = rec.frames_dropped
                 if rec.frames_dropped:
-                    detail = f"{rec.frames_dropped} frame(s) not recorded (queue full or failed)"
+                    detail = f"{rec.frames_dropped} frame(s) not recorded (queue full or failure)"
+                    log_event(
+                        HealthEvent("recorder_backlog", utc_now(), time.perf_counter(), detail)
+                    )
+                if recorder.size_dropped:
+                    seq, (w, h) = recorder.first_size_drop
+                    fw, fh = recorder.frame_size
+                    detail = (
+                        f"{recorder.size_dropped} frame(s) not recorded: another size than the "
+                        f"first ({fw}x{fh}); the first was seq {seq} at {w}x{h}"
+                    )
                     log_event(
                         HealthEvent("recorder_backlog", utc_now(), time.perf_counter(), detail)
                     )

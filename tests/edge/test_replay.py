@@ -8,6 +8,7 @@ import hashlib
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import cv2
@@ -240,3 +241,84 @@ def test_two_replays_of_one_session_keep_both_run_ids(clips, tmp_path):
     runs = json.loads((folder / "session.json").read_text())["runs"]
     assert set(ids) <= set(runs) and len(runs) == len(set(runs)) == 3
     assert {p.name for p in (folder / "runs").iterdir()} == set(runs)
+
+
+class SlowDetector:
+    """A detector slower than reading a file: a replay that drops frames would show it."""
+
+    threshold, det_size, device = 0.5, 384, "cpu"
+
+    def __init__(self, delay: float = 0.03):
+        self.delay = delay
+
+    def detect(self, frame):
+        from services.edge.perception.loop import NO_DETECTIONS
+
+        time.sleep(self.delay)
+        return NO_DETECTIONS
+
+
+class NoTracks:
+    params = {}
+
+    def update(self, dets, frame):
+        return []
+
+
+def test_replay_with_a_slow_detector_still_processes_every_frame(clips, tmp_path, monkeypatch):
+    """D-042 / Phase 04 A3 wiring: main must run a replay with lossless capture. Without it the
+    slow detector makes the capture thread drop frames, as a live run does."""
+    from services.edge import main as cli
+
+    folder = record(clips, tmp_path)
+    monkeypatch.setattr(cli, "load_perception", lambda a, d: (SlowDetector(), NoTracks()))
+    code = cli.main(["--replay", str(folder), "--out", str(tmp_path)])
+    assert code == 0
+    runs = [json.loads((r / "run.json").read_text()) for r in (folder / "runs").iterdir()]
+    (replay,) = [r for r in runs if r["mode"] == "replay"]
+    assert replay["counts"]["dropped"] == 0
+    assert replay["counts"]["processed"] == replay["counts"]["captured"] == 30
+    assert replay["detector"] is not None  # the detector path ran, not --no-detect
+
+
+def test_live_run_with_the_same_slow_detector_does_drop(clips, tmp_path, monkeypatch):
+    """The control: a live source plays at 15 fps (66 ms a frame), so the detector must be slower
+    than that. If it did not drop, the test above would prove nothing."""
+    from services.edge import main as cli
+
+    monkeypatch.setattr(cli, "load_perception", lambda a, d: (SlowDetector(0.15), NoTracks()))
+    cli.main(["--source", str(clips["moving"]), "--link", "file", "--out", str(tmp_path)])
+    (folder,) = [p for p in tmp_path.iterdir() if p.is_dir()]
+    (run_dir,) = (folder / "runs").iterdir()
+    assert json.loads((run_dir / "run.json").read_text())["counts"]["dropped"] > 0
+
+
+def test_session_recorded_as_mp4_before_the_rename_still_replays(clips, tmp_path):
+    """An older session names video.mp4 in session.json; replay follows the recorded path."""
+    folder = record(clips, tmp_path)
+    (folder / "video.mkv").rename(folder / "video.mp4")
+    doc = json.loads((folder / "session.json").read_text())
+    doc["recording"]["path"] = "video.mp4"
+    (folder / "session.json").write_text(json.dumps(doc))
+    result = run_cli(tmp_path, "--replay", str(folder))
+    assert result.returncode == 0, result.stderr
+    assert len(list((folder / "runs").iterdir())) == 2
+
+
+def test_recording_path_outside_the_session_folder_is_refused(clips, tmp_path):
+    folder = record(clips, tmp_path)
+    doc = json.loads((folder / "session.json").read_text())
+    doc["recording"]["path"] = "../" + folder.name + "/video.mkv"  # leaves the folder and returns
+    (folder / "session.json").write_text(json.dumps(doc))
+    doc["recording"]["path"] = str(clips["moving"])  # an absolute path elsewhere
+    (folder / "session.json").write_text(json.dumps(doc))
+    result = run_cli(tmp_path, "--replay", str(folder))
+    assert result.returncode == EXIT_OPEN_FAILED
+
+
+def test_an_mkv_file_replays_like_any_other_video(clips, tmp_path):
+    folder = record(clips, tmp_path)
+    copy = tmp_path / "copy.mkv"
+    copy.write_bytes((folder / "video.mkv").read_bytes())
+    result = run_cli(tmp_path / "out", "--replay", str(copy))
+    assert result.returncode == 0, result.stderr

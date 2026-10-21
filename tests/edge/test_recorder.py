@@ -250,3 +250,45 @@ def test_a_killed_session_leaves_a_readable_video(tmp_path):
     proc.wait(10)
     readable = len(video_frames(path))
     assert readable > printed * 0.5, f"{readable} frames readable of {printed}+ written"
+
+
+def test_frames_of_another_size_are_counted_with_where_they_started(tmp_path):
+    rec = FileRecorder()
+    rec.start(tmp_path / "video.mkv", INFO)
+    rec.write(frame(0))
+    for i in (1, 2):
+        rec.write(Frame(i, 0.0, "t", np.full((24, 32, 3), 50, np.uint8), "fake"))
+    rec.stop()
+    assert rec.frame_size == (64, 48)
+    assert rec.size_dropped == 2 and rec.first_size_drop == (1, (32, 24))
+
+
+def test_index_eviction_and_t_video_do_not_race(tmp_path, monkeypatch):
+    """The capture thread evicts old entries while the processing thread pops: a dict changed
+    during iteration must never escape write() (it would stop capture)."""
+    from services.edge.recording import recorder as recorder_mod
+
+    monkeypatch.setattr(recorder_mod, "INDEX_MAX", 4)
+    rec = FileRecorder(max_queue=4096, writer_factory=lambda p, f, s: FailingWriter(10**9))
+    rec.start(tmp_path / "video.mkv", INFO)
+    errors = []
+    done = threading.Event()
+
+    def popper():
+        seq = 0
+        while not done.is_set():
+            rec.t_video(seq)
+            seq += 1
+
+    t = threading.Thread(target=popper)
+    t.start()
+    try:
+        for i in range(20000):
+            rec.write(frame(i % 20))
+    except Exception as e:
+        errors.append(e)
+    finally:
+        done.set()
+        t.join()
+        rec.stop()
+    assert errors == []

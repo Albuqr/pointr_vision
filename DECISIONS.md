@@ -1008,7 +1008,7 @@ No new contract field and no version bump: `recording.sha256`, `recording.path` 
 `interrupted` or `error` event tagged `replay <run_id>:` when the replay does not end cleanly, because `run.json` has no
 status of its own. A bare file starts a new session. A replay reads at file speed and waits for processing instead of
 dropping frames. `t_video` is the container timestamp. A session video whose sha256 differs from `session.json` is
-refused; a session with no hash (a killed one) is replayed with a warning. Two replays of one session merge their run ids
+refused; a session with no hash (a killed one) is replayed with a warning. The video is the file named in `recording.path` (so a session recorded as `video.mp4` before this change still replays), which must stay inside the session folder; `.mkv` files are accepted as replay input beside `.mp4` and `.mov`. Two replays of one session merge their run ids
 (a read-merge-write, not a lock).
 
 **Consequences.** The Studio now keeps video by default: disk use is the video bitrate times the duration, to be
