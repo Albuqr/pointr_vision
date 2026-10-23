@@ -1039,3 +1039,32 @@ sensor call is labelled "video + sensor, reported only".
 attempt rows for H4, and per-frame `number` rows for H3): that is a contract bump and the owner's call. H1 and H3b show
 "not scorable" until slice R3 writes `shots.csv` and slice R5 puts numbers in `tracks.csv`. `shots.csv` holds only the
 final call, so video-alone and video-plus-sensor scores need two runs, one without the sensor.
+
+## D-044 · 2026-10-22 · Phase 03 scope extended with the fixes from the 2026-10-22 field test
+
+**Context.** Three two-camera Studio recordings on 2026-10-22 (2, 3 and 8 to 10 people, DroidCam over Wi-Fi), plus a
+replay measurement the same evening, are written up in `.scratch/pointr-vision/field-test-2026-10-22.md`. Measured:
+near the phone each camera processed about 10 fps and dropped 44 to 58% of the frames that arrived; at about 30 m the
+Wi-Fi delivered 2.8 to 3.5 fps. Replaying test 3 from file on AC power, two camera processes ran at 29.5 fps each, the
+same as one alone, so one process per camera (D-022) does not explain the live cap. The notebook was on AC during the
+tests. Every Studio stop was saved as `interrupted` with the detail `Ctrl+C`. Track counts were 230 to 265 for 6 to 8
+people in a few minutes. The owner also reported (not in the logs): IDs lost when someone walks behind another person,
+different IDs for the same person on each camera, camera 2's preview taking 2 to 3 minutes longer to appear, and a
+sessions page that shows raw report text.
+
+**Decision.** (Owner, 2026-10-22.) Every fix from the test goes into phase 03, as a second bounded scope exception
+like D-025: session and logging fixes, the sessions page and camera connection, live performance, and tracking plus
+per-camera calibration. The items and their acceptance criteria are in `docs/phases/PHASE_03.md`, "Scope addition
+(D-044)". The owner rejected DroidCam over USB (cables too short) and chose to test lower camera resolution, hardware
+video encoding and a router near the court. A VPS for the preview and dashboard was considered and not chosen: the
+notebook would still encode the preview frames and also upload them over the same Wi-Fi, and footage of real people
+would leave the notebook.
+
+**Consequences.** Phase 03 now overlaps other phases: cross-camera identity and jersey identity are Track R work (D-033,
+D-039), athlete assignment is phase 11, and per-camera calibration was pulled forward from phase 10 by D-025. Work on
+those items here must not duplicate Track R; each one states which it builds on. Several items change formats and
+need `docs/DATA_CONTRACTS.md` updated and the version bumped before code: the session status and event for a Studio
+stop, audit events, per-camera ready times, power state in `run.json`, a calibration built from a subset of the court
+points, and `.mp4` recording if Media Foundation H.264 is adopted (D-042 chose MKV). The ~10 fps cap's cause is still
+unmeasured; runs L1 to L8 and R1 to R5 in the field-test note come before any performance change. Phase 03's gate
+(A6, A7, report) is still pending and now also covers these items.
