@@ -1,6 +1,6 @@
 # Phases
 
-**Current phase: 03 (session and logging): v0 core built ahead of 02b (D-020); gate, A6, A7 and report pending. 02b stays open.**
+**Current phase: 03 (session and logging): v0 core built ahead of 02b (D-020); gate, A6, A7 and report pending. 02b stays open. Scope extended with the 2026-10-22 field-test fixes (D-044, PHASE_03.md "Scope addition").**
 
 **Approved scope exception (D-025):** Part 5a pulls the local Studio shell from phase 06
 forward, and part 5b pulls visual calibration from phase 10 forward into that app. This is
