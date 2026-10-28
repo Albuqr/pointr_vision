@@ -2,6 +2,12 @@
   "project": { "name": "pointr_vision" },
   "auth": { "strategy": "none", "roles": [] },
   "links": { "checkExternal": false },
+  "security": {
+    "semgrepExcludeRules": [
+      "python.lang.compatibility.python36.python36-compatibility-Popen1",
+      "python.lang.compatibility.python36.python36-compatibility-Popen2"
+    ]
+  },
   "python": {
     "excludePaths": [".venv", "venv", "node_modules", "build", "dist", "testkit", ".jupyter_runtime"],
     "commands": {
