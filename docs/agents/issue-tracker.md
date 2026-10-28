@@ -5,7 +5,7 @@ Tickets for this repo live as GitHub issues. Use the `gh` CLI for all operations
 Repo: `Albuqr/pointr_vision`.
 
 **Stage artifacts are files, not issues.** Briefs, specs, decision records and reviews stay in
-`.scratch/<feature>/` (`brief.md`, `spec.md`, `review.md`; see `docs/pipeline.md`). Only tickets,
+`.scratch/<feature>/` (`brief.md`, `spec.md`, `review.md`). Only tickets,
 triage state and wayfinder maps live on GitHub. Each ticket body links back to its spec path.
 Tickets before the 2026-10-28 switch are files in `.scratch/pointr-vision/issues/` (all done).
 

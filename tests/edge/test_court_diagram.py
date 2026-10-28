@@ -66,7 +66,9 @@ def client(tmp_path):
 def test_the_studio_gets_its_diagram_from_the_court_model_endpoint(client):
     body = client.get("/api/court", params={"kind": "custom", "length_m": 28, "width_m": 15}).json()
     court = court_model("custom", 28.0, 15.0)
-    assert {k: tuple(v) for k, v in body["landmarks"].items()} == pytest.approx(court.landmarks)
+    assert body["landmarks"].keys() == court.landmarks.keys()
+    for name, point in body["landmarks"].items():
+        assert tuple(point) == pytest.approx(court.landmarks[name])
     assert [[tuple(p) for p in line] for line in body["lines"]] == court_lines(court)
     refused = client.get("/api/court", params={"kind": "fiba_full", "length_m": 26, "width_m": 14})
     assert refused.status_code == 422

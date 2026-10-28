@@ -51,8 +51,13 @@ else skip "Segurança: segredos" "desativado"; fi
 
 if [[ "$(cfg security.sast true)" == "true" ]]; then
   if ensure_semgrep; then
+    # security.semgrepExcludeRules: rule ids to skip (a JSON list), e.g. rules for older Pythons
+    excluded=()
+    for rule in $("$PYTHON_BIN" -c 'import json,sys; print(" ".join(json.loads(sys.argv[1] or "[]")))' "$(cfg security.semgrepExcludeRules)"); do
+      excluded+=(--exclude-rule "$rule")
+    done
     step "Segurança: SAST (semgrep $(cfg security.semgrepConfig p/default))" \
-      semgrep scan --config "$(cfg security.semgrepConfig p/default)" --error --metrics=off \
+      semgrep scan --config "$(cfg security.semgrepConfig p/default)" --error --metrics=off "${excluded[@]}" \
       --exclude testkit --exclude node_modules --exclude .venv --exclude testkit.yml \
       --sarif --output "$REPORTS_DIR/semgrep.sarif"
   else step "Segurança: instalar semgrep" false; fi
