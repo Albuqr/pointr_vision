@@ -51,6 +51,9 @@ synced to a server when one is reachable. Basketball first. This is a TCC projec
   `pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cpu`,
   then `pip install -e ".[dev]"`. Check: `python -c "import torch; print(torch.__version__,
   torch.cuda.is_available())"` prints `2.14.1+cpu False`.
+- GPU PC (R2-A3, H2): has a CUDA build of torch, newer than the pin above, installed and tested
+  by the owner. Read its exact version there with the same check (it prints `True`); `run.json`
+  records it on every run.
 - If Git Bash loses PATH: `export PATH="/usr/bin:/bin:/mingw64/bin:/cmd:$PATH"`.
 - Docker Desktop must be running before any `docker build` (server phases).
 - Tooling: `ruff` (lint + format), `pytest`. Run both before declaring anything done.

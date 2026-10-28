@@ -20,7 +20,7 @@
 
 ## R1 Recording, replay and scoring (branch track-r-r1)
 
-**Status:** built and tested on the branch; gate step 3 ran twice (round 2 below). Not merged, not tagged. Manual acceptance is open (below).
+**Status:** merged to `main` (PR #4, merge commit b8e2722) after gate step 3 ran twice (round 2 below). Not tagged. Manual acceptance is open (below).
 
 **What R1 delivers.** (1) `FileRecorder`: raw frames to `video.mkv` on its own thread, a bounded queue that drops and counts, sha256 on stop; on by default, `--no-record` to skip (tickets 01, 02). (2) `frames.csv` `t_video` for live runs. (3) `--replay <session id | folder | .mp4/.mov>`: a new run in the session (original run untouched) or a new session from a video file; every frame processed; a changed video is refused (ticket 03). (4) `python -m services.edge.score <session>`: reads `labels.csv`, prints H1 and H3b beside their thresholds, and H3 and H4 as not scorable (ticket 04). Decisions: D-042, D-043.
 
