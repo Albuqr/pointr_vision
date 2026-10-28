@@ -1,5 +1,6 @@
 """Homography fitting and coordinate conversions, independent of file/camera state."""
 
+import itertools
 import math
 
 import cv2
@@ -18,7 +19,10 @@ RANSAC_THRESHOLD_M = 0.1  # a fit point farther than this from the fit is an out
 MAX_CHECK_ERROR_LIMIT_M = 2.0  # the largest "maximum mean check error" a user may set
 COINCIDENT_COURT_M = 1e-6  # two points this close in court metres are the same physical mark
 COINCIDENT_IMAGE_PX = 1.0  # ... or this close in the image
-MIN_SPREAD = 0.1  # sqrt(minor / major variance) of the fit points, in the image and on the court
+MIN_SPREAD = 0.1  # sqrt(minor / major variance) of the fit points on the court
+# Four fit points with no three nearer than this to one line in the image (D-050). Tuned on
+# synthetic views with 1 px click noise, not taken from a source.
+MIN_IMAGE_OFF_LINE_PX = 3.0
 MIN_HALF_COURT_COVERAGE = 0.2  # fit-point bounding box / full 14 x 15 m half-court area
 COND_LIMIT = 1e7  # a larger condition number is treated as singular or numerically unstable
 
@@ -123,10 +127,32 @@ def _spread(points):
     return 0.0 if major <= 0 else float(math.sqrt(max(minor, 0.0) / major))
 
 
+def _off_line(a, b, c):
+    """Distance of the triangle's nearest point to the line through the other two: its smallest
+    altitude, 2 * area / longest side. 0 for three collinear points."""
+    longest = max(math.dist(a, b), math.dist(b, c), math.dist(a, c))
+    area2 = abs((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]))
+    return 0.0 if longest == 0 else area2 / longest
+
+
+def _general_position_px(points):
+    """The largest, over every four of the points, of the smallest `_off_line` of their four
+    triples. A homography from four points is degenerate when three of them are collinear; a
+    thin point cloud is not (a floor seen low from the side is a flat trapezoid)."""
+    return max(
+        (
+            min(_off_line(*triple) for triple in itertools.combinations(four, 3))
+            for four in itertools.combinations(points, 4)
+        ),
+        default=0.0,
+    )
+
+
 def check_point_set(points, court_dimensions=None):
     """Hold-out integrity. A check point only tests the fit if it is a different physical mark
-    from every fit point, so no two points may coincide, and the fit points must be spread out
-    (not collinear, not bunched) in the image and on the court. Raises ValueError."""
+    from every fit point, so no two points may coincide; the fit points must be spread out (not
+    collinear, not bunched) on the court, and four of them must have no three collinear in the
+    image. Raises ValueError."""
     for i, a in enumerate(points):
         for b in points[i + 1 :]:
             if math.dist(a["court_m"], b["court_m"]) <= COINCIDENT_COURT_M:
@@ -140,13 +166,19 @@ def check_point_set(points, court_dimensions=None):
                     "point must be a different floor mark from every calibration point"
                 )
     fit = [point for point in points if point["role"] == "calibration"]
-    for name, key in (("image", "image_px"), ("court", "court_m")):
-        spread = _spread([point[key] for point in fit])
-        if spread < MIN_SPREAD:
-            raise ValueError(
-                f"the calibration points are collinear or bunched together in the {name} "
-                f"(spread {spread:.3f}, at least {MIN_SPREAD} needed): spread them over the floor"
-            )
+    spread = _spread([point["court_m"] for point in fit])
+    if spread < MIN_SPREAD:
+        raise ValueError(
+            "the calibration points are collinear or bunched together in the court "
+            f"(spread {spread:.3f}, at least {MIN_SPREAD} needed): spread them over the floor"
+        )
+    off_line = _general_position_px([tuple(point["image_px"]) for point in fit])
+    if off_line < MIN_IMAGE_OFF_LINE_PX:
+        raise ValueError(
+            "the calibration points are collinear in the image: no four of them have every "
+            f"point at least {MIN_IMAGE_OFF_LINE_PX:g} px off the line through two others "
+            f"(best {off_line:.1f} px); move a point off the line its neighbours make"
+        )
     if court_dimensions is not None and tuple(map(float, court_dimensions)) == (14.0, 15.0):
         court_points = np.asarray([point["court_m"] for point in fit], dtype=np.float64)
         area_fraction = (

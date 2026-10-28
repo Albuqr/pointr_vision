@@ -328,6 +328,68 @@ def test_fit_points_bunched_in_a_sliver_are_refused():
         fit_calibration(sliver)
 
 
+# -- image rule (D-050): no three of four fit points collinear, not an image spread ratio ---------
+
+
+def square_court_with_image(image):
+    """Fit points at the corners of a 10 x 8 m floor patch, seen at the given image points."""
+    court = [(0, 0), (10, 0), (10, 8), (0, 8)]
+    return [
+        {"image_px": list(map(float, px)), "court_m": list(map(float, m)), "role": "calibration"}
+        for px, m in zip(image, court, strict=True)
+    ]
+
+
+def test_foreshortened_fit_points_in_a_thin_image_band_are_accepted():
+    """A camera low on the sideline sees a floor rectangle as a flat trapezoid: thin in the
+    image (spread ratio under 0.1) but no three points near a line, so the fit is exact."""
+    import cv2
+
+    from services.edge.calibration.homography import _spread
+
+    image = [(100, 300), (1100, 300), (900, 360), (300, 360)]
+    fit = square_court_with_image(image)
+    assert _spread(image) < 0.1
+    to_image = cv2.getPerspectiveTransform(
+        np.float32([p["court_m"] for p in fit]), np.float32(image)
+    ).astype(np.float64)
+
+    def check(x, y):
+        u, v = cv2.perspectiveTransform(np.float64([[[x, y]]]), to_image)[0, 0]
+        return {"image_px": [float(u), float(v)], "court_m": [x, y], "role": "check"}
+
+    result = fit_calibration([*fit, check(5.0, 4.0), check(2.0, 6.0)])
+    assert result["check_mean_m"] < 1e-6
+
+
+@pytest.mark.parametrize("save_anyway", [False, True])
+def test_three_fit_points_on_one_image_line_are_refused_even_with_save_anyway(save_anyway):
+    image = [(0, 0), (1000, 2), (500, 1), (300, 400)]  # the first three on one line
+    source = square_court_with_image(image) + points()[4:]
+    with pytest.raises(ValueError, match="collinear in the image"):
+        fit_calibration(source, save_anyway=save_anyway)
+
+
+@pytest.mark.parametrize("offset_px, refused", [(0.0, True), (2.9, True), (3.1, False)])
+def test_the_image_collinearity_limit_is_three_pixels(offset_px, refused):
+    from services.edge.calibration.homography import check_point_set
+
+    image = [(0, 0), (1000, 0), (500, offset_px), (300, 400)]
+    source = square_court_with_image(image)
+    if refused:
+        with pytest.raises(ValueError, match="collinear in the image"):
+            check_point_set(source)
+    else:
+        check_point_set(source)
+
+
+def test_a_collinear_triple_is_fine_when_four_other_fit_points_are_in_general_position():
+    """Three marks along a baseline are on one line; with two more off it, four of the five
+    still determine the homography."""
+    source = [point(0, 0), point(2, 0), point(4, 0), point(4, 3), point(0, 3)] + points()[4:]
+    assert fit_calibration(source)["check_mean_m"] < 1e-6
+
+
 @pytest.mark.parametrize("limit", [2.5, 100.0, float("inf"), 0.0])
 def test_the_error_limit_is_capped_at_two_metres(limit):
     with pytest.raises(ValueError, match="at most 2.0 m"):
