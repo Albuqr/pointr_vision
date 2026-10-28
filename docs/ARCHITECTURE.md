@@ -63,6 +63,9 @@ pointr/
       store/                 SQLite access (registrations, session index, outbox)
       ui/                    preview window (phase 1-5), local web UI (phase 6+)
       contract.py            CONTRACT_VERSION, the one place the file-format version is written
+      camera_pipeline.py     one camera's wiring (capture, recorder, writer, calibration checks,
+                             frame and track logging, final status); composes the Protocols,
+                             is not one; used by main.py, reused per camera by R2a's group runner
       main.py                CLI entry point
     app/                     Pointr Studio: local FastAPI + React UI (cameras, recording,
                              per-camera calibration); starts the edge CLI once per camera

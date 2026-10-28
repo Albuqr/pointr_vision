@@ -29,8 +29,13 @@ from importlib.metadata import PackageNotFoundError, version
 import cv2
 import numpy as np
 
+from services.edge.camera_pipeline import (
+    CameraPipeline,
+    load_camera_calibration,
+    session_calibration,
+)
 from services.edge.capture.capture import Capture
-from services.edge.capture.health import HealthConfig, HealthMonitor
+from services.edge.capture.health import HealthConfig
 from services.edge.capture.sources import (
     DEFAULT_CAPTURE_SIZE,
     CameraSource,
@@ -45,17 +50,9 @@ from services.edge.perception.loop import Processor, delay_stats, rates
 from services.edge.recording.recorder import FileRecorder
 from services.edge.replay.resolve import ReplayError, resolve_replay
 from services.edge.reports.build import format_summary, write_report
-from services.edge.session.types import (
-    CAMERA_ID_RE,
-    GROUP_ID_RE,
-    FrameRecord,
-    RunCounts,
-    RunMeta,
-    SessionEvent,
-    SessionMeta,
-)
+from services.edge.session.types import CAMERA_ID_RE, GROUP_ID_RE, RunMeta, SessionMeta
 from services.edge.session.writer import FileSessionWriter, device_id
-from services.edge.ui.preview import HudInfo, run_preview
+from services.edge.ui.preview import run_preview
 
 EXIT_OPEN_FAILED = 2
 EXIT_CAPTURE_ERROR = 1
@@ -483,12 +480,11 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
     )
     events: Counter[str] = Counter()
     events_lock = threading.Lock()  # called from the capture, processing and main threads
-    capture: Capture | None = None
 
-    def on_event(ev: HealthEvent) -> None:
+    def on_event(ev: HealthEvent, t0: float | None) -> None:
         with events_lock:
             events[ev.kind] += 1
-            print_event(ev, capture.t0 if capture else None)
+            print_event(ev, t0)
 
     ref = args.replay or args.source
     replay = None
@@ -527,7 +523,7 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
             detector, tracker = load_perception(args, device)
         except Exception as e:  # e.g. no network for the first weights download
             # before any run, so no t0: t_mono is null (D-014)
-            on_event(HealthEvent("error", utc_now(), None, f"model load failed: {e!r}"))
+            on_event(HealthEvent("error", utc_now(), None, f"model load failed: {e!r}"), None)
             return EXIT_CAPTURE_ERROR
 
     try:
@@ -538,25 +534,8 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
     info = dataclasses.replace(info, link=args.link)
     calibration = positions = None
     if args.calibration:
-        from services.edge.calibration.document import load_calibration, run_calibration
-        from services.edge.calibration.homography import CalibrationPositions
-
         try:
-            calibration = load_calibration(args.calibration)
-            if args.camera_id is None:
-                raise ValueError("--camera-id is required when --calibration is used")
-            if calibration["camera_id"] != args.camera_id:
-                raise ValueError(
-                    f"calibration is for camera {calibration['camera_id']!r}, "
-                    f"not {args.camera_id!r}"
-                )
-            size = calibration["image_size"]
-            if (size["width"], size["height"]) != (info.width, info.height):
-                raise ValueError(
-                    f"calibration image size {size['width']}x{size['height']} differs from "
-                    f"capture size {info.width}x{info.height}"
-                )
-            positions = CalibrationPositions(calibration)
+            calibration, positions = load_camera_calibration(args.calibration, args.camera_id, info)
         except (ValueError, OSError) as e:
             source.close()
             print(f"error: calibration cannot be used: {e}", file=sys.stderr)
@@ -572,150 +551,53 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
     # session.json "running": hold it back here and raise it inside the try.
     stop_early = threading.Event()
     held = hold_ctrl_c(stop_early)
-    writer = FileSessionWriter(args.out)
     record = not args.no_record and replay is None  # a replay already has its video
     session_replay = replay is not None and replay.session_dir is not None
+    pipeline = CameraPipeline(
+        source,
+        info,
+        FileSessionWriter(args.out),
+        config,
+        detector=detector,
+        tracker=tracker,
+        recorder=FileRecorder() if record else None,
+        calibration=calibration,
+        positions=positions,
+        replay=replay is not None,
+        on_event=on_event,
+    )
+    writer, capture, processor = pipeline.writer, pipeline.capture, pipeline.processor
+    log_event = pipeline.log_event
     try:
-        session_id = str(uuid.uuid4())
         meta = (
             None
             if session_replay
             else SessionMeta(
-                session_id,
+                str(uuid.uuid4()),
                 device_id(args.out),
                 utc_now(),
                 info,
                 record,
                 args.camera_id,
                 args.group_id,
-                None
-                if calibration is None
-                else {
-                    "calibration_id": calibration["calibration_id"],
-                    "check_error_m": calibration["errors"]["check_mean_m"],
-                    "court": {
-                        "type": calibration["court"].get("type", calibration["court"]["kind"]),
-                        "length_m": calibration["court"]["length_m"],
-                        "width_m": calibration["court"]["width_m"],
-                    },
-                },
+                session_calibration(calibration),
             )
         )
-        run = run_meta(args, info, config, detector, tracker, gpu, replay)
-        if calibration is not None:
-            run = dataclasses.replace(run, calibration=run_calibration(calibration))
-        # positions only for a calibrated run: an uncalibrated run keeps the two-argument call
-        if session_replay:
-            writer.start_run(replay.session_dir, run, positions)
-        elif positions:
-            writer.start(meta, run, positions)
-        else:
-            writer.start(meta, run)
+        pipeline.open_session(
+            run_meta(args, info, config, detector, tracker, gpu, replay),
+            meta=meta,
+            session_dir=replay.session_dir if session_replay else None,
+        )
     except OSError as e:
         release_ctrl_c(held)
         source.close()
         print(f"error: cannot write session data under {args.out!r}: {e}", file=sys.stderr)
         return EXIT_CAPTURE_ERROR
     print(f"session: {writer.dir}")
-    recorder = FileRecorder() if record else None
-    if recorder:
-        recorder.start(writer.dir / VIDEO_FILE, info)
-
-    def rel(t: float | None) -> float | None:
-        """time.perf_counter() to s since the run's t0; None before t0 (D-011, D-014)."""
-        t0 = capture.t0 if capture else None
-        return None if t is None or t0 is None or t < t0 else t - t0
-
-    def log_event(ev: HealthEvent) -> None:
-        writer.event(SessionEvent(ev.t_wall, rel(ev.t_mono), ev.kind, ev.detail))
-        on_event(ev)
 
     if args.calibration_problem:  # before any run, so no t0: t_mono is null
         problem = args.calibration_problem
         log_event(HealthEvent("error", utc_now(), None, f"calibration not used: {problem}"))
-
-    size_state = {"first": True, "problem": None}
-
-    def frame_size_problem(p) -> tuple[str | None, bool]:
-        """Why the calibration does not apply to this frame (a different size), else None. The
-        first frame decides the run: a calibration made at another size would put every position
-        in the wrong place, so the camera fails loudly. A later change (a reconnect at another
-        resolution) stops the positions and is an event; the rows stay. Return whether this is the
-        first-frame failure so its frame and track rows can be queued before stopping the run."""
-        size = calibration["image_size"]
-        height, width = p.frame.image.shape[:2]
-        if (width, height) == (size["width"], size["height"]):
-            problem = None
-        else:
-            problem = (
-                f"frame size {width}x{height} differs from the calibration image size "
-                f"{size['width']}x{size['height']}"
-            )
-        first_frame = size_state["first"]
-        size_state["first"] = False
-        if first_frame and problem:
-            print(f"error: calibration cannot be used: the first {problem}", file=sys.stderr)
-        if problem != size_state["problem"] and problem:
-            log_event(HealthEvent("error", utc_now(), p.frame.t_recv, f"{problem}; no positions"))
-        size_state["problem"] = problem
-        return problem, bool(first_frame and problem)
-
-    def log_frame(p) -> None:
-        if writer.done.is_set():  # nothing is saved any more: end the run (status error)
-            raise RuntimeError("session writer stopped")
-        t0 = capture.t0
-        n_dets = None if detector is None else len(p.dets.xyxy)
-        n_tracks = None if detector is None else len(p.tracks)
-        rec = FrameRecord(
-            p.frame.seq,
-            p.frame.t_recv - t0,
-            p.t_proc_start - t0,
-            p.t_proc_end - t0,
-            n_dets,
-            n_tracks,
-            p.dropped_total,
-            recorder.t_video(p.frame.seq) if recorder else p.frame.t_video if replay else None,
-        )
-        no_positions, first_size_mismatch = (
-            frame_size_problem(p) if calibration is not None else (None, False)
-        )
-        writer.frame(rec)
-        if p.tracks:
-            if no_positions:
-                writer.tracks(p.frame.seq, p.tracks, no_positions)
-            else:
-                writer.tracks(p.frame.seq, p.tracks)
-        if first_size_mismatch:
-            raise RuntimeError(f"calibration cannot be used: the first {no_positions}")
-
-    monitor = HealthMonitor(config)
-    capture = Capture(
-        source,
-        monitor,
-        log_event,
-        on_frame=recorder.write if recorder else None,
-        lossless=replay is not None,
-    )
-    processor = Processor(
-        capture.proc_queue,
-        capture.done,
-        detector,
-        tracker,
-        log_event,
-        on_processed=log_frame,
-        dropped=lambda: capture.dropped,
-    )
-
-    def hud() -> HudInfo:
-        latest = processor.latest
-        return HudInfo(
-            capture_fps=capture.fps,
-            dropped=capture.dropped,
-            proc_fps=processor.fps,
-            app_delay_ms=latest.app_delay_ms if latest else None,
-            people=None if detector is None else (len(latest.dets.xyxy) if latest else 0),
-            tracks=None if detector is None else (len(latest.tracks) if latest else 0),
-        )
 
     http_preview = None
 
@@ -732,8 +614,8 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
 
             http_preview = HttpPreview(
                 args.http_preview,
-                lambda: monitor.state,
-                hud,
+                lambda: pipeline.monitor.state,
+                pipeline.hud,
                 lambda error: log_event(
                     HealthEvent(
                         "error",
@@ -748,15 +630,16 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
             http_preview.start()
             processor.on_preview = http_preview.publish
             print(f"preview_port: {http_preview.port}", flush=True)
-        capture.start()
-        processor.start()
-        while capture.t0_wall is None:  # set first thing by the capture thread
-            time.sleep(0.001)
-        writer.set_t0(capture.t0, capture.t0_wall)
+        pipeline.start()
         if args.preview:
             title = f"Pointr {args.camera_id} (q to quit)" if args.camera_id else None
             run_preview(
-                lambda: processor.latest, processor.done, hud, lambda: monitor.state, until, title
+                lambda: processor.latest,
+                processor.done,
+                pipeline.hud,
+                lambda: pipeline.monitor.state,
+                until,
+                title,
             )
         else:
             while not processor.done.wait(0.1):
@@ -776,69 +659,12 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
     finally:
         if http_preview is not None:
             http_preview.close()
-        # capture first, then processing drains the last frame (ARCHITECTURE section 5).
-        # More Ctrl+C presses must not skip a step or the final write: every wait below is
-        # bounded, so they are ignored until the session is saved.
+        # The camera's shutdown path (ARCHITECTURE section 5). More Ctrl+C presses must not skip
+        # a step or the final write: every wait in it is bounded, so they are ignored until the
+        # session is saved.
         previous = ignore_ctrl_c()
-        cap_ok = capture.stop()
-        # without a stopped capture there is no last frame to drain: do not wait for it
-        proc_ok = processor.stop(10.0 if cap_ok else 0.0)
-        if cap_ok:
-            source.close()
-        if not cap_ok:
-            print(
-                "warning: capture thread did not stop in time; source left open; "
-                "counts may be short",
-                file=sys.stderr,
-            )
-        if not proc_ok:
-            print("warning: processing did not stop in time; counts may be short", file=sys.stderr)
-        if session_status == "ended" and (
-            capture.error or processor.error or not (cap_ok and proc_ok)
-        ):
-            session_status = "error"
-        if not (cap_ok and proc_ok):  # the shortfall goes into the data, not only stderr
-            which = " and ".join(
-                n for n, ok in (("capture", cap_ok), ("processing", proc_ok)) if not ok
-            )
-            detail = f"{which} did not stop in time; counts may be short"
-            log_event(HealthEvent("error", utc_now(), time.perf_counter(), detail))
-        rec_dropped = None
-        if recorder:  # after capture has stopped: every frame it offered is queued
-            try:  # bounded, and never in the way of the final write below
-                rec = recorder.stop()
-                rec_dropped = rec.frames_dropped
-                if rec.frames_dropped:
-                    detail = f"{rec.frames_dropped} frame(s) not recorded (queue full or failure)"
-                    log_event(
-                        HealthEvent("recorder_backlog", utc_now(), time.perf_counter(), detail)
-                    )
-                if recorder.size_dropped:
-                    seq, (w, h) = recorder.first_size_drop
-                    fw, fh = recorder.frame_size
-                    detail = (
-                        f"{recorder.size_dropped} frame(s) not recorded: another size than the "
-                        f"first ({fw}x{fh}); the first was seq {seq} at {w}x{h}"
-                    )
-                    log_event(
-                        HealthEvent("recorder_backlog", utc_now(), time.perf_counter(), detail)
-                    )
-                if rec.sha256:
-                    writer.set_recording_sha256(rec.sha256)
-            except Exception as e:
-                recorder.error = recorder.error or e
-            if recorder.error:
-                detail = f"recording stopped: {recorder.error!r}"
-                log_event(HealthEvent("error", utc_now(), time.perf_counter(), detail))
-                session_status = "error"
-        counts = RunCounts(
-            capture.captured, processor.processed, capture.dropped, processor.unprocessed,
-            rec_dropped,
-        )  # fmt: skip
         try:
-            writer.close(session_status, counts)
-        except Exception as e:  # cannot write at all: say so, keep shutting down
-            print(f"error: final session files not written: {e!r}", file=sys.stderr)
+            session_status = pipeline.stop(session_status)
         finally:
             if previous is not None:
                 signal.signal(signal.SIGINT, previous)
@@ -866,7 +692,7 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
             status = EXIT_INTERRUPTED
         except OSError:  # stdout is gone (the launcher died): the files are already saved
             pass
-    if (capture.error or processor.error or writer.status != session_status) and not status:
+    if (pipeline.failed or writer.status != session_status) and not status:
         status = EXIT_CAPTURE_ERROR
     return status
 
