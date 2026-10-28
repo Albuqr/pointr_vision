@@ -4,7 +4,8 @@
 
 It speaks the same protocol: creates <OUT>/<CAMERA_ID>_<uuid>/ with a running session.json,
 prints "session: <dir>", prints a tick line every 50 ms, and on any input on stdin (or its end)
-finishes the session as "interrupted" and exits 130, like the real child after Ctrl+C.
+finishes the session as "interrupted" and exits 130, like the real child after Ctrl+C. What it
+read on stdin is saved as <OUT>/stdin_<CAMERA_ID>.
 
 MODES
   ok       the above
@@ -38,9 +39,10 @@ stop = threading.Event()
 
 def watch_stdin() -> None:
     try:
-        os.read(0, 64)
+        line = os.read(0, 64)
     except OSError:
-        pass
+        line = b""
+    (out / f"stdin_{camera_id}").write_bytes(line)  # what the launcher sent, for the tests
     stop.set()
 
 

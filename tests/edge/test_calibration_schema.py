@@ -132,10 +132,11 @@ def test_older_calibration_with_kind_only_remains_valid(kind):
     assert "type" not in legacy["court"]  # reading never rewrites the saved input object
 
 
-def test_a_calibration_saved_under_0_10_0_still_loads():
-    """0.11.0 changes no calibration format, so files saved under 0.10.0 stay usable."""
+@pytest.mark.parametrize("version", ["0.10.0", "0.11.0"])
+def test_a_calibration_saved_under_an_earlier_version_still_loads(version):
+    """0.11.0 and 0.12.0 change no calibration format, so files saved under them stay usable."""
     saved = copy.deepcopy(EXAMPLE)
-    saved["contract_version"] = "0.10.0"
+    saved["contract_version"] = version
     assert validate_calibration(saved)["calibration_id"] == EXAMPLE["calibration_id"]
 
 

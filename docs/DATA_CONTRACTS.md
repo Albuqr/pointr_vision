@@ -1,6 +1,6 @@
 # Data contracts
 
-Contract version: **0.11.0**. Any change bumps the version (minor for additive fields, major
+Contract version: **0.12.0**. Any change bumps the version (minor for additive fields, major
 for removals or meaning changes) and needs a `DECISIONS.md` entry. JSON Schemas in
 `contracts/` are written from this file and tests check them against it (D-009).
 
@@ -63,7 +63,7 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
 
 ```json
 {
-  "contract_version": "0.11.0",
+  "contract_version": "0.12.0",
   "session_id": "uuid",
   "device_id": "uuid",
   "camera_id": "cam1 | null",
@@ -111,7 +111,14 @@ Event `t_mono` is `null` for events that precede the run's `t0`, such as
 `source_open_failed` (D-014).
 Event kinds: `source_open_failed`, `source_lost`, `source_recovered`,
 `frozen_frames`, `dark_frames`, `writer_backlog`, `recorder_backlog`, `interrupted`, `error`,
-`camera_gap`, `sensor_outage`, `startup_check_failed`, `rim_drift` (the last four are 0.11.0, Track R).
+`camera_gap`, `sensor_outage`, `startup_check_failed`, `rim_drift` (those four are 0.11.0, Track R),
+`stopped` (0.12.0, D-049).
+`stopped` means the session was asked to stop and ended normally: status `ended`, not `interrupted`. Its
+`detail` starts with the source of the request and a colon; the only source so far is `ui` (Studio's stop
+button, through the launcher's stop channel), e.g. `ui: stop requested in Studio`. A Ctrl+C, the launcher's own
+Ctrl+C, Studio shutting down while it records, or the launcher's stop channel closing still ends the session
+`interrupted` with an `interrupted` event. A Studio stop before the session exists (model still loading) writes
+nothing; the process prints the `stopped` event and exits 0.
 `camera_gap` and `sensor_outage` are written when the camera stream or the rim sensor stops answering
 and again when it returns (`detail` says start or end and the seconds since t0); the final intervals are
 in `run.json` `gaps` and `outages`. `startup_check_failed` names the failed check in `detail`.
@@ -123,7 +130,7 @@ calibration used by this session and records its mean held-out check residual in
 
 ```json
 {
-  "contract_version": "0.11.0",
+  "contract_version": "0.12.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "mode": "live | replay",
@@ -321,7 +328,7 @@ One report per run, one per camera: there is no fusion across cameras.
 
 ```json
 {
-  "contract_version": "0.11.0",
+  "contract_version": "0.12.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "camera_id": "cam1 | null",
@@ -616,7 +623,7 @@ recorded video and is compared with `frames.csv` `t_video`; shots and tracks joi
 
 ```json
 {
-  "contract_version": "0.11.0",
+  "contract_version": "0.12.0",
   "fusion_id": "uuid",
   "group_id": "token",
   "created_at": "2026-12-01T18:50:00Z",

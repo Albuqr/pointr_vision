@@ -60,6 +60,8 @@ from services.edge.ui.preview import HudInfo, run_preview
 EXIT_OPEN_FAILED = 2
 EXIT_CAPTURE_ERROR = 1
 EXIT_INTERRUPTED = 130
+# the `stopped` event of Studio's stop (DATA_CONTRACTS section 2, D-049): source, then a sentence
+UI_STOP_DETAIL = "ui: stop requested in Studio"
 
 
 def positive(cast):
@@ -386,9 +388,28 @@ def stdin_ready() -> bool:
     raise OSError(error, "stdin is not a pipe")
 
 
-def stop_on_stdin() -> None:
+@dataclasses.dataclass
+class StopRequest:
+    """Where the launcher's stop came from: `source` is "ui" after a `stop ui` line (Studio's
+    stop, D-049) and None after a plain `stop`, the pipe closing, or a Ctrl+C."""
+
+    source: str | None = None
+
+    @property
+    def ui(self) -> bool:
+        """Studio's stop: the session ends `ended` with a `stopped` event, not `interrupted`."""
+        return self.source == "ui"
+
+
+def stop_source(line: str) -> str | None:
+    """The source a stop line names; anything but `stop ui` is a plain stop."""
+    return "ui" if line.split() == ["stop", "ui"] else None
+
+
+def stop_on_stdin(request: StopRequest | None = None) -> None:
     """Start a thread that turns any input on stdin, or its end, into Ctrl+C: the launcher's way
-    to stop this process, also when the launcher itself dies (D-022). Fires once."""
+    to stop this process, also when the launcher itself dies (D-022). Fires once. The line's
+    source goes into `request` before the Ctrl+C, so the main thread reads it in its handler."""
 
     if hasattr(signal, "SIGBREAK"):
         # Ctrl+Break (unlike Ctrl+C) reaches a child in its own process group and would kill it
@@ -405,6 +426,11 @@ def stop_on_stdin() -> None:
         except (OSError, ValueError, AttributeError) as e:  # a terminal, a file, no stdin
             print(f"warning: --stop-on-stdin cannot watch stdin ({e}); use Ctrl+C", file=sys.stderr)
             return
+        if request is not None:
+            try:  # the launcher writes whole lines; a closed pipe reads as "" at once
+                request.source = stop_source(sys.stdin.readline())
+            except (OSError, ValueError, AttributeError):  # unreadable: a plain stop
+                pass
         _thread.interrupt_main()  # the same path as Ctrl+C: KeyboardInterrupt in the main thread
 
     threading.Thread(target=watch, name="stdin-stop", daemon=True).start()
@@ -433,16 +459,20 @@ def link_conflict(kind: str, link: str | None) -> str | None:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    stop = StopRequest()
     try:
         if args.stop_on_stdin:
-            stop_on_stdin()
-        return run(args)
+            stop_on_stdin(stop)
+        return run(args, stop)
     except KeyboardInterrupt:  # Ctrl+C before capture started (model load, slow stream open)
+        if stop.ui:  # no session yet; Studio's stop is still a normal end
+            print_event(HealthEvent("stopped", utc_now(), None, UI_STOP_DETAIL), None)
+            return 0
         print_event(HealthEvent("interrupted", utc_now(), None, "Ctrl+C"), None)
         return EXIT_INTERRUPTED
 
 
-def run(args: argparse.Namespace) -> int:
+def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
     config = HealthConfig(
         lost_reads=args.lost_reads,
         lost_secs=args.lost_secs,
@@ -733,9 +763,12 @@ def run(args: argparse.Namespace) -> int:
                 if until is not None and time.perf_counter() >= until:
                     break
     except KeyboardInterrupt:
-        session_status = "interrupted"
-        status = EXIT_INTERRUPTED
-        log_event(HealthEvent("interrupted", utc_now(), time.perf_counter(), "Ctrl+C"))
+        if stop is not None and stop.ui:  # Studio's stop: a normal end (D-049)
+            log_event(HealthEvent("stopped", utc_now(), time.perf_counter(), UI_STOP_DETAIL))
+        else:
+            session_status = "interrupted"
+            status = EXIT_INTERRUPTED
+            log_event(HealthEvent("interrupted", utc_now(), time.perf_counter(), "Ctrl+C"))
     except Exception as e:  # one shutdown path; the failure is an event, not a traceback
         session_status = "error"
         status = EXIT_CAPTURE_ERROR

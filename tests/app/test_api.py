@@ -37,6 +37,7 @@ class FakeLauncher:
         self.children = [Child(camera) for camera in cameras]
         self.event = threading.Event()
         self.stop_called = False
+        self.stop_source = None
         FakeLauncher.instances.append(self)
 
     def run(self):
@@ -45,8 +46,9 @@ class FakeLauncher:
             child.running = False
         return 0
 
-    def stop_all(self, reason=None):
+    def stop_all(self, reason=None, source=None):
         self.stop_called = True
+        self.stop_source = source
         self.event.set()
 
 
@@ -351,6 +353,7 @@ def test_group_lifecycle_stays_running_until_explicit_stop(client):
     stopped = client.post("/api/recording/stop")
     assert stopped.json()["running"] is False
     assert FakeLauncher.instances[-1].stop_called
+    assert FakeLauncher.instances[-1].stop_source == "ui"  # a normal end, not a Ctrl+C (D-049)
 
 
 def test_application_shutdown_uses_clean_stop(tmp_path):
@@ -360,6 +363,8 @@ def test_application_shutdown_uses_clean_stop(tmp_path):
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 1234)) as test_client:
         assert test_client.post("/api/recording/start").status_code == 200
     assert FakeLauncher.instances[-1].stop_called
+    # closing Studio mid-recording is not the operator's stop: the sessions end interrupted
+    assert FakeLauncher.instances[-1].stop_source is None
 
 
 def test_camera_test_uses_fixture_without_model_and_is_refused_during_recording(client, tmp_path):

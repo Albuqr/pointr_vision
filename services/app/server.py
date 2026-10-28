@@ -14,6 +14,7 @@ import webbrowser
 from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
 import cv2
 import numpy as np
@@ -253,12 +254,14 @@ class Studio:
             sock.bind(("127.0.0.1", 0))
             return sock.getsockname()[1]
 
-    def stop(self):
+    def stop(self, source: Literal["ui"] | None = None):
+        """Stop the group. `source` "ui" is the operator's stop: each session ends normally with
+        a `stopped` event (D-049); without it (Studio shutting down) they end `interrupted`."""
         with self.lock:
             launcher = self.launcher
             worker = self.worker
         if worker and worker.is_alive():
-            launcher.stop_all("[app] stop requested")
+            launcher.stop_all("[app] stop requested", source=source)
             worker.join(timeout=50)
         if not worker or not worker.is_alive():
             self.active_group_path.unlink(missing_ok=True)
@@ -789,7 +792,7 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
 
     @app.post("/api/recording/stop")
     def stop_recording():
-        return studio.stop()
+        return studio.stop(source="ui")
 
     @app.get("/api/status")
     def recording_status():
