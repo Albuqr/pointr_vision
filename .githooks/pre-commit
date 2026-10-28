@@ -9,7 +9,14 @@ if git diff --cached --name-only | grep -E '(^|/)\.env(\.testkit)?$' >/dev/null;
   exit 1
 fi
 
-# 2. Lint, then the default tests minus R1's recording and replay files (about 2 of the
+# 2. A commit that only touches Markdown skips lint and tests; CI still runs them on push.
+staged=$(git diff --cached --name-only --diff-filter=ACMRD)
+if [[ -n "$staged" ]] && ! grep -v '\.md$' <<<"$staged" >/dev/null; then
+  echo "pre-commit: Markdown only, skipping lint and tests"
+  exit 0
+fi
+
+# 3. Lint, then the default tests minus R1's recording and replay files (about 2 of the
 #    suite's 5.5 minutes on the dev notebook, measured 2026-10-28). Run those three yourself when touching recording
 #    or replay.
 py=python

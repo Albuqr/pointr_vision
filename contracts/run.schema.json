@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:pointr:contracts:0.12.0:run",
+  "$id": "urn:pointr:contracts:0.13.0:run",
   "title": "run.json",
   "description": "DATA_CONTRACTS.md section 3. Missing values are null, never 0.",
   "type": "object",
@@ -11,7 +11,7 @@
     "checks", "clock", "t0_mono", "objects", "gaps", "outages"
   ],
   "properties": {
-    "contract_version": {"const": "0.12.0"},
+    "contract_version": {"const": "0.13.0"},
     "run_id": {"$ref": "#/$defs/uuid4"},
     "session_id": {"$ref": "#/$defs/uuid4"},
     "mode": {"enum": ["live", "replay"]},

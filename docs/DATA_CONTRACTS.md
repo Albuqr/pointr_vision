@@ -1,6 +1,6 @@
 # Data contracts
 
-Contract version: **0.12.0**. Any change bumps the version (minor for additive fields, major
+Contract version: **0.13.0**. Any change bumps the version (minor for additive fields, major
 for removals or meaning changes) and needs a `DECISIONS.md` entry. JSON Schemas in
 `contracts/` are written from this file and tests check them against it (D-009).
 
@@ -63,7 +63,7 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
 
 ```json
 {
-  "contract_version": "0.12.0",
+  "contract_version": "0.13.0",
   "session_id": "uuid",
   "device_id": "uuid",
   "camera_id": "cam1 | null",
@@ -130,7 +130,7 @@ calibration used by this session and records its mean held-out check residual in
 
 ```json
 {
-  "contract_version": "0.12.0",
+  "contract_version": "0.13.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "mode": "live | replay",
@@ -328,7 +328,7 @@ One report per run, one per camera: there is no fusion across cameras.
 
 ```json
 {
-  "contract_version": "0.12.0",
+  "contract_version": "0.13.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "camera_id": "cam1 | null",
@@ -394,8 +394,9 @@ selected court type and dimensions in the nested `court.type`, `court.length_m` 
 `court.width_m` values. Calibration files also keep `court.kind` as a compatibility alias equal
 to `court.type`; older files with only `court.kind` remain valid. Its landmarks are the `fiba_full` landmarks at x <= 14 m,
 with identical coordinates, plus corners and centre on x=14 m. Out-of-bounds projected points
-remain in metres and have `in_court=false`. The fit requires spread >= 0.1 in image and court
-coordinates and, for a half court, fit-point bounding-box coverage >= 20% of the 210 m² court
+remain in metres and have `in_court=false`. The fit requires spread >= 0.1 in court
+coordinates (since 0.13.0, no three-collinear in the image instead of an image spread; section 9)
+and, for a half court, fit-point bounding-box coverage >= 20% of the 210 m² court
 area. This area threshold rejects fits clustered in a small region such as the key while allowing
 baseline and midcourt corners to span the floor.
 
@@ -464,10 +465,14 @@ metres; separate calibration/check means and maximum check residual; the configu
 check mean; and whether the user forced saving above that error. At least four fit points and two
 held-out check points are required. Check points never participate in fitting. No two points may
 mark the same place (within 1e-6 m on the court or 1 px in the image), so a check point is a
-different floor mark from every fit point; the fit points must not be collinear or bunched (the
-square root of the ratio of their minor to major variance is at least 0.1, in the image and on the
-court). The configured maximum check mean is at most 2.0 m. Saving anyway can override the
-check-mean threshold only, not these minimums, the point rules or the homography checks
+different floor mark from every fit point; the fit points must not be collinear or bunched on the
+court (the square root of the ratio of their minor to major variance is at least 0.1), and must not
+be collinear in the image: at least four of them have no three within 3 px of one line (0.13.0,
+D-050). The image rule is not a spread ratio, because perspective squashes a camera's view of
+part of the court into a thin band of the image without making the fit degenerate; any visible
+subset of landmarks that meets these rules may be used, so a camera that sees only part of the
+court is calibrated from the points it sees. The configured maximum check mean is at most 2.0 m.
+Saving anyway can override the check-mean threshold only, not these minimums, the point rules or the homography checks
 (finite, invertible, condition number at most 1e7, every point in front of the horizon). A loader
 recomputes the residuals, the mean errors and `forced` from the homography and the points and
 refuses a file where they disagree. The audit frame is the JPEG-encoded copy (lossy, no
@@ -498,8 +503,9 @@ All paths are served on loopback by `python -m services.app`.
   of the points sent), `projected_court_lines`, `court`, `ransac_threshold_m` and
   `ransac_dropped_points` (indices of fit points RANSAC left out); `PUT` adds `calibration` (the
   saved document) and `path`. A refusal is `422` with `{"detail": message}`: too few points, a
-  check point on a fit point, collinear or bunched fit points, a singular homography, a limit
-  above 2.0 m, a point outside the frame or court. `409` when the frame token is stale.
+  check point on a fit point, fit points collinear or bunched on the court or collinear in the
+  image, a singular homography, a limit above 2.0 m, a point outside the frame or court. `409`
+  when the frame token is stale.
 - `GET /api/cameras/{id}/calibration` returns the active document, `null` when there is none, or
   `422` when it cannot be read;
   `GET /api/cameras/{id}/calibration/compare` returns `{audit_frame, fresh_frame,
@@ -623,7 +629,7 @@ recorded video and is compared with `frames.csv` `t_video`; shots and tracks joi
 
 ```json
 {
-  "contract_version": "0.12.0",
+  "contract_version": "0.13.0",
   "fusion_id": "uuid",
   "group_id": "token",
   "created_at": "2026-12-01T18:50:00Z",
