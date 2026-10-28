@@ -67,8 +67,8 @@ work, not duplicate it.
   parallel, one shared model, tracker frame rate set from the real input rate.
 
 ### Tracking and calibration
-- Fewer ID changes when a person walks behind another (re-identification after occlusion).
-- The same person gets the same ID across cameras (builds on Track R two-camera fusion).
+- Fewer ID changes when a person walks behind another (re-identification after occlusion). Uses R2a's colour and box-height cue (D-045).
+- ~~The same person gets the same ID across cameras.~~ Moved to Phase R slice R2a (D-045).
 - Per-camera calibration that uses only the court points that camera can see, not the
   full court. **contract**
 
@@ -85,8 +85,9 @@ work, not duplicate it.
 | B8 | Camera discovery finds a DroidCam stream on the current network | manual |
 | B9 | Runs L1–L8 recorded, cause of the cap named, chosen fix measured against L1 | manual, in the phase report |
 | B10 | ID changes per person on a recorded occlusion clip go down against the current tracker | integration on a recorded clip, plus manual check |
-| B11 | One person seen by both cameras has one ID in the fused output | integration (Track R fixtures) |
+| B11 | ~~One person seen by both cameras has one ID in the fused output~~ Moved to R2a-A2 (D-045) | — |
 | B12 | A calibration fitted from a visible subset of court points saves, and check points report their error | unit + manual |
+| B13 | A calibration rejected at fit time shows the reason (points, error) and offers a retry or starting that camera uncalibrated, recorded as a failed calibration check (spec CR-1, D-048) | integration |
 
 ## Gate reviewers
 `code-reviewer`, `test-auditor`, `contract-guardian`, `reliability-reviewer`.

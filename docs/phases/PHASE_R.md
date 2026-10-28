@@ -23,16 +23,20 @@ gate below. Contracts first: R0 writes every new format before any code reads or
 |---|---|---|---|---|
 | R0 | Contracts and decisions: `objects.csv`, `events.csv`, `shots.csv`, `run.json` blocks `checks` and `clock`, `tracks.csv` columns `player_number` and `id_source`, fusion outputs; JSON Schemas; `CONTRACT_VERSION` 0.11.0; a `DECISIONS.md` entry per accepted ADR | all new formats | 0001–0006 | all |
 | R1 | Recording and replay for the rig, the hand-label file and the scoring tool | FR-013, RF08 video, RF09, RNF04, RNF05 | — | H1–H4 (instrument) |
+| R2a | One process for all cameras of a group (D-045, ADR 0007): one shared detector, one tracker state, track IDs shared across cameras; matching by court position and time, fallback clothing colour and box height (no model); contract bump for group-wide track IDs first | FR-004 (live part), FR-007, FR-014 | 0007 | H3b, H6 |
 | R2 | Ball and rim detection and the H2 baseline: measure first (ball pixel size, 2/5/10/15 fps subsample), then fine-tune; rim fixed per session | FR-008, NFR-001, NFR-002 | 0004 | H1, H2 |
 | R3 | Shot layer: attempts, make/miss on video alone, shooter by last possession, shot map | FR-010 (video), FR-011, FR-012 | 0005 | H1, H4 |
 | R4 | Rim sensor and clock model: `EventSource`, firmware, ping-pong sync, LED test, outage handling, sensor matching | FR-005, FR-009, FR-010 (sensor), FR-015 | 0002, 0003 | H1 |
 | R5 | Identity: `IdentityResolver`, number voting, roster, then colour and position gating | FR-006, FR-007, NFR-003 | 0006 | H3, H3b |
-| R6 | Two-camera fusion, failure handling and the startup checks in Studio | FR-001, FR-003, FR-004, FR-014 | 0001 | H6, H7 |
+| R6 | Two-camera fusion (combine and compare only; matching is live since R2a), failure handling and the startup checks in Studio | FR-001, FR-003, FR-004, FR-014 | 0001 | H6, H7 |
 
 ## Out of scope
 The backlog table of the spec: "guarded by", session browser, live metrics (H8), cloud sync,
 coach-facing report (H5), learned re-identification, shot form. Consent and minors (adults only in
 the owner's test group). Phases 03–09 and 10–14 scope.
+
+## Owner decisions (2026-10-28)
+D-045 to D-047: slice R2a (one process, shared live IDs) is added before R2; December covers every slice; order in D-047.
 
 ## Owner decisions (2026-10-19)
 Decided (D-034 to D-040):
@@ -40,9 +44,9 @@ Decided (D-034 to D-040):
 2. **New dependencies** are approved by category: a labelling and fine-tuning workflow (R2), a number-recognition model (R5), ESP32 firmware tooling in a `firmware/` folder (R4). Each slice names the exact packages or models here before they are installed.
 3. **Spec changes** CR-2 (FR-005), CR-3 (FR-006) and CR-4 (FR-009) are accepted and the spec is amended.
 
-Still open:
-- **PC-to-rim distance.** About 5 m or less picks a USB cable (ADR 0003, L1); more picks ESP-NOW (L2). L2 is assumed until the owner gives it.
-- **Spec CR-1.** What behaved differently on a failed calibration (D-027 already starts the camera uncalibrated with a warning).
+Closed 2026-10-28 (D-048):
+- **PC-to-rim distance.** More than 5 m: ESP-NOW with a USB gateway (ADR 0003, L2).
+- **Spec CR-1.** The owner saw a calibration rejected at fit time with no way forward; fixed in phase 03's per-camera partial calibration item.
 ## Acceptance
 | # | Criterion | Test |
 |---|---|---|
@@ -52,6 +56,11 @@ Still open:
 | R1-A2 | MP4 and MOV replay (RNF05) | integration |
 | R1-A3 | Given a hand-labelled session, the scoring tool prints H1, H3, H3b and H4 next to their thresholds (AC-013.1) | integration on a fixture |
 | R1-A4 | The scoring tool's results equal a hand calculation on one session | manual |
+| R2a-A1 | One process runs two cameras with one detector loaded; each camera's session folder is written as before | integration |
+| R2a-A2 | A person seen by both cameras in the overlap zone has one track ID in both cameras' `tracks.csv` | integration on fixtures, then manual |
+| R2a-A3 | A camera without a valid calibration falls back to colour and box height, and a session event says so | integration |
+| R2a-A4 | One camera's stream loss leaves the other camera recording (FR-014); a crash leaves every camera's files readable (NFR-004) | integration |
+| R2a-A5 | ID changes per person on a recorded occlusion clip, and per-camera fps, recorded against the pre-R2a run | manual, record `run_id` |
 | R2-A1 | Ball and rim are boxed around a recorded release (AC-008.1) | integration on a fixture |
 | R2-A2 | Subsampled runs at 2, 5, 10 and 15 fps report ball pixel size and the share of frames with the ball found | integration |
 | R2-A3 | The H2 baseline on the borrowed GPU PC logs total fps, time per stage and delay with two phones (NFR-001, NFR-002) | manual, record `run_id` |
@@ -79,7 +88,7 @@ Still open:
 `docs/phases/PHASE_R_REPORT.md` and a tag `track-r-<slice>` after each slice's gate passes.
 
 **Gate reviewers:** `code-reviewer` and `test-auditor` on every slice; `contract-guardian` on R0 and on
-any slice that writes or reads the new files; `reliability-reviewer` on R1, R4 and R6 (recording,
+any slice that writes or reads the new files; `reliability-reviewer` on R1, R2a, R4 and R6 (recording,
 outages, gaps). `security-reviewer` is not needed: nothing leaves the owner's PC.
 
 Hypotheses are decided only by the manual acceptance rows on real hardware, with the thresholds of

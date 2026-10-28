@@ -6,7 +6,7 @@ description: Stage 4. Slice the spec into tracer-bullet tickets and implement th
 # Build
 
 ## Procedure
-1. Run **`to-tickets`** on `spec.md`. The tickets land in `.scratch/<feature>/issues/NN-<slug>.md`: vertical slices with blocking edges, refactors first. Every ticket names the FR/AC IDs it delivers.
+1. Run **`to-tickets`** on `spec.md`. The tickets land as GitHub issues on `Albuqr/pointr_vision` (see `docs/agents/issue-tracker.md`): vertical slices with blocking edges, refactors first. Every ticket names the FR/AC IDs it delivers.
 2. Implement:
    - Small or single-session work → **`implement`** per ticket. Clear context between tickets.
    - Many unblocked tickets → **`implement-spec`**, which runs parallel sub-agents on one integration branch.
