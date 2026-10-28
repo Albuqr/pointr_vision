@@ -14,7 +14,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from fixtures import make_clips
 from scripts import run_cameras as rc
 from services.edge import main as cli
 from services.edge.capture.capture import Capture
@@ -270,6 +269,8 @@ def test_ctrl_c_stops_every_child_and_no_session_stays_running(tmp_path, capsys)
     assert run_then_ctrl_c(lau, all_ticking(tmp_path, cams), presses=3) == 0
     for c in cams:
         assert (tmp_path / f"stopped_{c}").exists(), "the stop request never reached the child"
+        # not a UI stop (D-049); a text-mode pipe ends the line with \r\n on Windows
+        assert (tmp_path / f"stdin_{c}").read_bytes().split() == [b"stop"]
         assert status_of(tmp_path, c) == "interrupted"
         assert not lau.children[cams.index(c)].killed
     out = capsys.readouterr().out
@@ -277,6 +278,32 @@ def test_ctrl_c_stops_every_child_and_no_session_stays_running(tmp_path, capsys)
     table = out[out.index("result:") :]
     assert table.count("interrupted") == 3 and "running" not in table
     assert "cam1_" in table  # the session folder is in the table
+
+
+def test_a_ui_stop_names_its_source_on_every_childs_stop_channel(tmp_path):
+    """Studio stops from another thread while run() is in its worker (D-049)."""
+    cams = ["cam1", "cam2"]
+    lau = launcher(tmp_path, dict.fromkeys(cams, "ok"))
+    worker = threading.Thread(target=lau.run)
+    worker.start()
+    ready = all_ticking(tmp_path, cams)
+    deadline = time.monotonic() + 20
+    while not ready() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    try:
+        lau.stop_all("[app] stop requested", source="ui")
+    finally:
+        lau.stop(lau.children)  # never leave the worker waiting on its children
+        worker.join(30)
+    assert not worker.is_alive()
+    for c in cams:
+        assert (tmp_path / f"stdin_{c}").read_bytes().split() == [b"stop", b"ui"]
+
+
+def test_a_stop_source_the_child_does_not_know_is_refused(tmp_path):
+    """The child ends only `stop ui` normally; any other source would end interrupted unseen."""
+    with pytest.raises(ValueError, match="unknown stop source"):
+        launcher(tmp_path, {}).stop([], source="app")
 
 
 def test_a_child_that_fails_to_start_does_not_stop_the_others(tmp_path, capsys):
@@ -336,14 +363,6 @@ def test_the_launcher_ends_by_itself_when_every_camera_has_stopped(tmp_path):
 # -- the real child ---------------------------------------------------------------------------
 
 
-@pytest.fixture(scope="module")
-def long_clips(tmp_path_factory) -> list[Path]:
-    """Two 30 s synthetic clips (plays in real time, so Ctrl+C lands mid-recording)."""
-    folder = tmp_path_factory.mktemp("long")
-    frames = [make_clips.scene(i % 30) for i in range(30 * 15)]
-    return [make_clips.write_clip(folder / f"long{i}.mp4", frames) for i in (1, 2)]
-
-
 @pytest.mark.parametrize("how", ["stop line", "stdin closed"])
 def test_real_child_stops_like_ctrl_c_on_stdin(tmp_path, long_clips, how):
     out = tmp_path / "out"
@@ -375,6 +394,37 @@ def test_real_child_stops_like_ctrl_c_on_stdin(tmp_path, long_clips, how):
     assert session["camera_id"] == "cam1" and session["group_id"] == GROUP
     assert folder.name == f"cam1_{session['session_id']}"
     assert "session interrupted:" in text
+
+
+def test_real_child_ends_normally_on_a_ui_stop_line(tmp_path, long_clips):
+    """Studio's stop (D-049): `stop ui` takes the same shutdown path but is a normal end."""
+    out = tmp_path / "out"
+    p = subprocess.Popen(
+        [sys.executable, "-u", "-m", "services.edge.main", "--no-detect", "--out", str(out),
+         "--source", str(long_clips[0]), "--camera-id", "cam1", "--group-id", GROUP,
+         "--stop-on-stdin"],  # fmt: skip
+        cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True,
+    )  # fmt: skip
+    try:
+        for line in p.stdout:
+            if line.startswith("session: "):
+                break
+        time.sleep(1.0)
+        p.stdin.write("stop ui\n")
+        p.stdin.flush()
+        text = p.stdout.read()
+        assert p.wait(30) == 0, text
+    finally:
+        p.kill()
+    assert "Traceback" not in text
+    [folder] = [d for d in out.iterdir() if d.is_dir()]
+    session = json.loads((folder / "session.json").read_text())
+    assert session["status"] == "ended" and session["ended_at"]
+    [stop] = [e for e in session["events"] if e["kind"] == "stopped"]
+    assert stop["detail"].startswith("ui:") and stop["t_mono"] is not None
+    assert "interrupted" not in [e["kind"] for e in session["events"]]
+    assert "session ended:" in text
 
 
 def test_watching_stdin_does_not_stall_a_dll_load():

@@ -30,6 +30,7 @@ import uuid
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -426,14 +427,18 @@ class Launcher:
 
     # -- stop ----------------------------------------------------------------------------------
 
-    def stop(self, children: list[Child]) -> None:
+    def stop(self, children: list[Child], source: Literal["ui"] | None = None) -> None:
         """Ask each running child to stop like Ctrl+C and wait for it; kill only after
-        stop_timeout. Safe to call again after a Ctrl+C."""
+        stop_timeout. Safe to call again after a Ctrl+C. `source` "ui" sends `stop ui`, which the
+        child ends as a normal stop (D-049); without it the child ends `interrupted`."""
+        if source not in (None, "ui"):  # the child knows no other: it would end interrupted
+            raise ValueError(f"unknown stop source {source!r}")
+        line = f"stop {source}\n" if source else "stop\n"
         for child in children:
             if child.running and not child.stop_sent:
                 child.stop_sent = True
                 try:
-                    child.proc.stdin.write("stop\n")
+                    child.proc.stdin.write(line)
                     child.proc.stdin.flush()
                 except OSError:  # it exited meanwhile
                     pass
@@ -454,7 +459,7 @@ class Launcher:
                 except OSError:
                     pass
 
-    def stop_all(self, reason: str | None = None) -> None:
+    def stop_all(self, reason: str | None = None, source: Literal["ui"] | None = None) -> None:
         """Stop every child. While it runs Ctrl+C and Ctrl+Break only print a reminder: the
         stop deadline is not restarted and nothing escapes before the table."""
 
@@ -471,7 +476,7 @@ class Launcher:
         try:
             if reason:
                 self.say(reason)
-            self.stop(self.children)
+            self.stop(self.children, source)
         finally:
             for sig, handler in saved.items():
                 signal.signal(sig, handler)
