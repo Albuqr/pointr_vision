@@ -471,8 +471,8 @@ be collinear in the image: at least four of them have no three within 3 px of on
 D-050). The image rule is not a spread ratio, because perspective squashes a camera's view of
 part of the court into a thin band of the image without making the fit degenerate; any visible
 subset of landmarks that meets these rules may be used, so a camera that sees only part of the
-court is calibrated from the points it sees. The configured maximum check mean is at most 2.0 m. Saving anyway can override the
-check-mean threshold only, not these minimums, the point rules or the homography checks
+court is calibrated from the points it sees. The configured maximum check mean is at most 2.0 m.
+Saving anyway can override the check-mean threshold only, not these minimums, the point rules or the homography checks
 (finite, invertible, condition number at most 1e7, every point in front of the horizon). A loader
 recomputes the residuals, the mean errors and `forced` from the homography and the points and
 refuses a file where they disagree. The audit frame is the JPEG-encoded copy (lossy, no
@@ -504,8 +504,8 @@ All paths are served on loopback by `python -m services.app`.
   `ransac_dropped_points` (indices of fit points RANSAC left out); `PUT` adds `calibration` (the
   saved document) and `path`. A refusal is `422` with `{"detail": message}`: too few points, a
   check point on a fit point, fit points collinear or bunched on the court or collinear in the
-  image, a singular homography, a limit
-  above 2.0 m, a point outside the frame or court. `409` when the frame token is stale.
+  image, a singular homography, a limit above 2.0 m, a point outside the frame or court. `409`
+  when the frame token is stale.
 - `GET /api/cameras/{id}/calibration` returns the active document, `null` when there is none, or
   `422` when it cannot be read;
   `GET /api/cameras/{id}/calibration/compare` returns `{audit_frame, fresh_frame,

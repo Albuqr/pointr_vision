@@ -1135,7 +1135,8 @@ table. R2a's contract change (#7) bumps after this one.
 could not be calibrated. The field-test note is not in the repo and the owner does not remember Studio's message, so
 the cause was reproduced instead: a synthetic pinhole camera (1280 x 720, 1.5 to 4 m high, on the sideline, behind a
 baseline or in a corner) projected the FIBA landmarks it sees, and every 4-landmark fit set was run through
-`fit_calibration`. The refusal that a partial view hits is the image half of the spread rule: "the calibration points
+`fit_calibration`. The refusal a partial view hits there, and so the most likely field-test cause until B12's manual
+check confirms it, is the image half of the spread rule: "the calibration points
 are collinear or bunched together in the image (spread …, at least 0.1 needed)". Perspective squashes the depth axis,
 so well-spread floor marks fill a thin band of the image. With exact projections, every set the image ratio refused
 fitted with ~0 check error. With 1 px click noise, 148 refused sets would have passed a 0.5 m check (measured on
@@ -1149,8 +1150,12 @@ only exact collinearity, and only in RANSAC samples. The image spread ratio is r
 with no three within 3 px of one line. The 3 px threshold is not from a source: in the synthetic runs every fit under
 2 px failed a 0.5 m check and 2 of 148 between 2 and 5 px passed. The court spread ratio (0.1), the condition number,
 the horizon check, duplicate points and the 2.0 m limit stay as they were; Save anyway still cannot override any of
-them. No field or file format changes: the loader accepts 0.12.0 files, which met the stricter rule. The Studio needed
-no change, as it already lets the operator place any landmark or a typed coordinate.
+them. No field or file format changes, so the bump is minor (as D-032's coverage rule was): only which point sets
+the fit accepts changes. The loader accepts 0.12.0 files and re-runs the new rule on them. The new rule is not a strict
+superset of the old: a 0.12.0 file whose fit points have three within 3 px of one image line would now be refused on
+load. In the two such sets tried, the old horizon check already refused them, so no saved file is expected to be
+affected; that is not proven. The Studio needed no change, as it already lets the operator place any landmark or a
+typed coordinate.
 **Consequences.** Contract 0.13.0. A camera seeing one half of a full court calibrates against `fiba_full` from the
 landmarks it sees, so both cameras of a group share one court frame (needed by R2a). A thin but non-degenerate fit can
 still extrapolate badly where there are no check points; propagating click noise into a predicted error in metres (the
