@@ -1068,3 +1068,50 @@ stop, audit events, per-camera ready times, power state in `run.json`, a calibra
 points, and `.mp4` recording if Media Foundation H.264 is adopted (D-042 chose MKV). The ~10 fps cap's cause is still
 unmeasured; runs L1 to L8 and R1 to R5 in the field-test note come before any performance change. Phase 03's gate
 (A6, A7, report) is still pending and now also covers these items.
+
+## D-045 · 2026-10-28 · Slice R2a: one process per group with track IDs shared live (ADR 0007)
+**Context.** The 2026-10-22 field test gave the same person different IDs on each camera (D-044). The owner needs one
+ID per person across the cameras of a group while recording. D-022 (one process per camera) and ADR 0001 (post-session
+matching) cannot give that.
+**Decision.** (Owner, 2026-10-28, ADR 0007.) Every camera of a group runs in one process with one shared detector and
+one tracker state; a track ID means the same person in every camera of the group. Matching is by court-plane position
+and time in the overlap zone, with clothing colour and box height as the fallback (no learned model, no new
+dependency). Each camera keeps its own session folder. Post-session fusion stays but only combines and compares. This
+supersedes D-022 for groups and ADR 0001's matching. Built as a new Phase R slice, R2a, after the R1 manual checks,
+the Studio stop fix and partial calibration, and before R2. The phase 03 item "the same person gets the same ID across
+cameras" (D-044) is delivered by R2a and leaves phase 03.
+**Consequences.** A crash ends every camera of the group (accepted; files stay readable, NFR-004). Track IDs become
+unique per group: `DATA_CONTRACTS.md` changes and `CONTRACT_VERSION` gets a minor bump before any R2a code. No speed
+or matching-accuracy figure is written until a recorded run.
+
+## D-046 · 2026-10-28 · Phase 02b closed as superseded
+**Context.** 02b was a CPU detector spike (RF-DETR Nano via OpenVINO/ONNX vs YOLOX) feeding Q-02, plus ID survival
+through short exits. Since then the field test measured live throughput (D-044), phase 03's B9 (runs L1–L8)
+investigates the ~10 fps cap, and Phase R's R2-A3 holds the H2 baseline on the GPU PC, which the owner has set up and
+tested with CUDA.
+**Decision.** (Owner, 2026-10-28.) 02b is closed without being run. Speed is measured in B9 and R2-A3 only. ID survival
+through short exits is covered by R5-A2 and R2a's matching.
+**Consequences.** `PHASES.md` no longer lists 02b as open. Q-02 takes its inputs from B9 and R2-A3.
+
+## D-047 · 2026-10-28 · December plan: all of Phase R and D-044, in a fixed order
+**Context.** About 9 weeks are left before the 2026-12-31 review; the decision record's effort ranges sum to 14–29
+weeks serial. R2a (D-045) is new work.
+**Decision.** (Owner, 2026-10-28.) The December tests cover all of Phase R (R2a, R2–R6) and every D-044 item; the owner
+accepts the schedule risk. Order: (1) tag `track-r-R0` and run R1's manual checks (Phase 04 A6, R1-A4); (2) Studio stop
+as a normal end and per-camera partial calibration; (3) R2a; (4) runs L1–L8 once the field-test note is copied from
+the owner's other PC; (5) R2 → R3 → R4 → R5 → R6; the remaining D-044 items (camera states, ready times, audit trail,
+sessions page, discovery, power state, preview delay) go in between slices as small tickets. A sensor make that no
+attempt's flight window contains is an **unmatched sensor make**: not an attempt or a make in the statistics, and an
+attempt the video missed when scoring (as `DATA_CONTRACTS.md` section 12 already says); the decision record's
+edge-case rule is amended by a change request.
+**Consequences.** B9 is blocked until the field-test note is in the repo. R4 is built even if H1 passes on video alone.
+
+## D-048 · 2026-10-28 · PC-to-rim distance and spec CR-1 closed
+**Context.** Two items were open in `PHASE_R.md`: the PC-to-rim distance, which picks the rim sensor link (ADR 0003),
+and spec CR-1, where the owner reported that a refused calibration did not behave as FR-003 describes.
+**Decision.** (Owner, 2026-10-28.) The PC stands more than 5 m from the rim: the link is ESP-NOW with a USB gateway
+(ADR 0003, L2), as assumed. For CR-1, what the owner saw was a calibration rejected at fit time with no way forward.
+When Studio rejects a calibration (check error over the limit, or too few points), it shows the reason (which points,
+what error) and offers a retry or starting that camera uncalibrated, recorded as a failed calibration check (FR-003).
+**Consequences.** New acceptance row B13 in phase 03, built with the per-camera partial calibration item, which also
+makes "too few points" rarer. R4 builds the ESP-NOW firmware and gateway.

@@ -90,3 +90,12 @@ effort: ball and rim detector 2-4 weeks (owner), identity about 4 weeks (owner),
 
 ## 11. Triggers
 pivot if: H1 lands at 70-85% (add the sensor) or H3 at 50-80% (vests or manual correction) · stop if: H1 <70% and the sensor route also fails, or H2 cannot sustain the needed frame rate with no alternative, or H4 error stays over ~0.5 m · next review: 2026-12-31, after the December 1- and 2-person tests
+
+## Change request (2026-10-28, grill-with-docs, owner-approved)
+- **Edge-case rule, "sensor fires with no attempt seen".** Replace "log a make, shooter unknown, flagged, not counted
+  as an attempt" with: log an **unmatched sensor make**, flagged; it is not an attempt or a make in the statistics, and
+  the scorer counts it as an attempt the video missed (`GLOSSARY.md`, D-047, `DATA_CONTRACTS.md` section 12).
+- **Scope for December.** All of Phase R, including the new slice R2a (one process, shared live IDs, ADR 0007), plus
+  every D-044 item; the owner accepts that the serial estimate exceeds the time left (D-047).
+- **GPU PC.** Arranged and set up with CUDA (D-046); the objection "real-time frame rate on a GPU is untested" stands
+  until R2-A3 is recorded.
