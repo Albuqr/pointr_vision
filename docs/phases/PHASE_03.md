@@ -85,8 +85,9 @@ work, not duplicate it.
 | B8 | Camera discovery finds a DroidCam stream on the current network | manual |
 | B9 | Runs L1–L8 recorded, cause of the cap named, chosen fix measured against L1 | manual, in the phase report |
 | B10 | ID changes per person on a recorded occlusion clip go down against the current tracker | integration on a recorded clip, plus manual check |
-| B11 | One person seen by both cameras has one ID in the fused output | integration (Track R fixtures) |
+| B11 | ~~One person seen by both cameras has one ID in the fused output~~ Moved to R2a-A2 (D-045) | — |
 | B12 | A calibration fitted from a visible subset of court points saves, and check points report their error | unit + manual |
+| B13 | A calibration rejected at fit time shows the reason (points, error) and offers a retry or starting that camera uncalibrated, recorded as a failed calibration check (spec CR-1, D-048) | integration |
 
 ## Gate reviewers
 `code-reviewer`, `test-auditor`, `contract-guardian`, `reliability-reviewer`.

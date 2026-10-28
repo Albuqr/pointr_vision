@@ -44,9 +44,9 @@ Decided (D-034 to D-040):
 2. **New dependencies** are approved by category: a labelling and fine-tuning workflow (R2), a number-recognition model (R5), ESP32 firmware tooling in a `firmware/` folder (R4). Each slice names the exact packages or models here before they are installed.
 3. **Spec changes** CR-2 (FR-005), CR-3 (FR-006) and CR-4 (FR-009) are accepted and the spec is amended.
 
-Still open:
-- **PC-to-rim distance.** About 5 m or less picks a USB cable (ADR 0003, L1); more picks ESP-NOW (L2). L2 is assumed until the owner gives it.
-- **Spec CR-1.** What behaved differently on a failed calibration (D-027 already starts the camera uncalibrated with a warning).
+Closed 2026-10-28 (D-048):
+- **PC-to-rim distance.** More than 5 m: ESP-NOW with a USB gateway (ADR 0003, L2).
+- **Spec CR-1.** The owner saw a calibration rejected at fit time with no way forward; fixed in phase 03's per-camera partial calibration item.
 ## Acceptance
 | # | Criterion | Test |
 |---|---|---|

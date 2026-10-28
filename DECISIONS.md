@@ -1105,3 +1105,13 @@ attempt's flight window contains is an **unmatched sensor make**: not an attempt
 attempt the video missed when scoring (as `DATA_CONTRACTS.md` section 12 already says); the decision record's
 edge-case rule is amended by a change request.
 **Consequences.** B9 is blocked until the field-test note is in the repo. R4 is built even if H1 passes on video alone.
+
+## D-048 · 2026-10-28 · PC-to-rim distance and spec CR-1 closed
+**Context.** Two items were open in `PHASE_R.md`: the PC-to-rim distance, which picks the rim sensor link (ADR 0003),
+and spec CR-1, where the owner reported that a refused calibration did not behave as FR-003 describes.
+**Decision.** (Owner, 2026-10-28.) The PC stands more than 5 m from the rim: the link is ESP-NOW with a USB gateway
+(ADR 0003, L2), as assumed. For CR-1, what the owner saw was a calibration rejected at fit time with no way forward.
+When Studio rejects a calibration (check error over the limit, or too few points), it shows the reason (which points,
+what error) and offers a retry or starting that camera uncalibrated, recorded as a failed calibration check (FR-003).
+**Consequences.** New acceptance row B13 in phase 03, built with the per-camera partial calibration item, which also
+makes "too few points" rarer. R4 builds the ESP-NOW firmware and gateway.

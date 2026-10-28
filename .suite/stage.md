@@ -21,6 +21,6 @@ Status values: todo · doing · blocked · done · n/a (stage 0 is n/a for a new
 date: 2026-10-28 · agent: claude · what was done: tracker switched to GitHub Issues; GLOSSARY.md rewritten for the whole project; grill-with-docs on the project state: ADR 0007 (one process, shared live IDs, slice R2a), D-045 to D-047, phase 02b closed.
 
 ## Next action
-Stage 4, order from D-047: (1) owner tags track-r-R0 and runs R1's manual checks (Phase 04 A6, R1-A4); (2) Studio stop as a normal end and per-camera partial calibration (contract first); (3) R2a: contract bump for group-wide track IDs, then the single process; (4) L1-L8 once the field-test note is copied from the owner's other PC; (5) R2 to R6, with the remaining D-044 items as small tickets between slices. Still open: PC-to-rim distance (ESP-NOW assumed), spec CR-1.
+Stage 4, order from D-047: (1) owner tags track-r-R0 and runs R1's manual checks (Phase 04 A6, R1-A4); (2) Studio stop as a normal end and per-camera partial calibration (contract first); (3) R2a: contract bump for group-wide track IDs, then the single process; (4) L1-L8 once the field-test note is copied from the owner's other PC; (5) R2 to R6, with the remaining D-044 items as small tickets between slices. PC-to-rim (ESP-NOW) and spec CR-1 closed in D-048.
 
 ## Open questions for the human
