@@ -17,7 +17,7 @@ from services.edge.contract import CONTRACT_VERSION
 # Versions of this file format the loader accepts. A later contract bump that leaves the
 # calibration format unchanged adds the previous version here, so saved calibrations stay usable;
 # a bump that changes it does not, and the old files are refused with a clear message.
-ACCEPTED_VERSIONS = (CONTRACT_VERSION, "0.11.0", "0.10.0", "0.9.0", "0.8.0")
+ACCEPTED_VERSIONS = (CONTRACT_VERSION, "0.12.0", "0.11.0", "0.10.0", "0.9.0", "0.8.0")
 _SCHEMA = Path(__file__).with_name("calibration.schema.json")
 
 
