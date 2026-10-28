@@ -1122,8 +1122,10 @@ camera process's stdin; the process turned that into its Ctrl+C path, so every s
 `interrupted` / `Ctrl+C`, the same as a crash-like stop.
 **Decision.** (Owner chose the event shape, 2026-10-28.) The stop channel carries its source: Studio sends `stop ui`.
 That stop still runs the one shutdown path, but the session ends `ended` with a new `stopped` event whose `detail`
-starts with the source (`ui: stop requested in Studio`). A plain `stop` line (the launcher's own Ctrl+C), the pipe
-closing (the launcher died) and Ctrl+C in a terminal still end `interrupted`. Contract 0.12.0 adds the event kind;
+starts with the source (`ui: stop requested in Studio`). A plain `stop` line (the launcher's own Ctrl+C, or Studio
+shutting down while it records: not the operator's stop), the pipe closing (the launcher died) and Ctrl+C in a
+terminal still end `interrupted`. `ui` is the only source; the launcher refuses any other, which the child would
+read as a plain stop. Contract 0.12.0 adds the event kind;
 calibration files saved under 0.11.0 or 0.10.0 stay loadable, as no calibration format changed.
 **Consequences.** Studio-stopped sessions and their exit code (0) read as normal ends in reports and the launcher's
 table. R2a's contract change (#7) bumps after this one.

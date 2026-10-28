@@ -116,7 +116,9 @@ Event kinds: `source_open_failed`, `source_lost`, `source_recovered`,
 `stopped` means the session was asked to stop and ended normally: status `ended`, not `interrupted`. Its
 `detail` starts with the source of the request and a colon; the only source so far is `ui` (Studio's stop
 button, through the launcher's stop channel), e.g. `ui: stop requested in Studio`. A Ctrl+C, the launcher's own
-Ctrl+C, or the launcher's stop channel closing still ends the session `interrupted` with an `interrupted` event.
+Ctrl+C, Studio shutting down while it records, or the launcher's stop channel closing still ends the session
+`interrupted` with an `interrupted` event. A Studio stop before the session exists (model still loading) writes
+nothing; the process prints the `stopped` event and exits 0.
 `camera_gap` and `sensor_outage` are written when the camera stream or the rim sensor stops answering
 and again when it returns (`detail` says start or end and the seconds since t0); the final intervals are
 in `run.json` `gaps` and `outages`. `startup_check_failed` names the failed check in `detail`.

@@ -176,9 +176,9 @@ capture thread ──▶ proc_queue (maxsize=1, drop oldest, count drops) ──
   not a layer: it starts the processes one at a time, prefixes their output and stops them
   through a stop channel, the child's stdin (a `stop` line, or the pipe closing when the
   launcher dies, becomes the Ctrl+C path of that process: the same shutdown as above). A
-  `stop ui` line (Studio's stop, D-049) takes the same path but ends the session `ended` with a
-  `stopped` event instead of `interrupted`. A
-  child's `session.json` carries `camera_id` and `group_id`.
+  `stop ui` line (Studio's stop button, D-049) takes the same path but ends the session `ended`
+  with a `stopped` event instead of `interrupted`. A child's `session.json` carries `camera_id`
+  and `group_id`.
 
 ## 6. Local storage
 
