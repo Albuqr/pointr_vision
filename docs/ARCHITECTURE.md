@@ -141,7 +141,7 @@ class Recorder(Protocol):
     def stop(self) -> RecordingInfo: ...  # path, frames written, frames dropped, sha256
 ```
 
-`Detections` and `TrackObs` are plain dataclasses defined in `perception/types.py`. The
+`Detections` and `TrackObs` are plain dataclasses defined in `services/edge/perception/types.py`. The
 `supervision` and `rfdetr` objects never leave the perception layer.
 
 ## 5. Edge concurrency
