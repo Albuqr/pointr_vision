@@ -24,9 +24,6 @@ SKIP_PREFIXES = (
 # Paths that are referenced but genuinely absent, pending an owner decision.
 ALLOWLIST = {
     ".scratch/pointr-vision/field-test-2026-10-22.md": "owner is copying it from another PC",
-    "docs/pipeline.md": "AI Production Suite file, not vendored; owner decision pending",
-    "docs/research/sources.md": "AI Production Suite file, not vendored; owner decision pending",
-    ".suite/assess/assessment.md": "AI Production Suite file, not vendored; owner decision pending",
 }
 
 ID_RE = re.compile(r"^\**`?((?:[A-Z][A-Za-z0-9]*-)*[A-Z]\d+[a-z]?)`?\**$")
