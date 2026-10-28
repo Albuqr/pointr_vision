@@ -67,6 +67,13 @@ def test_the_synthetic_camera_sees_one_half_only():
     assert "corner_far_left" not in seen and "far_basket_floor" not in seen
 
 
+def test_the_fit_points_fill_a_thin_image_band_the_old_ratio_refused():
+    from services.edge.calibration.homography import _spread
+
+    fit = [p for p in partial_view_points() if p["role"] == "calibration"]
+    assert _spread([p["image_px"] for p in fit]) < 0.1 <= _spread([p["court_m"] for p in fit])
+
+
 client = test_api.client  # the Studio API fixture, with its fake launcher
 
 

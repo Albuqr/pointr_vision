@@ -135,7 +135,7 @@ def _off_line(a, b, c):
     return 0.0 if longest == 0 else area2 / longest
 
 
-def _general_position_px(points):
+def _best_off_line_px(points):
     """The largest, over every four of the points, of the smallest `_off_line` of their four
     triples. A homography from four points is degenerate when three of them are collinear; a
     thin point cloud is not (a floor seen low from the side is a flat trapezoid)."""
@@ -169,10 +169,10 @@ def check_point_set(points, court_dimensions=None):
     spread = _spread([point["court_m"] for point in fit])
     if spread < MIN_SPREAD:
         raise ValueError(
-            "the calibration points are collinear or bunched together in the court "
+            "the calibration points are collinear or bunched together on the court "
             f"(spread {spread:.3f}, at least {MIN_SPREAD} needed): spread them over the floor"
         )
-    off_line = _general_position_px([tuple(point["image_px"]) for point in fit])
+    off_line = _best_off_line_px([tuple(point["image_px"]) for point in fit])
     if off_line < MIN_IMAGE_OFF_LINE_PX:
         raise ValueError(
             "the calibration points are collinear in the image: no four of them have every "
