@@ -9,7 +9,7 @@ idea: <one line>
 | 1 Define | | todo | .scratch/<feature>/decision-record.md or brief.md |
 | 2 Requirements | | todo | .scratch/<feature>/spec.md |
 | 3 Dev model | | todo | docs/adr/ |
-| 4 Build | | todo | .scratch/<feature>/issues/ |
+| 4 Build | | todo | GitHub Issues (Albuqr/pointr_vision) |
 | 5 E2E / UX | | todo | .scratch/<feature>/e2e-report.md |
 | 6 Review | | todo | .scratch/<feature>/review.md |
 | 7 Docs & release | | todo | CHANGELOG.md |

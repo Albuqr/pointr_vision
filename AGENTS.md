@@ -82,7 +82,7 @@ open_questions: <n>
 ## Agent skills
 
 ### Issue tracker
-Local markdown under `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
+GitHub Issues on `Albuqr/pointr_vision` (`gh` CLI); stage artifacts (brief/spec/review) stay in `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 Default five roles (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
