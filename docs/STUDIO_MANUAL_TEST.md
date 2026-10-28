@@ -101,6 +101,17 @@ Write down the resolution the test shows.
 
 Refusals appear as a message, never as a crash page.
 
+### A camera that sees only part of the court (B12, D-050)
+
+On a real court, aim one camera so it sees about one half and not the other basket. Set **Court
+model** to *Full court*, so every camera of the group shares one court frame. Place 4 fit points
+and 2 check points only on landmarks the camera sees (centre line, centre circle, key corners,
+basket floor point), or on taped marks with typed coordinates. Expected: the fit saves, even though
+the points sit in a thin band of the image, and the table shows each check point's error and the
+held-out mean. Write the held-out mean and max, and the camera's position, in the phase report.
+Four fit points of which three lie on one image line are still refused with "collinear in the
+image".
+
 ## 5. Record with the calibration (Record page)
 
 1. Open **Record**. Press **Start group**.
