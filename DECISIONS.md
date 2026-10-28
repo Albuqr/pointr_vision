@@ -1115,3 +1115,15 @@ When Studio rejects a calibration (check error over the limit, or too few points
 what error) and offers a retry or starting that camera uncalibrated, recorded as a failed calibration check (FR-003).
 **Consequences.** New acceptance row B13 in phase 03, built with the per-camera partial calibration item, which also
 makes "too few points" rarer. R4 builds the ESP-NOW firmware and gateway.
+
+## D-049 · 2026-10-28 · A Studio stop is a normal end (contract 0.12.0)
+**Context.** Phase 03 B1 (D-044, issue #18). Studio's stop goes through the launcher, which writes `stop` to each
+camera process's stdin; the process turned that into its Ctrl+C path, so every session stopped from Studio read
+`interrupted` / `Ctrl+C`, the same as a crash-like stop.
+**Decision.** (Owner chose the event shape, 2026-10-28.) The stop channel carries its source: Studio sends `stop ui`.
+That stop still runs the one shutdown path, but the session ends `ended` with a new `stopped` event whose `detail`
+starts with the source (`ui: stop requested in Studio`). A plain `stop` line (the launcher's own Ctrl+C), the pipe
+closing (the launcher died) and Ctrl+C in a terminal still end `interrupted`. Contract 0.12.0 adds the event kind;
+calibration files saved under 0.11.0 or 0.10.0 stay loadable, as no calibration format changed.
+**Consequences.** Studio-stopped sessions and their exit code (0) read as normal ends in reports and the launcher's
+table. R2a's contract change (#7) bumps after this one.
