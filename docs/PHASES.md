@@ -1,6 +1,6 @@
 # Phases
 
-**Current phase: 03 (session and logging): v0 core built ahead of 02b (D-020); gate, A6, A7 and report pending. 02b stays open. Scope extended with the 2026-10-22 field-test fixes (D-044, PHASE_03.md "Scope addition").**
+**Current phase: 03 (session and logging): v0 core built ahead of 02b (D-020); gate, A6, A7 and report pending. 02b closed as superseded (D-046). Scope extended with the 2026-10-22 field-test fixes (D-044, PHASE_03.md "Scope addition").**
 
 **Approved scope exception (D-025):** Part 5a pulls the local Studio shell from phase 06
 forward, and part 5b pulls visual calibration from phase 10 forward into that app. This is
@@ -17,7 +17,7 @@ structured test with one person. Later phases follow the scope's progression.
 | 00 | Foundations | repo, tooling, contracts, test harness, fixtures | - | - |
 | 01 | Capture | frame sources, source health, preview | RF01 (partial), RF02, RNF01 (recorded) | 00 |
 | 02 | Perception | detector + tracker, HUD metrics | RF03, RF04, RNF02 (measured) | 01 |
-| 02b | Detector spike | compare RF-DETR Nano via OpenVINO/ONNX vs YOLOX-Nano/Tiny on a recorded clip; input to Q-02. Also measure ID survival through short (<1 s) exits at each speed | RNF02 (input to Q-02) | 02 |
+| 02b | Detector spike (closed, superseded by B9 and R2-A3, D-046) | compare RF-DETR Nano via OpenVINO/ONNX vs YOLOX-Nano/Tiny on a recorded clip; input to Q-02. Also measure ID survival through short (<1 s) exits at each speed | RNF02 (input to Q-02) | 02 |
 | 03 | Session and logging | session lifecycle, files, partial data, soak test | RF06, RF07, RF08 (data), RNF03 | 02 |
 | 04 | Recording and replay | raw video, replay as new run, MP4/MOV | RF08 (video), RF09, RNF04, RNF05 | 03 |
 | 05 | Reports | coverage and failure reports | RF10, RF11 | 03, 04 |
@@ -32,7 +32,7 @@ structured test with one person. Later phases follow the scope's progression.
 | 12 | Movement recognition | pose, event definitions, manual validation | RF05 | 10, 11 |
 | 13 | Custom phone app (optional) | camera + device checks on the phone | RF01 (full) | 01 |
 | 14 | Analytics (pointr-data) | bronze/silver/gold over synced data | scope section 12 | 08 |
-| R | **Track R: December test rig** (own track, D-033) | ball and rim detection, rim sensor and clock model, shot layer, jersey identity, two-camera fusion, scored against hand labels | spec FR-001 to FR-015 | 03 running; recording and replay: open decision in `phases/PHASE_R.md` |
+| R | **Track R: December test rig** (own track, D-033) | one process with shared IDs (R2a, D-045), ball and rim detection, rim sensor and clock model, shot layer, jersey identity, two-camera fusion, scored against hand labels | spec FR-001 to FR-015 | 03 running; recording and replay: open decision in `phases/PHASE_R.md` |
 
 Phases 10-14 have short specs only. Expand each into a full phase file when it becomes the
 current phase, using what the earlier tests showed.

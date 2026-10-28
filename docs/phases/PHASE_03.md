@@ -67,8 +67,8 @@ work, not duplicate it.
   parallel, one shared model, tracker frame rate set from the real input rate.
 
 ### Tracking and calibration
-- Fewer ID changes when a person walks behind another (re-identification after occlusion).
-- The same person gets the same ID across cameras (builds on Track R two-camera fusion).
+- Fewer ID changes when a person walks behind another (re-identification after occlusion). Uses R2a's colour and box-height cue (D-045).
+- ~~The same person gets the same ID across cameras.~~ Moved to Phase R slice R2a (D-045).
 - Per-camera calibration that uses only the court points that camera can see, not the
   full court. **contract**
 

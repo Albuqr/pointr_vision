@@ -1,5 +1,5 @@
 # 0001 — Cross-camera fusion as a post-session step
-status: accepted · date: 2026-10-19 (accepted by the owner)
+status: accepted · date: 2026-10-19 (accepted by the owner) · matching superseded by ADR 0007 (2026-10-28); fusion as a post-session combine step stays
 
 ## Context
 FR-004 asks for one record per player when two phones see the same person, with a report of where the cameras differ. FR-014 covers a phone dropping mid-session. Today D-022 runs one OS process per camera with **no fusion across cameras**, and `docs/BACKLOG.md` notes that cameras of one group are not aligned: each has its own `t0` and `t0_wall`. Both cameras are calibrated to court metres (FR-002, error at most 0.5 m), so ground-plane positions are comparable. Fusion depends on ADR 0002 (the clock model).
