@@ -3,7 +3,7 @@
 Write entries as decisions are made, including the ones that turn out wrong, and how that
 was found. Never edit an old entry's reasoning; add a new entry that supersedes it.
 
-Format: `D-NNN · date · title` / Context / Decision / Consequences / Status.
+Format: `D-NNN · date · title` / Context / Decision / Consequences / Status. An entry that records an ADR ends its title with `(ADR NNNN)`, which `tests/test_contracts_track_r.py::test_every_accepted_adr_has_a_decision_entry` requires.
 
 ## D-001 · 2026-10-07 · Layers in one edge process; services only where the boundary is real
 **Context.** The goal is iterable layers that can be added and tested independently.
@@ -176,7 +176,7 @@ then `null`, and `HealthEvent.t_mono` could not be `None`.
 - `Capture.stop()` waits 8 s by default, longer than the slowest blocking stream read.
 - Ctrl+C and main-loop exceptions become `interrupted` / `error` events with non-zero exit
   codes (130 / 1), not a bare message or a traceback.
-- `SourceEnded` and `utc_now` move to `capture/types.py`. Generic code no longer imports
+- `SourceEnded` and `utc_now` move to `services/edge/capture/types.py`. Generic code no longer imports
   from the concrete sources module, and ARCHITECTURE §4 documents the `SourceEnded` signal.
 **Consequences.** The stream values (2 s read timeout, 5 s open timeout) are configuration
 only; no stream loss time has been measured on hardware. A8 over IP Webcam will show it.
