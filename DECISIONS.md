@@ -1278,7 +1278,7 @@ needed; check error over the limit: the per-point check errors, their mean and t
 last refusal, cleared by a fit or save that succeeds. The operator then chooses, in Studio: retry (the UI keeps the
 placed points) or start that camera uncalibrated (`POST .../calibration/uncalibrated`). The reason is taken from
 Studio's stored refusal, not from the request, so a client cannot invent a failed check. The choice lives in the
-running Studio only; it is not a file. At the next start that camera gets no calibration, even if an older one is saved,
+running Studio only; it is not a file. At each start while it holds that camera gets no calibration, even if an older one is saved,
 and its process writes `checks = [calibration, failed, <reason>]` into `run.json` and a `startup_check_failed`
 event whose detail is `calibration: <reason>`. Only the `calibration` check is written; the other four and the
 `passed` entries stay with Track R, so `checks` stays `null` for a camera that was not started this way.

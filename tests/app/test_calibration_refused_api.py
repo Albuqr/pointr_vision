@@ -105,6 +105,7 @@ def test_the_start_after_the_choice_starts_that_camera_uncalibrated_and_not_the_
         None,
     )
     assert (other.calibration_failed, other.calibration_path) == (None, None)
+    assert clip.calibration_problem is None  # a choice, not an error: one event, not two
     by_id = {c["camera_id"]: c for c in started.json()["cameras"]}
     assert reason in by_id["clip"]["calibration_warning"]
     assert by_id["other"]["calibration_warning"] is None
@@ -117,3 +118,18 @@ def test_the_choice_and_its_undo_are_in_the_audit_trail(studio):
     audit = studio.app.state.studio.audit.path.read_text(encoding="utf-8")
     assert '"calibration_uncalibrated"' in audit
     assert '"calibration_uncalibrated_clear"' in audit
+
+
+def test_removing_a_camera_forgets_its_refusal_and_choice(studio):
+    studio.put(SAVE_URL, json=payload(studio.token, GOOD_FIT + BAD_CHECKS))
+    studio.post(SKIP_URL)
+    assert studio.delete("/api/cameras/clip").status_code == 200
+    assert studio.get("/api/status").json()["uncalibrated"] == {}
+    assert studio.post(SKIP_URL).status_code == 409
+
+
+def test_a_long_refusal_is_cut_before_it_reaches_a_command_line(studio):
+    response = studio.post(FIT_URL, json=payload(studio.token, GOOD_FIT, length_m="x" * 5000))
+    assert response.status_code == 422
+    studio.post(SKIP_URL)
+    assert len(studio.get("/api/status").json()["uncalibrated"]["clip"]) <= 300

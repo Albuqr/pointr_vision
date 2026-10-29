@@ -559,10 +559,10 @@ All paths are served on loopback by `python -m services.app`.
   keeps the last refusal of each camera until a fit or a save of that camera succeeds.
 - `POST /api/cameras/{id}/calibration/uncalibrated` (0.18.0, D-057) is the operator's choice, after
   a refusal, to start that camera uncalibrated: `409` when the camera has no refusal, else
-  `{camera_id, reason}` where `reason` is the refusal's message on one line. `DELETE` on the
+  `{camera_id, reason}` where `reason` is the refusal's message on one line, cut to 300 characters. `DELETE` on the
   same path takes the choice back (`{camera_id}`); a successful `PUT` of a calibration for the
-  camera does too. The choice is kept by the running Studio, not in a file. While it holds, the
-  next start (`POST /api/recording/start`) does not use that camera's saved calibration, if any,
+  camera does too. The choice is kept by the running Studio, not in a file. While it holds, every
+  start (`POST /api/recording/start`) does not use that camera's saved calibration, if any,
   and records the camera as in section 3 `checks`: a `calibration` check `failed` whose `detail`
   is the reason, plus a `startup_check_failed` session event with the same `detail`. The other
   cameras are started as before. Both calls write a Studio audit entry (`calibration_uncalibrated`,
@@ -576,7 +576,7 @@ All paths are served on loopback by `python -m services.app`.
   uncalibrated after a refusal it holds the refusal). A camera whose frame
   size differs from the calibration at its first frame fails with both sizes in `error`.
   `GET /api/status` also carries `uncalibrated` (0.18.0): `{camera_id: reason}` for every camera
-  whose next start is uncalibrated by the operator's choice (empty when none).
+  whose starts are uncalibrated by the operator's choice (empty when none).
 
 ## 10. Studio camera settings (`%LOCALAPPDATA%/pointr/cameras.json`)
 

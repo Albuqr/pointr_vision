@@ -275,7 +275,7 @@ class Studio:
                         camera.track_min_frames,
                         self.preview_ports[camera.camera_id],
                         calibration_paths[camera.camera_id],
-                        warnings.get(camera.camera_id),
+                        None if camera.camera_id in failed else warnings.get(camera.camera_id),
                         camera.name,
                         camera.fps_cap,
                         camera.enabled,
@@ -609,7 +609,7 @@ class Studio:
         except (KeyError, TypeError, ValueError, np.linalg.LinAlgError) as exc:
             message = str(exc) or exc.__class__.__name__
             with self.lock:
-                self.refusals[camera_id] = " ".join(message.split())
+                self.refusals[camera_id] = " ".join(message.split())[:300]  # fits a command line
             raise CalibrationRefusal(message, getattr(exc, "refusal", {"kind": "invalid"})) from exc
         with self.lock:
             self.refusals.pop(camera_id, None)
@@ -785,6 +785,9 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
                 raise HTTPException(404, "camera not found")
             studio.save(kept)
         studio.logs.pop(camera_id, None)
+        with studio.lock:
+            studio.refusals.pop(camera_id, None)
+            studio.uncalibrated.pop(camera_id, None)
         return {"ok": True}
 
     @app.delete("/api/cameras/{camera_id}/error")
