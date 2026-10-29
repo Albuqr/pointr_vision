@@ -9,6 +9,7 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from services.edge import contract
+from services.edge.session.writer import TRACKS_COLUMNS
 
 ROOT = Path(__file__).resolve().parents[1]
 DOC = (ROOT / "docs" / "DATA_CONTRACTS.md").read_text(encoding="utf-8")
@@ -207,9 +208,77 @@ def test_broken_track_r_blocks_fail(path, value):
     assert errors, f"{path} = {value!r} should be rejected"
 
 
-@pytest.mark.parametrize("key", ["checks", "clock", "t0_mono", "objects", "gaps", "outages"])
+@pytest.mark.parametrize(
+    "key", ["checks", "clock", "t0_mono", "objects", "gaps", "outages", "group"]
+)
 def test_run_requires_the_blocks_even_when_null(key):
     assert list(validator("run").iter_errors(mutate(example("run"), (key,), DELETE)))
+
+
+# -- run.json: the group block (0.14.0, D-051) ------------------------------------------------
+
+GROUP = {
+    "group_id": "g1",
+    "group_run_id": "5e0b7c1d-2a4f-4b6e-8d3c-9f1a0e2b4c67",
+    "cameras": [
+        {
+            "camera_id": "cam1",
+            "session_id": "3f1c2a8e-5b7d-4e9a-8c21-6d4f0b9e7a13",
+            "run_id": "c2b9e6f4-1d3a-4c8e-9f7b-5a0d2e4c6b81",
+        },
+        {
+            "camera_id": "cam2",
+            "session_id": "7a2d4e6f-8b0c-4d1e-9f3a-5b7c9d1e3f50",
+            "run_id": "1b3d5f7a-9c2e-4a6b-8d0f-2e4a6c8e0b12",
+        },
+    ],
+    "params": {"any_name": 0.5},  # names arrive with the matcher (R2a 05, 06)
+}
+
+
+def test_a_run_without_a_group_has_a_null_group_and_a_group_run_validates():
+    run = example("run")
+    assert run["group"] is None
+    run["group"] = GROUP
+    assert not list(validator("run").iter_errors(run))
+
+
+def test_a_group_with_no_matcher_has_empty_params():
+    run = example("run")
+    run["group"] = {**GROUP, "params": {}}
+    assert not list(validator("run").iter_errors(run))
+
+
+@pytest.mark.parametrize(
+    "path,value",
+    [
+        (("group", "group_id"), ""),
+        (("group", "group_id"), "a/b"),
+        (("group", "group_id"), "x" * 65),
+        (("group", "group_run_id"), "not-a-uuid"),
+        (("group", "group_run_id"), DELETE),
+        (("group", "cameras"), []),
+        (("group", "cameras", 0, "camera_id"), "has space"),
+        (("group", "cameras", 0, "session_id"), "x"),
+        (("group", "cameras", 0, "run_id"), DELETE),
+        (("group", "cameras", 0, "extra"), 1),
+        (("group", "params"), None),
+        (("group", "params"), DELETE),
+        (("group", "extra"), 1),
+    ],
+    ids=lambda x: "/".join(map(str, x)) if isinstance(x, tuple) else repr(x)[:20],
+)
+def test_broken_group_fails(path, value):
+    run = example("run")
+    run["group"] = copy.deepcopy(GROUP)
+    errors = list(validator("run").iter_errors(mutate(run, path, value)))
+    assert errors, f"{path} = {value!r} should be rejected"
+
+
+def test_an_identical_camera_entry_listed_twice_fails():
+    run = example("run")
+    run["group"] = {**GROUP, "cameras": [GROUP["cameras"][0]] * 2}
+    assert list(validator("run").iter_errors(run))
 
 
 # -- fusion.json -----------------------------------------------------------------------------
@@ -277,7 +346,7 @@ def test_a_camera_without_a_latency_test_is_valid_and_gaps_may_start_before_zero
     "marker,end,values",
     [
         ("`checks` (0.11.0", "`clock` (0.11.0", contract.CHECK_NAMES),
-        ("## 5.", "## 6.", contract.ID_SOURCES),
+        ("## 5.", "## 6.", contract.ID_SOURCES + contract.TRACK_LINKS),
         ("## 11.", "## 12.", contract.OBJECT_CLASSES + contract.OBJECT_SOURCES),
         ("## 12.", "## 13.", contract.SENSOR_EVENT_KINDS + contract.LINKS),
         ("## 13.", "## 14.", contract.SHOT_CALLS + contract.CALL_SOURCES + contract.SHOT_FLAGS),
@@ -317,6 +386,7 @@ def test_schema_enums_equal_the_code_constants():
 # -- CSV formats: header, types, empty cells and value domains, all read from the doc tables ----
 
 CSV_FILES = {
+    "tracks": ("## 5. `tracks.csv`", TRACKS_COLUMNS),
     "objects": ("## 11.", contract.OBJECTS_COLUMNS),
     "events": ("## 12.", contract.EVENTS_COLUMNS),
     "shots": ("## 13.", contract.SHOTS_COLUMNS),
@@ -326,6 +396,8 @@ CSV_FILES = {
 }
 # (file, column) -> the code constant that must equal the backticked values in that doc row
 ENUM_COLUMNS = {
+    ("tracks", "id_source"): contract.ID_SOURCES,
+    ("tracks", "link"): contract.TRACK_LINKS,
     ("objects", "class"): contract.OBJECT_CLASSES,
     ("objects", "source"): contract.OBJECT_SOURCES,
     ("events", "kind"): contract.SENSOR_EVENT_KINDS,

@@ -1161,3 +1161,29 @@ landmarks it sees, so both cameras of a group share one court frame (needed by R
 still extrapolate badly where there are no check points; propagating click noise into a predicted error in metres (the
 research's best predictor) is in the backlog. B12's manual check (one real camera) is still open. R2a's contract bump
 follows this one.
+
+## D-051 · 2026-10-28 · Track IDs shared within a group run, and the `link` column (contract 0.14.0)
+**Context.** R2a 01 (issue #7, D-045, ADR 0007). Before any group-runner code, the contract has to say what a shared
+track is, how a row says it was linked, and how a reader tells a group run's files from a camera that ran alone. Until
+R2a 04 the launcher still starts one process per camera, so files with a `group_id` and run-scoped track IDs keep
+being written for a while.
+**Decision.** (Owner chose the `link` column and its three values, 2026-10-28; the rest is this entry.) `run.json` gets a
+`group` block: the `group_id`, a new `group_run_id` (UUIDv4) shared by the runs of every camera processed together,
+the list of those cameras (`camera_id`, `session_id`, `run_id`) and the matcher's effective `params`. A `track_id` is
+unique within its group run: the same `track_id` in two runs with the same `group_run_id` is the same person. When
+`group` is `null` the track IDs stay run-scoped, as before; that covers a camera without a group, a group camera run
+in its own process (the launcher before R2a 04), every replay of one session and every file written before 0.14.0.
+A `group_id` in `session.json` alone does not make IDs shared. A replay of a group is its own group run (R2a 08): the
+contract does not make its IDs name the same people as the live run's, but R2a 08 checks that it reproduces them on the
+same frames. `tracks.csv` gains `link` after
+`id_source`: `position`, `appearance` or `unshared`, never empty, the link in force for that row's track when the row
+was written; a camera without a group writes `unshared` on every row. `params` is a free object, like
+`tracker.params`: the matcher's parameter names are fixed by the matcher slices (R2a 05, R2a 06), which list them in
+the doc with a minor bump. A `camera_id` is never listed twice in `cameras` and the run's own camera is one of them;
+the schema refuses only an identical entry twice, so the group runner checks the rest. The bump is minor although `track_id`'s meaning widens: the old meaning
+holds for every run with `group` null, which is every file written so far.
+**Consequences.** Contract 0.14.0; calibration files saved under 0.13.0 stay loadable (no calibration change). Readers
+that pick columns by name are unaffected. R2a 03 writes the first non-null `group`; R2a 05 and 06 the first rows with
+`link` other than `unshared`. `group` is written when the run opens, so the group runner allocates every camera's
+`run_id` before any writer starts. Fusion (section 15) still describes matching; R6 trims it.
+**Status.** Accepted.

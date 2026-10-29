@@ -1,6 +1,6 @@
 # Data contracts
 
-Contract version: **0.13.0**. Any change bumps the version (minor for additive fields, major
+Contract version: **0.14.0**. Any change bumps the version (minor for additive fields, major
 for removals or meaning changes) and needs a `DECISIONS.md` entry. JSON Schemas in
 `contracts/` are written from this file and tests check them against it (D-009).
 
@@ -63,7 +63,7 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
 
 ```json
 {
-  "contract_version": "0.13.0",
+  "contract_version": "0.14.0",
   "session_id": "uuid",
   "device_id": "uuid",
   "camera_id": "cam1 | null",
@@ -86,8 +86,9 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
 (D-022): `camera_id` is a label chosen by the user (`--camera-id`, 1-32 characters of
 `A-Za-z0-9_-`), `group_id` is shared by every session started together (`--group-id`, 1-64
 characters of `A-Za-z0-9_-`; the launcher writes a UUIDv4). Both are `null` when not given. Each
-camera is its own session with its own clock; nothing links frames across cameras while the session
-runs (0.11.0: the post-session fusion of section 15 links them afterwards, D-034). The folder is
+camera is its own session with its own folder, even when the cameras of a group are processed together
+in one process (0.14.0, D-051): then the cameras' runs share track IDs, and `run.json` `group` (section 3)
+says so; a `group_id` alone does not. The folder is
 `<camera_id>_<session_id>` when `camera_id` is set, else `<session_id>`; the folder name is
 never parsed, `session_id` inside the file is the identity.
 `registration` is filled from phase 6 and is `null` before that. `ended_at` is `null` while
@@ -130,7 +131,7 @@ calibration used by this session and records its mean held-out check residual in
 
 ```json
 {
-  "contract_version": "0.13.0",
+  "contract_version": "0.14.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "mode": "live | replay",
@@ -161,7 +162,10 @@ calibration used by this session and records its mean held-out check residual in
   "calibration": {"calibration_id": "uuid", "check_error_m": 0.12,
                   "homography_image_to_court": [[0.01,0,0],[0,0.01,0],[0,0,1]],
                   "court": {"type": "fiba_half", "length_m": 14.0, "width_m": 15.0},
-                  "image_size": {"width": 1280, "height": 720}}
+                  "image_size": {"width": 1280, "height": 720}},
+  "group": {"group_id": "token", "group_run_id": "uuid",
+            "cameras": [{"camera_id": "cam1", "session_id": "uuid", "run_id": "uuid"}],
+            "params": {}}
 }
 ```
 
@@ -219,6 +223,18 @@ events. An outage: `start_t` is the `t_pc` of the last events.csv row of that se
 `sensor_outage` session events. An interval still open at the end has `end_t` equal to `perf_counter` at
 close minus t0. These arrays are the copy used for scoring. `clock.camera_latency` holds only the entries
 of this run's own camera.
+`group` (0.14.0, D-051, ADR 0007) is `null` when this run's track IDs are run-scoped: a camera without a
+group, a camera of a group processed in its own process, and every file written before 0.14.0. Otherwise
+it names the group run, the cameras of one group processed together in one process (a live recording, or a
+replay of the group's videos): `group_id` is the sessions' `group_id`, `group_run_id` a UUIDv4 that every
+run of the group run carries, and `cameras` one entry per camera of the group run (this run's own camera
+included, no `camera_id` twice; the schema refuses only an identical entry twice, the group runner checks
+the rest) with its `camera_id`, `session_id` and `run_id`. A `track_id` is then unique within the group
+run: the same `track_id` in the `tracks.csv` of two runs with the same `group_run_id` is the same person.
+A live run and a replay of it are two group runs, so the contract does not make their IDs name the same
+person; a replay is expected to reproduce the live IDs on the same frames (R2a 08), and that is checked,
+not assumed. `params` records the effective parameters of the cross-camera matcher by name, like
+`tracker.params` (`{}` when no matcher ran); the matcher slices list the names here, with a minor bump.
 For ByteTrack timestamp mode, `lost_track_buffer` is a count of 30 FPS frames and the
 effective lost-track duration is `lost_track_buffer / 30` seconds, rounded to the nearest
 frame when configured with `--track-lost-secs`.
@@ -244,18 +260,22 @@ One row per **processed** frame, including frames with zero detections.
 | column | type | meaning |
 |---|---|---|
 | seq | int | frame seq |
-| track_id | int | temporary tracker ID, valid only within this run |
+| track_id | int | temporary tracker ID: unique within the group run when `run.json` `group` is set (0.14.0), else within this run only |
 | x1, y1, x2, y2 | float | box in pixels |
 | confidence | float/empty | detector confidence if the tracker exposes it |
 | state | str | `observed` or `predicted`, when the tracker exposes it, else empty |
 | athlete_id | uuid/empty | empty until the assignment phase |
 | player_number | int/empty | the jersey number read by the identity layer (0.11.0, D-039); empty until that layer runs |
 | id_source | str/empty | how the number was decided: `jersey_vote`, `jersey_gated` or `operator`; empty when `player_number` is empty |
+| link | str | how this row's track was linked to the other cameras of the group run (0.14.0, D-051): `position` (court position and time), `appearance` (clothing colour and box height) or `unshared` (not linked; every row of a run without a group in run.json) |
 | x_m, y_m | float/empty | projected box bottom-centre in court metres; empty without calibration, and empty when the point cannot be projected (on or beyond the horizon, or not finite): never 0 |
 | calibration_id | uuid/empty | calibration used for the projection; empty without calibration |
 | position_method | str/empty | `box_bottom_center` when calibrated; empty without calibration |
 | in_court | bool/empty | `true` or `false`, lowercase: whether projected point is within court bounds; empty without calibration and for a point that cannot be projected |
 
+`link` is the link in force for the row's track when the row was written, so one track's rows may
+change from `unshared` to `position` once a second camera sees the person. A file written before
+0.14.0 has no `link` column; read it as `unshared`.
 Out-of-court points are retained, with `in_court=false`; they are not clamped to court bounds.
 A point that cannot be projected (on or beyond the camera's horizon, or not finite) keeps its
 pixel box and its `calibration_id`, with `x_m`, `y_m` and `in_court` empty; the writer records
@@ -328,7 +348,7 @@ One report per run, one per camera: there is no fusion across cameras.
 
 ```json
 {
-  "contract_version": "0.13.0",
+  "contract_version": "0.14.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "camera_id": "cam1 | null",
@@ -629,7 +649,7 @@ recorded video and is compared with `frames.csv` `t_video`; shots and tracks joi
 
 ```json
 {
-  "contract_version": "0.13.0",
+  "contract_version": "0.14.0",
   "fusion_id": "uuid",
   "group_id": "token",
   "created_at": "2026-12-01T18:50:00Z",

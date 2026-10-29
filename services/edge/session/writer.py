@@ -22,7 +22,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from services.edge.capture.types import utc_now
-from services.edge.contract import CONTRACT_VERSION, VIDEO_FILE
+from services.edge.contract import CONTRACT_VERSION, UNSHARED, VIDEO_FILE
 from services.edge.perception.types import TrackObs
 from services.edge.session.types import (
     CAMERA_ID_RE,
@@ -41,8 +41,10 @@ FRAMES_COLUMNS = [
 ]  # fmt: skip
 TRACKS_COLUMNS = [
     "seq", "track_id", "x1", "y1", "x2", "y2", "confidence", "state", "athlete_id",
-    "player_number", "id_source", "x_m", "y_m", "calibration_id", "position_method", "in_court",
+    "player_number", "id_source", "link", "x_m", "y_m", "calibration_id", "position_method",
+    "in_court",
 ]  # fmt: skip
+# every row is UNSHARED until the group runner (R2a) passes each row's link (0.14.0, D-051)
 FLUSH_SECS = 0.5  # flush period; under the contract's "at least once per second"
 METHOD = "box_bottom_center"
 UNPROJECTED_EVENT_SECS = 30.0  # at most one "no metre position" event per this many seconds
@@ -256,6 +258,7 @@ class FileSessionWriter:
             "objects": run.objects,
             "gaps": run.gaps,
             "outages": run.outages,
+            "group": run.group,
         }
         self._frames_f = open(self._run_dir / "frames.csv", "w", newline="", encoding="utf-8")
         self._tracks_f = open(self._run_dir / "tracks.csv", "w", newline="", encoding="utf-8")
@@ -438,7 +441,7 @@ class FileSessionWriter:
                         changed |= self._note_unprojected(why)
                     row = [
                         seq, o.track_id, _num(x1, 2), _num(y1, 2), _num(x2, 2), _num(y2, 2),
-                        _num(o.confidence, 4), _opt(o.state), "", "", "",
+                        _num(o.confidence, 4), _opt(o.state), "", "", "", UNSHARED,
                         _num(x_m, 4), _num(y_m, 4),
                         calibration_id, position_method, in_court,
                     ]  # fmt: skip
@@ -449,7 +452,7 @@ class FileSessionWriter:
                     except Exception:
                         track_id = ""
                     row = [
-                        seq, track_id, "", "", "", "", "", "", "", "", "", "", "",
+                        seq, track_id, "", "", "", "", "", "", "", "", "", UNSHARED, "", "",
                         self._calibration_id(), METHOD if self._positions else "", "",
                     ]  # fmt: skip
                 self._tracks.writerow(row)
