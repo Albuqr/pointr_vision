@@ -69,6 +69,8 @@ pointr/
       group_runner.py        the cameras of a group in one process (R2a, ADR 0007): one
                              CameraPipeline per camera, one shared detector, track IDs unique
                              within the group run (D-055)
+      matcher.py             the cross-camera matcher (R2a 05, D-057): local tracks with court
+                             positions in, group track IDs and links out; pure, no clock
       group_main.py          a group's one process: main.py's job for every camera of the
                              group, through the group runner (R2a 04, D-056)
       main.py                CLI entry point
@@ -118,6 +120,14 @@ class Tracker(Protocol):
     def update(
         self, dets: Detections, frame: Frame
     ) -> list[TrackObs]: ...  # track_id, box, conf, state
+
+
+class CrossCameraMatcher(Protocol):  # seam B of the group runner (R2a 05, D-057), matcher.py
+    def update(
+        self, camera_id: str, t_recv: float, tracks: Sequence[LocalTrack]
+    ) -> list[GroupTrack]: ...  # one camera's tracks in one frame -> group track IDs, same order
+
+    def record_params(self) -> dict: ...  # run.json group.params
 
 
 class PositionMap(Protocol):  # injected into the writer for a calibrated run (D-027)
