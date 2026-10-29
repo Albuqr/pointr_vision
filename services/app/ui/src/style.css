@@ -409,7 +409,9 @@ select:focus {
   background: #eeeee6;
   border-radius: 4px;
 }
-.state.running {
+.state.running,
+.state.recording,
+.state.preview_ready {
   color: #276849;
   background: #dfeee0;
 }
@@ -1159,6 +1161,8 @@ button:focus-visible,
   border-color: var(--line);
 }
 .state.running,
+.state.recording,
+.state.preview_ready,
 .role-pill,
 .court-point.highlight {
   color: #7b350e;
