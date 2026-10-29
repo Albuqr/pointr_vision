@@ -17,6 +17,7 @@ from services.edge.capture.types import (
     SourceHealth,
     SourceInfo,
 )
+from services.edge.matcher import CrossCameraMatcher, GroupTrack
 from services.edge.perception.types import Detections, Detector, Tracker, TrackObs
 from services.edge.recording.types import Recorder, RecordingInfo
 from services.edge.session.types import FrameRecord, SessionEvent, SessionWriter
@@ -44,6 +45,7 @@ EXPECTED = {
         "close": ["status", "counts"],
     },
     Recorder: {"start": ["path", "info"], "write": ["frame"], "t_video": ["seq"], "stop": []},
+    CrossCameraMatcher: {"update": ["camera_id", "t_recv", "tracks"], "record_params": []},
 }
 PROTOCOLS = list(EXPECTED)
 CASES = [(p, m) for p, methods in EXPECTED.items() for m in methods]
@@ -70,6 +72,8 @@ RETURNS = {
     (Recorder, "write"): NONE,
     (Recorder, "t_video"): float | None,
     (Recorder, "stop"): RecordingInfo,
+    (CrossCameraMatcher, "update"): list[GroupTrack],
+    (CrossCameraMatcher, "record_params"): dict,
 }
 
 
@@ -151,8 +155,9 @@ def test_frame_record_matches_frames_csv_columns():
 
 def test_track_obs_matches_tracks_csv_columns():
     """seq comes from SessionWriter.tracks(); athlete_id, player_number and id_source are filled
-    in later phases; link is unshared until the group runner (R2a) passes it."""
+    in later phases; link is a TrackObs field (the matcher's, R2a 05) that sits after id_source."""
     fields = field_names(TrackObs)
+    fields.remove("link")
     i = fields.index("xyxy")
     fields[i : i + 1] = ["x1", "y1", "x2", "y2"]
     assert [

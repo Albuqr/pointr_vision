@@ -3,9 +3,9 @@
 Each camera keeps its own capture thread, processing thread, tracker, session writer and recorder
 (one CameraPipeline each), so its session folder, frame rate, drops and app delay are its own, as
 with one process per camera. The detector is loaded once by the caller and shared: frames of every
-camera go through it in turn. Each camera keeps its own calibration. Track IDs are unique
-within the group run and not linked across cameras yet (`link` unshared); the cross-camera
-matcher (R2a 05) links them.
+camera go through it in turn. Each camera keeps its own calibration. Track IDs are unique within
+the group run: the cross-camera matcher (R2a 05, `matcher.py`) gives the same ID to a person two
+calibrated cameras both see, and each tracks row says how its track was linked.
 """
 
 import dataclasses
@@ -26,6 +26,7 @@ from services.edge.camera_pipeline import (
 from services.edge.capture.health import HealthConfig
 from services.edge.capture.types import Frame, FrameSource, HealthEvent, SourceInfo, utc_now
 from services.edge.contract import UI_STOP_DETAIL
+from services.edge.matcher import CourtMatcher, CrossCameraMatcher, LocalTrack
 from services.edge.perception.types import Detections, Detector, Tracker, TrackObs
 from services.edge.recording.recorder import FileRecorder
 from services.edge.session.types import RunMeta, SessionMeta
@@ -56,28 +57,41 @@ class SharedDetector:
             return self._detector.detect(frame)
 
 
-class GroupTrackIds:
-    """A group track ID for each (camera, local tracker ID): unique within the group run."""
-
-    def __init__(self):
-        self._ids: dict[tuple[str, int], int] = {}
-        self._lock = threading.Lock()  # every camera's processing thread asks
-
-    def get(self, camera_id: str, local_id: int) -> int:
-        with self._lock:
-            return self._ids.setdefault((camera_id, local_id), len(self._ids) + 1)
-
-
 class CameraTracker:
-    """A camera's own tracker, writing group track IDs instead of its local ones."""
+    """A camera's own tracker, writing the matcher's group track IDs and links instead of its
+    local ones. `positions` (a calibrated camera's PositionMap) gives each track's court position
+    for the matcher; `image_size` is the size the calibration was made at, and a frame of another
+    size has no positions (the writer leaves them empty too)."""
 
-    def __init__(self, tracker, camera_id: str, ids: GroupTrackIds):
-        self._tracker, self._camera_id, self._ids = tracker, camera_id, ids
+    def __init__(
+        self,
+        tracker,
+        camera_id: str,
+        matcher: CrossCameraMatcher,
+        positions=None,
+        image_size: tuple[int, int] | None = None,
+    ):
+        self._tracker, self._camera_id, self._matcher = tracker, camera_id, matcher
+        self._positions, self._image_size = positions, image_size
+
+    def _court_xy(self, box, frame: Frame):
+        if self._positions is None or frame.image.shape[1::-1] != self._image_size:
+            return None
+        try:
+            return self._positions((box[0] + box[2]) / 2, box[3])
+        except Exception:  # a point that cannot be projected is a track without a position
+            return None
 
     def update(self, dets: Detections, frame: Frame) -> list[TrackObs]:
+        tracks = self._tracker.update(dets, frame)
+        linked = self._matcher.update(  # also with no tracks: the camera reported
+            self._camera_id,
+            frame.t_recv,
+            [LocalTrack(t.track_id, self._court_xy(t.xyxy, frame)) for t in tracks],
+        )
         return [
-            dataclasses.replace(t, track_id=self._ids.get(self._camera_id, t.track_id))
-            for t in self._tracker.update(dets, frame)
+            dataclasses.replace(t, track_id=g.group_id, link=g.link)
+            for t, g in zip(tracks, linked, strict=True)
         ]
 
 
@@ -91,6 +105,7 @@ def run_group(
     make_run: Callable[[str, SourceInfo], RunMeta],
     *,
     record: bool = True,
+    matcher: CrossCameraMatcher | None = None,
     stop: threading.Event | None = None,
     on_event: OnGroupEvent | None = None,
     on_session: Callable[[str, CameraPipeline], None] | None = None,
@@ -104,7 +119,9 @@ def run_group(
     interrupted or error, with an event) and is raised again, except Studio's stop (`ui_stop()`
     true when the Ctrl+C arrives), a normal end with a `stopped` event (D-049). A calibration that
     cannot be used is an event, and that camera records uncalibrated. `on_session` gets each
-    camera's pipeline once its session is open, before any camera starts."""
+    camera's pipeline once its session is open, before any camera starts. `matcher` links the
+    cameras' tracks (default: a CourtMatcher with its default parameters); its parameters go into
+    every run's group block."""
     camera_ids = [c.camera_id for c in cameras]
     if len(set(camera_ids)) != len(camera_ids):
         raise ValueError(f"a camera_id is given twice: {camera_ids}")
@@ -128,7 +145,8 @@ def run_group(
             except (ValueError, OSError) as e:
                 calibrations.append((None, None, f"calibration not used: {e}"))
         shared_detector = None if detector is None else SharedDetector(detector)
-        ids = GroupTrackIds()
+        if detector is not None and matcher is None:
+            matcher = CourtMatcher()
         pipelines = [
             CameraPipeline(
                 cam.source,
@@ -138,7 +156,14 @@ def run_group(
                 detector=shared_detector,
                 tracker=None
                 if detector is None
-                else CameraTracker(make_tracker(cam.camera_id), cam.camera_id, ids),
+                else CameraTracker(
+                    make_tracker(cam.camera_id),
+                    cam.camera_id,
+                    matcher,
+                    positions,
+                    calibration
+                    and (calibration["image_size"]["width"], calibration["image_size"]["height"]),
+                ),
                 recorder=FileRecorder() if record else None,
                 calibration=calibration,
                 positions=positions,
@@ -157,7 +182,9 @@ def run_group(
                 {"camera_id": c, "session_id": s, "run_id": r.run_id}
                 for c, s, r in zip(camera_ids, session_ids, runs, strict=True)
             ],
-            "params": {},  # no matcher yet (R2a 05)
+            "params": {}
+            if detector is None
+            else matcher.record_params(),  # no detector, no matching
         }
         device = device_id(out)
         for i, p in enumerate(pipelines):
