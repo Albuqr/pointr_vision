@@ -606,7 +606,7 @@ class Studio:
                 if court.kind == "fiba_half"
                 else None,
             )
-        except (KeyError, TypeError, ValueError, np.linalg.LinAlgError) as exc:
+        except (KeyError, TypeError, ValueError, np.linalg.LinAlgError, cv2.error) as exc:
             message = str(exc) or exc.__class__.__name__
             with self.lock:
                 self.refusals[camera_id] = " ".join(message.split())[:300]  # fits a command line

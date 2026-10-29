@@ -133,3 +133,18 @@ def test_a_long_refusal_is_cut_before_it_reaches_a_command_line(studio):
     assert response.status_code == 422
     studio.post(SKIP_URL)
     assert len(studio.get("/api/status").json()["uncalibrated"]["clip"]) <= 300
+
+
+def test_an_opencv_failure_in_the_fit_is_a_refusal_not_a_500(studio, monkeypatch):
+    import cv2
+
+    from services.app import server
+
+    def broken(*args, **kwargs):
+        raise cv2.error("findHomography failed")
+
+    monkeypatch.setattr(server, "fit_calibration", broken)
+    response = studio.post(FIT_URL, json=payload(studio.token, GOOD_FIT))
+    assert response.status_code == 422
+    assert response.json()["refusal"] == {"kind": "invalid"}
+    assert studio.post(SKIP_URL).status_code == 200

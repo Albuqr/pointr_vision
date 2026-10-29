@@ -564,7 +564,7 @@ All paths are served on loopback by `python -m services.app`.
   camera does too. The choice is kept by the running Studio, not in a file. While it holds, every
   start (`POST /api/recording/start`) does not use that camera's saved calibration, if any,
   and records the camera as in section 3 `checks`: a `calibration` check `failed` whose `detail`
-  is the reason, plus a `startup_check_failed` session event with the same `detail`. The other
+  is the reason, plus a `startup_check_failed` session event with `detail` `calibration: <reason>`. A camera already recording is not changed. The other
   cameras are started as before. Both calls write a Studio audit entry (`calibration_uncalibrated`,
   `calibration_uncalibrated_clear`).
 - `GET /api/cameras/{id}/calibration` returns the active document, `null` when there is none, or
