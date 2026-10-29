@@ -66,6 +66,9 @@ pointr/
       camera_pipeline.py     one camera's wiring (capture, recorder, writer, calibration checks,
                              frame and track logging, final status); composes the Protocols,
                              is not one; used by main.py, reused per camera by R2a's group runner
+      group_runner.py        the cameras of a group in one process (R2a, ADR 0007): one
+                             CameraPipeline per camera, one shared detector, track IDs unique
+                             within the group run (D-055)
       main.py                CLI entry point
     app/                     Pointr Studio: local FastAPI + React UI (cameras, recording,
                              per-camera calibration); starts the edge CLI once per camera
