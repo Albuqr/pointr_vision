@@ -590,10 +590,14 @@ operator did and what failed; sessions do not carry a copy (D-054). Fields of ev
 | `action` | `camera_add`, `camera_edit`, `camera_remove`, `camera_test`, `recording_start`, `recording_stop`, `calibration_save`, or `error` |
 | `camera_id` | The camera acted on, or `null` for an action on the whole group |
 | `outcome` | `"ok"`, or the error text |
-| `detail` | Object or `null`: `camera_add` and `camera_edit` hold the saved settings; `recording_start` holds `cameras`, the settings of every camera it started and `group_id`; `error` holds the `reason` |
+| `detail` | Object or `null`: `camera_add` and `camera_edit` hold the saved settings; `recording_start` holds `cameras`, the settings of every camera it started, `skipped` (enabled cameras that did not start, each with its masked `reason`) and `group_id`; `error` holds the `reason` |
 
-`error` entries are failures that happen outside a request (a camera that cannot open its source
-while recording); a request that fails writes its own action entry with the error as `outcome`.
+`error` entries record each error Studio shows for a camera (its last-error panel: a source that
+cannot be opened, a failed test, a camera that stops with an error), including those outside any
+request. A request that fails also writes its own action entry with the error as `outcome`, so one
+failure can appear as both; the action still has exactly one entry of its own. A camera renamed by
+`camera_edit` is logged under the `camera_id` of the request. If an entry cannot be written
+(locked or full disk) the action still completes and Studio logs one line; that entry is lost.
 Every string is masked like all Studio output (URL credentials never reach the file). A crash can
 leave at most one torn last line; readers skip a line that is not valid JSON and read the rest.
 The file is never rewritten or truncated by Studio. It does not alter any session, run, report or

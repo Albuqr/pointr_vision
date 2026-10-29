@@ -130,3 +130,35 @@ def test_entries_are_appended_and_a_torn_last_line_leaves_the_rest_readable(tmp_
     assert [e["action"] for e in trail.read()] == ["camera_add", "camera_edit"]
     trail.record("camera_remove", "cam1")  # the file is still usable afterwards
     assert trail.read()[-1]["action"] == "camera_remove"
+
+
+def test_an_unwritable_trail_never_changes_the_action(tmp_path):
+    client, path = make_client(tmp_path)
+    path.mkdir()  # audit.jsonl is a directory: every write fails
+    with client:
+        assert client.post("/api/cameras", json=camera()).status_code == 200
+        assert client.put("/api/cameras/ghost", json=camera("ghost")).status_code == 404
+        assert client.app.state.studio.audit.failed_writes == 2
+
+
+def test_start_names_the_enabled_cameras_it_skipped_and_why(tmp_path):
+    client, path = make_client(tmp_path)
+    with client:
+        studio = client.app.state.studio
+        studio.config.write([camera("cam1"), camera("cam2", "rtsp://u:pw@192.168.1.9/s")])
+        real = studio.start
+
+        def start_without_cam2():
+            status = real()
+            studio.log("cam2").set_error("The camera URL could not be used safely.", "")
+            studio.launcher.cameras = [c for c in studio.launcher.cameras if c.camera_id == "cam1"]
+            return status
+
+        studio.start = start_without_cam2
+        client.post("/api/recording/start")
+        studio.start = real
+    start = next(e for e in entries(path) if e["action"] == "recording_start")
+    assert start["detail"]["skipped"] == [
+        {"camera_id": "cam2", "reason": "The camera URL could not be used safely."}
+    ]
+    assert "pw" not in path.read_text(encoding="utf-8").replace("pwd", "")

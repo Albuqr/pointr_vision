@@ -1221,6 +1221,8 @@ filtering on `camera_id` and the session's time span; `recording_start` carries 
 JSON Lines, append-only, flushed per entry: a crash can tear only the last line, which readers skip, and nothing is
 ever rewritten, so no atomic replace is needed. Failed actions record the (masked) error as `outcome` instead of
 being left out. Failures outside a request are `error` entries.
+`camera_remove` is audited too, though the ticket does not list it: it changes the camera list a session starts from.
+A trail that cannot be written never changes the action (one logged line, counted); losing an entry is the lesser harm.
 **Consequences.** Contract 0.17.0, additive (minor). Sessions are unchanged. Not copying into sessions keeps one
 place to read; the cost is that a session folder moved elsewhere loses its trail.
 **Status.** Accepted.

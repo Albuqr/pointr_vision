@@ -652,7 +652,8 @@ class Studio:
 
 
 def _camera_id(entry):
-    return str(entry.get("camera_id")) if isinstance(entry, dict) else None
+    camera_id = entry.get("camera_id") if isinstance(entry, dict) else None
+    return None if camera_id is None else str(camera_id)
 
 
 def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher):
@@ -841,9 +842,17 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
     def start_recording():
         with studio.audited("recording_start") as note:
             status = studio.start()
+            started = {c.camera_id for c in studio.launcher.cameras}
+            skipped = [
+                {"camera_id": e["camera_id"], "reason": error["message"] if error else None}
+                for e in studio.entries()
+                if e.get("enabled", True) and e["camera_id"] not in started
+                for error in [studio.log(e["camera_id"]).snapshot()["last_error"]]
+            ]
             note["detail"] = {
                 "group_id": studio.group_id,
                 "cameras": [studio.camera_settings(c) for c in studio.launcher.cameras],
+                "skipped": skipped,
             }
         return status
 

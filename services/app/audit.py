@@ -5,6 +5,7 @@ Each entry is one line written and flushed before the caller goes on, so a crash
 most the last line. Every string goes through mask_credentials on the way in."""
 
 import json
+import logging
 import os
 import threading
 from pathlib import Path
@@ -23,9 +24,13 @@ def _masked(value):
     return value
 
 
+log = logging.getLogger(__name__)
+
+
 class AuditTrail:
     def __init__(self, path: Path):
         self.path = Path(path)
+        self.failed_writes = 0  # entries that could not be written (locked or full disk)
         self.lock = threading.Lock()
 
     def record(self, action: str, camera_id: str | None, outcome: str = "ok", detail=None) -> None:
@@ -38,13 +43,21 @@ class AuditTrail:
         }
         line = json.dumps(entry, ensure_ascii=False) + "\n"
         with self.lock:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            with self.path.open("ab+") as handle:
-                if handle.seek(0, os.SEEK_END) and self._last_byte(handle) != b"\n":
-                    handle.write(b"\n")  # a crash tore the last line: end it, keep this one whole
-                handle.write(line.encode("utf-8"))
-                handle.flush()
-                os.fsync(handle.fileno())
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                with self.path.open("ab+") as handle:
+                    if handle.seek(0, os.SEEK_END) and self._last_byte(handle) != b"\n":
+                        handle.write(
+                            b"\n"
+                        )  # a crash tore the last line: end it, keep this one whole
+                    handle.write(line.encode("utf-8"))
+                    handle.flush()
+                    os.fsync(handle.fileno())
+            except OSError as exc:
+                # The action being audited has already happened or failed on its own; a trail
+                # that cannot be written must not change that. Counted and said, not raised.
+                self.failed_writes += 1
+                log.warning("audit entry not written (%s): %s", action, exc)
 
     @staticmethod
     def _last_byte(handle) -> bytes:
