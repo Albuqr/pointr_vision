@@ -2,6 +2,7 @@
 
 import json
 import queue
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -12,6 +13,24 @@ from services.edge.calibration.court import court_model
 from services.edge.calibration.render import draw_projected_court
 from services.edge.perception.loop import Processed
 from services.edge.ui.preview import draw_hud, draw_tracks
+
+
+class _PreviewServer(ThreadingHTTPServer):
+    def handle_error(self, request, client_address):
+        """A client that left (closed tab, dropped socket) is expected: one line, no traceback.
+        Anything else is a bug and keeps the default traceback."""
+        error = sys.exc_info()[1]
+        if not isinstance(error, ConnectionError):
+            super().handle_error(request, client_address)
+            return
+        try:
+            print(
+                f"preview client {client_address[0]}:{client_address[1]} left: "
+                f"{type(error).__name__}",
+                flush=True,
+            )
+        except OSError:  # the launcher that read this pipe is gone
+            pass
 
 
 class HttpPreview:
@@ -106,26 +125,23 @@ class HttpPreview:
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
                 self.end_headers()
-                try:
-                    while not owner._stop.is_set():
-                        with owner._ready:
-                            owner._ready.wait(timeout=0.2)
-                            payload = owner._jpeg
-                        if payload is not None:
-                            self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\n\r\n")
-                            self.wfile.write(payload + b"\r\n")
-                            self.wfile.flush()
-                            time.sleep(0.2)
-                except OSError:
-                    pass
+                while not owner._stop.is_set():
+                    with owner._ready:
+                        owner._ready.wait(timeout=0.2)
+                        payload = owner._jpeg
+                    if payload is not None:
+                        self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\n\r\n")
+                        self.wfile.write(payload + b"\r\n")
+                        self.wfile.flush()
+                        time.sleep(0.2)
 
             def log_message(self, fmt, *args):
                 return
 
         try:
-            self.server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+            self.server = _PreviewServer(("127.0.0.1", port), Handler)
         except OSError:
-            self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+            self.server = _PreviewServer(("127.0.0.1", 0), Handler)
         self.port = self.server.server_address[1]
         self.server.daemon_threads = True
         self._http_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
