@@ -81,13 +81,21 @@ work, not duplicate it.
 | B4 | Studio status reports each camera's state through start, record and stop | integration |
 | B5 | Model-loaded, first-frame and first-preview-frame times are in the session files | integration |
 | B6 | `run.json` holds the power state | unit |
-| B7 | The sessions page lists each session's time, cameras, duration, fps, drops, events and status | e2e (Playwright) |
+| B7 | The sessions page lists each session's time, cameras, duration, fps, drops, events and status | integration (`GET /api/sessions`, `tests/app/test_sessions_page.py`) + manual visual check (below); Playwright e2e only if the owner approves the dependency (CLAUDE.md rule 8) |
 | B8 | Camera discovery finds a DroidCam stream on the current network | manual |
 | B9 | Runs L1–L8 recorded, cause of the cap named, chosen fix measured against L1 | manual, in the phase report |
 | B10 | ID changes per person on a recorded occlusion clip go down against the current tracker | integration on a recorded clip, plus manual check |
 | B11 | ~~One person seen by both cameras has one ID in the fused output~~ Moved to R2a-A2 (D-045) | — |
 | B12 | A calibration fitted from a visible subset of court points saves, and check points report their error | unit + manual |
 | B13 | A calibration rejected at fit time shows the reason (points, error) and offers a retry or starting that camera uncalibrated, recorded as a failed calibration check (spec CR-1, D-048) | integration |
+
+### Manual steps (scope addition)
+- **B7 visual check.** Start Studio (`python -m services.app`), record a short two-camera session, stop, open
+  the Sessions page. Pass: each session card shows its start time, the cameras of its recording, duration,
+  frame rate, dropped frames (count of captured, percent), events (total and by kind) and status, with no raw
+  report text. Then rename one session's `runs/<run_id>/run.json` and press Refresh list: that session is still
+  listed and a line says what is not available. Check a narrow window (about 600 px): the facts wrap, nothing
+  overflows.
 
 ## Gate reviewers
 `code-reviewer`, `test-auditor`, `contract-guardian`, `reliability-reviewer`.
