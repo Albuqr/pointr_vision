@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:pointr:contracts:0.14.0:run",
+  "$id": "urn:pointr:contracts:0.15.0:run",
   "title": "run.json",
   "description": "DATA_CONTRACTS.md section 3. Missing values are null, never 0.",
   "type": "object",
@@ -8,10 +8,10 @@
   "required": [
     "contract_version", "run_id", "session_id", "mode", "input", "detector", "tracker",
     "health", "runtime", "started_at", "t0_wall", "ended_at", "counts", "calibration",
-    "checks", "clock", "t0_mono", "objects", "gaps", "outages", "group"
+    "checks", "clock", "t0_mono", "objects", "gaps", "outages", "group", "ready"
   ],
   "properties": {
-    "contract_version": {"const": "0.14.0"},
+    "contract_version": {"const": "0.15.0"},
     "run_id": {"$ref": "#/$defs/uuid4"},
     "session_id": {"$ref": "#/$defs/uuid4"},
     "mode": {"enum": ["live", "replay"]},
@@ -254,6 +254,44 @@
           }
         },
         "params": {"type": "object", "description": "the cross-camera matcher's effective parameters"}
+      }
+    },
+    "ready": {
+      "type": "object",
+      "description": "when this camera became ready, D-052; t_pc is raw perf_counter, the base of t0_mono",
+      "additionalProperties": false,
+      "required": ["model_loaded", "first_frame", "first_preview"],
+      "properties": {
+        "model_loaded": {
+          "type": ["object", "null"],
+          "description": "null when the step did not happen",
+          "additionalProperties": false,
+          "required": ["t_wall", "t_pc"],
+          "properties": {
+            "t_wall": {"$ref": "#/$defs/utc"},
+            "t_pc": {"type": "number", "minimum": 0}
+          }
+        },
+        "first_frame": {
+          "type": ["object", "null"],
+          "description": "null when the step did not happen",
+          "additionalProperties": false,
+          "required": ["t_wall", "t_pc"],
+          "properties": {
+            "t_wall": {"$ref": "#/$defs/utc"},
+            "t_pc": {"type": "number", "minimum": 0}
+          }
+        },
+        "first_preview": {
+          "type": ["object", "null"],
+          "description": "null when the step did not happen",
+          "additionalProperties": false,
+          "required": ["t_wall", "t_pc"],
+          "properties": {
+            "t_wall": {"$ref": "#/$defs/utc"},
+            "t_pc": {"type": "number", "minimum": 0}
+          }
+        }
       }
     },
     "counts": {

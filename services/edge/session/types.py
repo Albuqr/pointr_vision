@@ -48,6 +48,7 @@ class RunMeta:
     gaps: list | None = None  # null = not measured; SessionWriter.set_final fills it at the end
     outages: list | None = None  # same for the rim sensor outages (0.11.0)
     group: dict | None = None  # the group run sharing track IDs; null when run-scoped (0.14.0)
+    ready: dict | None = None  # steps already reached at run start, e.g. model_loaded (0.15.0)
 
 
 @dataclass(frozen=True)
@@ -117,6 +118,10 @@ class SessionWriter(Protocol):
 
     def set_final(self, **blocks) -> None:
         """run.json blocks known only at the end: gaps, outages, clock. Call before close()."""
+        ...
+
+    def set_ready(self, step: str, t_wall: str, t_pc: float) -> None:
+        """run.json ready[step] (model_loaded | first_frame | first_preview), when it happens."""
         ...
 
     def set_recording_sha256(self, sha256: str) -> None:

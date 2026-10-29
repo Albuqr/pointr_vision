@@ -103,6 +103,7 @@ class CameraPipeline:
             self.log_event,
             on_frame=recorder.write if recorder else None,
             lossless=replay,
+            on_first_frame=lambda f: self.writer.set_ready("first_frame", f.t_wall, f.t_recv),
         )
         self.processor = Processor(
             self.capture.proc_queue,
@@ -142,6 +143,10 @@ class CameraPipeline:
             self.writer.start(meta, run)
         if self.recorder:
             self.recorder.start(self.writer.dir / VIDEO_FILE, self.info)
+
+    def mark_preview_ready(self) -> None:
+        """The first annotated preview image is ready to serve (run.json ready, D-052)."""
+        self.writer.set_ready("first_preview", utc_now(), time.perf_counter())
 
     def rel(self, t: float | None) -> float | None:
         """time.perf_counter() to s since the run's t0; None before t0 (D-011, D-014)."""

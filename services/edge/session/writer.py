@@ -45,6 +45,7 @@ TRACKS_COLUMNS = [
     "in_court",
 ]  # fmt: skip
 # every row is UNSHARED until the group runner (R2a) passes each row's link (0.14.0, D-051)
+READY_STEPS = ("model_loaded", "first_frame", "first_preview")  # run.json ready (0.15.0, D-052)
 FLUSH_SECS = 0.5  # flush period; under the contract's "at least once per second"
 METHOD = "box_bottom_center"
 UNPROJECTED_EVENT_SECS = 30.0  # at most one "no metre position" event per this many seconds
@@ -259,6 +260,7 @@ class FileSessionWriter:
             "gaps": run.gaps,
             "outages": run.outages,
             "group": run.group,
+            "ready": {**dict.fromkeys(READY_STEPS), **(run.ready or {})},
         }
         self._frames_f = open(self._run_dir / "frames.csv", "w", newline="", encoding="utf-8")
         self._tracks_f = open(self._run_dir / "tracks.csv", "w", newline="", encoding="utf-8")
@@ -289,6 +291,13 @@ class FileSessionWriter:
             raise RuntimeError("set_final after close()")
         with self._lock:
             self._final.update(blocks)
+
+    def set_ready(self, step: str, t_wall: str, t_pc: float) -> None:
+        """A step of run.json `ready` happened (D-052). Saved with the run's next snapshot, so a
+        run stopped early keeps the steps it reached; the first call for a step wins."""
+        if step not in READY_STEPS:
+            raise ValueError(f"unknown ready step: {step!r}")
+        self._put(("ready", step, t_wall, t_pc))
 
     def set_recording_sha256(self, sha256: str) -> None:
         """The sha256 of the session video, once the recorder has stopped; call before close()."""
@@ -459,6 +468,11 @@ class FileSessionWriter:
             return changed
         elif kind == "event":
             return self._add_event(item[1])
+        elif kind == "ready":
+            _, step, t_wall, t_pc = item
+            if self._run_doc["ready"][step] is None:
+                self._run_doc["ready"][step] = {"t_wall": t_wall, "t_pc": t_pc}
+                self._snapshot(self._run_dir / "run.json", self._run_doc)
         elif kind == "t0":
             self._run_doc["t0_wall"] = item[1]
             self._run_doc["t0_mono"] = item[2]

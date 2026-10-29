@@ -209,7 +209,7 @@ def test_broken_track_r_blocks_fail(path, value):
 
 
 @pytest.mark.parametrize(
-    "key", ["checks", "clock", "t0_mono", "objects", "gaps", "outages", "group"]
+    "key", ["checks", "clock", "t0_mono", "objects", "gaps", "outages", "group", "ready"]
 )
 def test_run_requires_the_blocks_even_when_null(key):
     assert list(validator("run").iter_errors(mutate(example("run"), (key,), DELETE)))
