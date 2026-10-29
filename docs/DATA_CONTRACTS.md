@@ -1,6 +1,6 @@
 # Data contracts
 
-Contract version: **0.16.0**. Any change bumps the version (minor for additive fields, major
+Contract version: **0.17.0**. Any change bumps the version (minor for additive fields, major
 for removals or meaning changes) and needs a `DECISIONS.md` entry. JSON Schemas in
 `contracts/` are written from this file and tests check them against it (D-009).
 
@@ -577,6 +577,27 @@ preserved as `cameras.json.bak`. An unreadable or invalid settings file loads as
 list and produces a visible warning; it is not silently replaced with the backup. The camera
 configuration is a local Studio setting and does not alter session, run, report, or calibration
 field meanings. This additive settings contract is recorded under contract version 0.10.0.
+
+### Studio audit trail (`%LOCALAPPDATA%/pointr/audit.jsonl`, 0.17.0)
+
+One file next to `cameras.json`, append-only JSON Lines: one object per line, UTF-8, written and
+flushed to disk before the action's response is returned. It is the Studio's record of what the
+operator did and what failed; sessions do not carry a copy (D-054). Fields of every entry:
+
+| Field | Meaning |
+|---|---|
+| `t_wall` | UTC ISO-8601 time the action finished |
+| `action` | `camera_add`, `camera_edit`, `camera_remove`, `camera_test`, `recording_start`, `recording_stop`, `calibration_save`, or `error` |
+| `camera_id` | The camera acted on, or `null` for an action on the whole group |
+| `outcome` | `"ok"`, or the error text |
+| `detail` | Object or `null`: `camera_add` and `camera_edit` hold the saved settings; `recording_start` holds `cameras`, the settings of every camera it started and `group_id`; `error` holds the `reason` |
+
+`error` entries are failures that happen outside a request (a camera that cannot open its source
+while recording); a request that fails writes its own action entry with the error as `outcome`.
+Every string is masked like all Studio output (URL credentials never reach the file). A crash can
+leave at most one torn last line; readers skip a line that is not valid JSON and read the rest.
+The file is never rewritten or truncated by Studio. It does not alter any session, run, report or
+calibration field.
 
 ## 11. `objects.csv` (0.11.0, Track R)
 

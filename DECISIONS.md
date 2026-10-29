@@ -1212,3 +1212,15 @@ reports 255 for "unknown" and the reader maps it to `null`. Windows is read with
 machine. `end` is `null` when the run never closed. The block is a run field, not a session event, like `ready` (D-052).
 **Consequences.** Contract 0.16.0, additive (minor). Older files have no `power`, read as not measured.
 **Status.** Accepted.
+
+## D-054 · 2026-10-29 · Studio audit trail (contract 0.17.0)
+**Context.** Phase 03 B2 (issue #27, D-044). After the 2026-10-22 field test the files could not say which camera
+settings a session started from, or what had failed and when. The owner chose where the trail lives.
+**Decision.** One Studio-level `audit.jsonl` next to `cameras.json`, not copied into sessions. A session is rebuilt by
+filtering on `camera_id` and the session's time span; `recording_start` carries the settings of each started camera.
+JSON Lines, append-only, flushed per entry: a crash can tear only the last line, which readers skip, and nothing is
+ever rewritten, so no atomic replace is needed. Failed actions record the (masked) error as `outcome` instead of
+being left out. Failures outside a request are `error` entries.
+**Consequences.** Contract 0.17.0, additive (minor). Sessions are unchanged. Not copying into sessions keeps one
+place to read; the cost is that a session folder moved elsewhere loses its trail.
+**Status.** Accepted.
