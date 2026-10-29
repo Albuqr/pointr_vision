@@ -1187,3 +1187,16 @@ that pick columns by name are unaffected. R2a 03 writes the first non-null `grou
 `link` other than `unshared`. `group` is written when the run opens, so the group runner allocates every camera's
 `run_id` before any writer starts. Fusion (section 15) still describes matching; R6 trims it.
 **Status.** Accepted.
+
+## D-052 · 2026-10-29 · Ready times in run.json (contract 0.15.0)
+**Context.** Phase 03 B5 (issue #25, D-044). The 2026-10-22 field test saw camera 2's preview take minutes and
+the files could not say which step was slow. Studio's camera states (B4) read the same three moments.
+**Decision.** `run.json` gets a `ready` block with `model_loaded`, `first_frame` and `first_preview`, each
+`{t_wall, t_pc}` or `null`. `t_pc` is raw `perf_counter` (the base of `t0_mono` and `events.csv` `t_pc`), not
+seconds since t0, because the model load comes before t0 and the base of `t_mono` is undefined there (D-014).
+They are run fields, not session events: a time is one value per run, and events are for things that go wrong.
+`first_preview` means the first annotated JPEG was ready to serve, not that a client fetched it: when Studio
+happens to connect says nothing about the camera. The block is always present in a 0.15.0 file with `null` for
+steps that did not happen; the writer saves each step as it happens, so a run stopped early keeps what it reached.
+**Consequences.** Contract 0.15.0, additive (minor). Calibrations saved under earlier versions stay loadable.
+**Status.** Accepted.

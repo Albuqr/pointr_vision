@@ -23,6 +23,7 @@ class HttpPreview:
         on_error=lambda error: None,
         raw_snapshot=lambda: None,
         calibration=None,
+        on_first_preview=lambda: None,
     ):
         self.port = port
         self.state = state
@@ -30,6 +31,8 @@ class HttpPreview:
         self.on_error = on_error
         self.raw_snapshot = raw_snapshot
         self.calibration = calibration
+        self.on_first_preview = on_first_preview  # once, when the first JPEG is ready to serve
+        self._first_preview_sent = False
         self.court = None
         if calibration:
             court = calibration["court"]
@@ -180,6 +183,9 @@ class HttpPreview:
                     self._jpeg = encoded.tobytes()
                     self._last_encoded = time.monotonic()
                     self._ready.notify_all()
+                if not self._first_preview_sent:
+                    self._first_preview_sent = True
+                    self.on_first_preview()
                 self._failure_active = False
             except Exception as error:
                 if not self._failure_active:

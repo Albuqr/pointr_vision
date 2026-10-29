@@ -510,7 +510,7 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
         print(f"error: {conflict}", file=sys.stderr)
         return EXIT_OPEN_FAILED
 
-    detector = tracker = gpu = None
+    detector = tracker = gpu = model_loaded = None
     if not args.no_detect:
         try:
             device, gpu = resolve_device(args.device)
@@ -521,6 +521,7 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
         print(f"device: {device}" + (f" ({gpu})" if gpu else " (no CUDA GPU in use)"))
         try:
             detector, tracker = load_perception(args, device)
+            model_loaded = {"t_wall": utc_now(), "t_pc": time.perf_counter()}
         except Exception as e:  # e.g. no network for the first weights download
             # before any run, so no t0: t_mono is null (D-014)
             on_event(HealthEvent("error", utc_now(), None, f"model load failed: {e!r}"), None)
@@ -584,7 +585,10 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
             )
         )
         pipeline.open_session(
-            run_meta(args, info, config, detector, tracker, gpu, replay),
+            dataclasses.replace(
+                run_meta(args, info, config, detector, tracker, gpu, replay),
+                ready={"model_loaded": model_loaded},
+            ),
             meta=meta,
             session_dir=replay.session_dir if session_replay else None,
         )
@@ -626,6 +630,7 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
                 ),
                 raw_snapshot=capture.raw_snapshot,
                 calibration=calibration,
+                on_first_preview=pipeline.mark_preview_ready,
             )
             http_preview.start()
             processor.on_preview = http_preview.publish

@@ -29,12 +29,14 @@ class Capture:
         fail_backoff: float = 0.01,  # pause after a failed read, so a dead device is not spun on
         on_frame: Callable[[Frame], None] | None = None,
         lossless: bool = False,
+        on_first_frame: Callable[[Frame], None] | None = None,
     ):
         self.source = source
         self.health = health
         self.on_event = on_event  # called on the capture thread
         self.on_frame = on_frame  # every captured frame, before proc_queue; must not block
         self.lossless = lossless  # a replay waits for the consumer instead of dropping (A3)
+        self.on_first_frame = on_first_frame  # the first frame the source delivered, once
         self.fail_backoff = fail_backoff
         self.proc_queue: queue.Queue[Frame] = queue.Queue(maxsize=1)
         # written by the capture thread only; other threads read them for display
@@ -111,6 +113,8 @@ class Capture:
                     continue
                 with self._latest_lock:
                     self._latest_frame = frame
+                if self.captured == 0 and self.on_first_frame is not None:
+                    self.on_first_frame(frame)
                 self.captured += 1
                 self._times.append(frame.t_recv)
                 span = self._times[-1] - self._times[0]

@@ -1,6 +1,6 @@
 # Data contracts
 
-Contract version: **0.14.0**. Any change bumps the version (minor for additive fields, major
+Contract version: **0.15.0**. Any change bumps the version (minor for additive fields, major
 for removals or meaning changes) and needs a `DECISIONS.md` entry. JSON Schemas in
 `contracts/` are written from this file and tests check them against it (D-009).
 
@@ -63,7 +63,7 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
 
 ```json
 {
-  "contract_version": "0.14.0",
+  "contract_version": "0.15.0",
   "session_id": "uuid",
   "device_id": "uuid",
   "camera_id": "cam1 | null",
@@ -131,7 +131,7 @@ calibration used by this session and records its mean held-out check residual in
 
 ```json
 {
-  "contract_version": "0.14.0",
+  "contract_version": "0.15.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "mode": "live | replay",
@@ -165,7 +165,10 @@ calibration used by this session and records its mean held-out check residual in
                   "image_size": {"width": 1280, "height": 720}},
   "group": {"group_id": "token", "group_run_id": "uuid",
             "cameras": [{"camera_id": "cam1", "session_id": "uuid", "run_id": "uuid"}],
-            "params": {}}
+            "params": {}},
+  "ready": {"model_loaded": {"t_wall": "2026-10-07T17:59:52Z", "t_pc": 1226.1},
+            "first_frame": {"t_wall": "2026-10-07T18:00:00.6Z", "t_pc": 1234.7},
+            "first_preview": null}
 }
 ```
 
@@ -235,6 +238,17 @@ A live run and a replay of it are two group runs, so the contract does not make 
 person; a replay is expected to reproduce the live IDs on the same frames (R2a 08), and that is checked,
 not assumed. `params` records the effective parameters of the cross-camera matcher by name, like
 `tracker.params` (`{}` when no matcher ran); the matcher slices list the names here, with a minor bump.
+`ready` (0.15.0, D-052) says when this camera became ready, one entry per step, so a slow start can be
+placed from the files alone. Each entry is `{t_wall, t_pc}`: the UTC wall time and the raw `perf_counter`
+seconds of the PC clock (the base of `t0_mono`, so `t_pc - t0_mono` is seconds since t0, and negative for
+a step before t0 such as the model load). A step that never happened is `null`, never 0, and the block
+itself is always an object in a 0.15.0 file; a file from before 0.15.0 has no `ready` key, which readers
+treat as not measured. `model_loaded`: the detector is loaded and warmed up (`null` with `--no-detect`).
+`first_frame`: the first frame the camera delivered (the frame's own `t_recv` and wall time).
+`first_preview`: the first annotated preview image was encoded and ready to serve over the HTTP preview
+(`null` without `--http-preview`, and when no frame reached it); a client connecting later does not move it.
+The entries are written as they happen, so a run stopped early keeps the steps it reached. A replay
+fills the same entries, with the frame times of the replay.
 For ByteTrack timestamp mode, `lost_track_buffer` is a count of 30 FPS frames and the
 effective lost-track duration is `lost_track_buffer / 30` seconds, rounded to the nearest
 frame when configured with `--track-lost-secs`.
@@ -348,7 +362,7 @@ One report per run, one per camera: there is no fusion across cameras.
 
 ```json
 {
-  "contract_version": "0.14.0",
+  "contract_version": "0.15.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "camera_id": "cam1 | null",
@@ -649,7 +663,7 @@ recorded video and is compared with `frames.csv` `t_video`; shots and tracks joi
 
 ```json
 {
-  "contract_version": "0.14.0",
+  "contract_version": "0.15.0",
   "fusion_id": "uuid",
   "group_id": "token",
   "created_at": "2026-12-01T18:50:00Z",
