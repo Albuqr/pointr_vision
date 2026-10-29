@@ -1226,3 +1226,23 @@ A trail that cannot be written never changes the action (one logged line, counte
 **Consequences.** Contract 0.17.0, additive (minor). Sessions are unchanged. Not copying into sessions keeps one
 place to read; the cost is that a session folder moved elsewhere loses its trail.
 **Status.** Accepted.
+
+## D-055 · 2026-10-29 · Group runner: one detector shared in turn, per-camera pipelines
+**Context.** R2a 03 (issue #9, ADR 0007): the cameras of a group run in one process with one detector. The ticket
+asks to check the installed `rfdetr` before choosing between detecting frames in turn or as a batch.
+**Found.** `rfdetr` 1.11.2 `RFDETR.predict()` (`rfdetr/detr.py`) takes a list of images, resizes each to `shape`
+and runs them as one batch (`torch.stack`), returning one `Detections` per image.
+**Decision.** Frames are detected in turn: each camera keeps its own capture and processing thread (one
+`CameraPipeline` each), and the one detector is called under a lock. A batch would make one camera's frame wait for
+the other's, so each camera's processing rate and app delay would no longer be its own. Whether batching gains
+throughput on the GPU PC is unmeasured; it is reconsidered only if R2a-A5's recorded runs show the detector as the
+limit (BACKLOG). Track IDs: each camera's tracker keeps its local IDs; a group table maps (camera, local ID) to a
+group ID, so IDs never collide. Group IDs are numbered in the order the cameras' threads first report a track, so
+they are not reproducible run to run; group replay (R2a 08), which must reproduce the live IDs, has to fix the order.
+No linking yet: every row is `unshared` and `group.params` is `{}` until the matcher
+(R2a 05). A source that cannot open, or a session that cannot be written, stops the group before any session is left
+running. Calibration per camera comes with R2a 05; the launcher and Studio with R2a 04.
+**Consequences.** No contract change (0.14.0 already defines `group` and `link`). The spec's "one processing loop"
+is one processing thread per camera sharing one detector; the group tracker state the matcher needs is shared
+across those threads under a lock.
+**Status.** Accepted.
