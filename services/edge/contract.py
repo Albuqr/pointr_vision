@@ -3,7 +3,7 @@
 docs/DATA_CONTRACTS.md, the schemas in contracts/ and the fixtures carry the same number;
 tests/test_contracts.py compares them. Change it here and nowhere else."""
 
-CONTRACT_VERSION = "0.17.0"
+CONTRACT_VERSION = "0.18.0"
 
 # The raw recording of a live session (D-042). MKV, not MP4: an MP4 written by
 # OpenCV has no index until it is closed, so a killed session leaves an unreadable file (measured
@@ -41,7 +41,10 @@ LINKS = ("espnow", "usb")
 ID_SOURCES = ("jersey_vote", "jersey_gated", "operator")
 UNSHARED = "unshared"  # the link of every track row of a run without a group run
 TRACK_LINKS = ("position", "appearance", UNSHARED)  # tracks.csv link (0.14.0, D-051)
-OBJECT_CLASSES = ("ball", "rim")
+# Names in run.json group.params when the court-position matcher ran (0.18.0, D-057); the matcher's
+# MatcherParams fields plus the per-camera latency it used. A test compares them with the doc.
+MATCHER_PARAMS = ("match_distance_m", "max_offset_s", "lost_s", "max_speed_mps", "latency_s")
+OBJECT_CLASSES =("ball", "rim")
 OBJECT_SOURCES = ("detector", "session_median")
 SENSOR_EVENT_KINDS = ("make", "sync", "outage_start", "outage_end", "reset")
 SHOT_CALLS = ("make", "miss", "uncertain")

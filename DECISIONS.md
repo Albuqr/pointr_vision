@@ -1268,3 +1268,21 @@ every camera of the group (D-055); per-camera isolation inside a group is R2a 07
 stays (`group_command=None`) and its process tests use it. No preview window (`--preview`) in a group: Studio shows
 each camera's preview. Not measured: memory and throughput of one process versus two, recorded in R2a-A5.
 **Status.** Accepted.
+
+## D-057 · 2026-10-29 · Cross-camera matcher by court position: parameters in run.json (contract 0.18.0)
+**Context.** R2a 05 (issue #11, ADR 0007, D-045). D-051 left the matcher's parameter names to this slice and asks for
+them to be listed in `DATA_CONTRACTS.md` with a minor bump before code.
+**Decision.** The matcher links a new or still-unlinked local track to a track of another camera when both have a court
+position, the other camera's last update is within `max_offset_s` of this one in group time, and the positions are
+within `match_distance_m`; the nearest pair wins, one to one. Two local tracks of one camera that are present together
+are never put in one group. A local track that is no longer reported keeps its group ID for `lost_s`; a new local
+track of any camera that appears within `match_distance_m + max_speed_mps * gap` of such a group's last position takes
+it over. Group time is the frame's receive time minus the camera's latency (`latency_s`, 0.0 when none was
+measured). `group.params` holds `match_distance_m`, `max_offset_s`, `lost_s`, `max_speed_mps` and `latency_s`; a
+linked track's rows carry `link=position` from the frame where the link was made, earlier rows stay `unshared`.
+The defaults (0.5 m, 0.25 s, 1.0 s, 4.0 m/s) are starting values, not measured: R2a-A5 and the field recordings tune
+them. `lost_s` is set from the tracker's lost-track time by the group process.
+**Consequences.** Contract 0.18.0, additive: the schemas leave `group.params` a free object, so only the version and
+the doc change. Nothing here decides the appearance fallback (R2a 06). A link is never undone while both local tracks
+exist (BACKLOG).
+**Status.** Accepted.
