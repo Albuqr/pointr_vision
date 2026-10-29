@@ -11,7 +11,7 @@ import threading
 import time
 import uuid
 import webbrowser
-from collections import deque
+from collections import Counter, deque
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Literal
@@ -33,7 +33,7 @@ from services.edge.capture.sources import DEFAULT_CAPTURE_SIZE, SourceOpenError,
 from services.edge.capture.types import SourceEnded
 from services.edge.contract import CONTRACT_VERSION
 from services.edge.launcher import Camera, ConfigError, Launcher, Options, parse_config
-from services.edge.reports.build import build_report, format_summary, run_dirs
+from services.edge.reports.build import build_report, run_dirs
 from services.edge.session.writer import mask_credentials
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -931,31 +931,10 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
         rows = []
         if base.exists():
             for path in base.iterdir():
-                session_file = path / "session.json"
-                if path.is_symlink() or not path.is_dir() or not session_file.is_file():
+                if path.is_symlink() or not path.is_dir() or not (path / "session.json").is_file():
                     continue
-                try:
-                    value = json.loads(session_file.read_text(encoding="utf-8"))
-                except (OSError, ValueError):
-                    continue
-                report_text = None
-                for run_dir in run_dirs(path) if (path / "session.json").is_file() else []:
-                    try:
-                        report_text = format_summary(build_report(run_dir))
-                    except (OSError, ValueError, KeyError):
-                        continue
-                    break
-                rows.append(
-                    {
-                        "camera_id": value.get("camera_id"),
-                        "group_id": value.get("group_id"),
-                        "status": value.get("status"),
-                        "started_at": value.get("started_at"),
-                        "duration": session_duration(value),
-                        "folder": path.name,
-                        "summary": report_text,
-                    }
-                )
+                rows.append(session_row(path))
+        rows.sort(key=lambda row: str(row["started_at"] or ""), reverse=True)
         return rows
 
     @app.get("/api/cameras/{camera_id}/preview/{kind}")
@@ -1066,3 +1045,78 @@ def session_duration(value):
     else:
         finish = dt.datetime.now(dt.UTC)
     return max(0.0, (finish - start).total_seconds())
+
+
+def _why(error):
+    """One readable reason for a file that could not be read (no full path, no traceback)."""
+    if isinstance(error, FileNotFoundError):
+        return f"{Path(str(error.filename)).name} missing"
+    if isinstance(error, OSError):
+        return f"{Path(str(error.filename)).name} unreadable ({error.strerror})"
+    return f"{type(error).__name__}: {str(error)[:80]}"
+
+
+def session_row(path: Path) -> dict:
+    """One sessions-page row, from the session folder's files only (B7). Whatever cannot be
+    read stays None and is named in `missing`: a damaged session is listed, never dropped."""
+    row = {
+        "folder": path.name,
+        "camera_id": None,
+        "group_id": None,
+        "status": None,
+        "started_at": None,
+        "duration": None,
+        "fps": None,
+        "captured": None,
+        "dropped": None,
+        "drop_rate": None,
+        "events": {},
+        "missing": [],
+    }
+    missing = row["missing"]
+    try:
+        value = json.loads((path / "session.json").read_text(encoding="utf-8"))
+        if not isinstance(value, dict):
+            raise ValueError("not a JSON object")
+    except (OSError, ValueError) as error:
+        missing.append(f"session.json: {_why(error)}")
+        return row
+    for key in ("camera_id", "group_id", "status", "started_at"):
+        row[key] = value.get(key)
+    try:
+        row["duration"] = session_duration(value)
+    except (TypeError, ValueError, AttributeError):
+        missing.append("started_at or ended_at in session.json is not a valid time")
+    if row["started_at"] is None:
+        missing.append("started_at not recorded")
+    events = value.get("events")
+    if isinstance(events, list):
+        row["events"] = dict(Counter(str(e.get("kind")) for e in events if isinstance(e, dict)))
+    else:
+        missing.append("events not readable in session.json")
+    try:
+        run_folders = run_dirs(path)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        missing.append(f"runs: {_why(error)}")
+        return row
+    if not run_folders:
+        missing.append("no run recorded in this session")
+        return row
+    reason = None
+    for run_dir in run_folders:
+        try:
+            stats = build_report(run_dir).session
+        except Exception as error:  # a damaged run must not hide the session
+            reason = f"report for run {run_dir.name[:8]}: {_why(error)}"
+            continue
+        row.update(
+            fps=stats.processed_fps.value,
+            captured=stats.n_captured,
+            dropped=stats.n_dropped,
+            drop_rate=stats.drop_rate.value,
+        )
+        if stats.n_dropped is None:
+            missing.append("counts not recorded (the run did not end)")
+        return row
+    missing.append(reason)
+    return row

@@ -1,5 +1,6 @@
 import queue
 import socket
+import struct
 import threading
 import time
 
@@ -104,3 +105,84 @@ def test_processing_preview_hook_only_hands_off_the_unmodified_frame():
     assert processor.done.wait(2)
     assert processor.stop()
     assert received[0].frame.image is image
+
+
+def preview_with_frame():
+    preview = HttpPreview(0, lambda: "OK", lambda: HudInfo(0, 0, 0, 0, 0, 0))
+    preview.start()
+    frame = Frame(
+        1, time.perf_counter(), "2026-01-01T00:00:00Z", np.zeros((80, 120, 3), np.uint8), "fake"
+    )
+    detections = Detections(
+        np.empty((0, 4), np.float32), np.empty(0, np.float32), np.empty(0, np.int64)
+    )
+    preview.publish(Processed(frame, detections, [], 0.0, 0.0))
+    deadline = time.monotonic() + 3
+    while preview._jpeg is None and time.monotonic() < deadline:
+        time.sleep(0.02)
+    return preview
+
+
+def open_mjpeg(port: int, path: str = "/mjpeg") -> socket.socket:
+    client = socket.create_connection(("127.0.0.1", port), timeout=5)
+    client.sendall(f"GET {path} HTTP/1.0\r\n\r\n".encode())
+    data = b""
+    while b"--frame" not in data:  # the stream is running
+        chunk = client.recv(65536)
+        assert chunk, "the server closed the stream"
+        data += chunk
+    return client
+
+
+def drop_abruptly(client: socket.socket) -> None:
+    client.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))  # RST
+    client.close()
+
+
+def test_b3_clients_that_leave_mid_stream_leave_no_traceback_and_others_keep_frames(capfd):
+    preview = preview_with_frame()
+    try:
+        staying = open_mjpeg(preview.port)
+        open_mjpeg(preview.port).close()  # a browser tab closed mid-stream
+        drop_abruptly(open_mjpeg(preview.port))  # a dropped socket
+        # connections that leave before or while a plain request is answered
+        for path in ("/snapshot.jpg", "/status.json", "/raw-snapshot.jpg"):
+            early = socket.create_connection(("127.0.0.1", preview.port), timeout=5)
+            early.sendall(f"GET {path} HTTP/1.0\r\n\r\n".encode())
+            drop_abruptly(early)
+        drop_abruptly(socket.create_connection(("127.0.0.1", preview.port), timeout=5))
+        time.sleep(1)  # let the server threads hit the dead sockets
+        staying.settimeout(5)
+        data = b""
+        while data.count(b"--frame") < 2:  # frames still arrive after the others left
+            data += staying.recv(65536)
+        staying.close()
+    finally:
+        preview.close()
+    captured = capfd.readouterr()
+    assert "Traceback" not in captured.out + captured.err
+
+
+def test_b3_a_client_leaving_is_one_readable_line(capfd):
+    preview = preview_with_frame()
+    try:
+        client = open_mjpeg(preview.port)
+        mine = f"127.0.0.1:{client.getsockname()[1]} "  # other tests' threads may still print
+        drop_abruptly(client)
+        time.sleep(1)
+    finally:
+        preview.close()
+    captured = capfd.readouterr()
+    lines = [line for line in (captured.out + captured.err).splitlines() if mine in line]
+    assert len(lines) == 1
+    assert lines[0].startswith("preview client ")
+
+
+def test_b3_a_failure_that_is_not_a_client_leaving_still_shows_its_traceback(capfd):
+    preview = HttpPreview(0, lambda: "OK", lambda: HudInfo(0, 0, 0, 0, 0, 0))
+    try:
+        raise ValueError("a real bug")
+    except ValueError:
+        preview.server.handle_error(None, ("127.0.0.1", 1))
+    preview.server.server_close()
+    assert "Traceback" in capfd.readouterr().err
