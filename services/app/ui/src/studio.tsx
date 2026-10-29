@@ -1047,7 +1047,6 @@ export default function StudioApp() {
                       onDismiss={() => void dismissCameraError(camera.camera_id)}
                     />
                   ) : (
-                    !status.running &&
                     camera.state === "error" &&
                     camera.error && <p className="feed-error">{camera.error}</p>
                   )}

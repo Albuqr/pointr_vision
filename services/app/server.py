@@ -312,6 +312,7 @@ class Studio:
         cameras = []
         for child in getattr(launcher, "children", []):
             session_dir = child.session_dir
+            alive = child.running  # before the files: once gone, what they say is final
             session = {}
             if session_dir:
                 try:
@@ -336,7 +337,7 @@ class Studio:
             except (OSError, ValueError, StopIteration, KeyError):
                 fps, people, track_count, drops = None, 0, 0, 0
             events = session.get("events", [])
-            state = camera_state(child, session, run_dir)
+            state = camera_state(child, alive, session, run_dir)
             log = self.log(child.cam.camera_id)
             self.note_child(child, log, status, events)
             health = "OK"
@@ -946,20 +947,7 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
     return app
 
 
-STATES = (
-    "starting",
-    "loading_model",
-    "waiting_first_frame",
-    "recording",
-    "preview_ready",
-    "stopping",
-    "ended",
-    "interrupted",
-    "error",
-)
-
-
-def camera_state(child, session, run_dir) -> str:
+def camera_state(child, alive, session, run_dir) -> str:
     """Where one camera is, from the signals the launcher and the session files already carry:
     its output (device line, session line), session.json status and run.json `ready` (D-052)."""
     status = session.get("status")
@@ -967,7 +955,7 @@ def camera_state(child, session, run_dir) -> str:
         return status
     if getattr(child, "failure", None) or status == "error":
         return "error"
-    if not child.running:  # gone with no end written: it died, or it never recorded
+    if not alive:  # gone with no end written: it died, or it never recorded
         return "error"
     if getattr(child, "stop_sent", False):
         return "stopping"

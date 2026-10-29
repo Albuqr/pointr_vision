@@ -90,3 +90,21 @@ def test_a_camera_that_died_without_ending_its_session_is_an_error(client, tmp_p
     first.running = False  # the process is gone and session.json still says running
     camera = client.get("/api/status").json()["cameras"][0]
     assert camera["state"] == "error" and camera["error"]
+
+
+def test_the_launcher_marks_a_child_loading_its_model_from_its_device_line():
+    import io
+    from types import SimpleNamespace
+
+    from services.edge.launcher import Camera
+    from services.edge.launcher_impl import Child, Launcher
+
+    child = Child(Camera("cam1", "0", "builtin"))
+    child.proc = SimpleNamespace(
+        stdout=io.StringIO("source ok\ndevice: cpu (no CUDA GPU in use)\n")
+    )
+    launcher = Launcher.__new__(Launcher)
+    launcher.say = lambda line: None
+    assert child.loading_model is False
+    Launcher.read(launcher, child)
+    assert child.loading_model is True
