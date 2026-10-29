@@ -19,6 +19,9 @@ RUN_SCHEMA = json.loads((ROOT / "contracts" / "run.schema.json").read_text("utf-
 REPORT_SCHEMA = json.loads((ROOT / "contracts" / "report.schema.json").read_text("utf-8"))
 
 
+RECORDING = ("recording", "preview_ready")
+
+
 def no_detect_launcher(cameras, options):
     return Launcher(cameras, dataclasses.replace(options, no_detect=True))
 
@@ -38,10 +41,10 @@ def test_a_studio_stop_ends_each_session_normally(tmp_path, long_clips):
         deadline = time.monotonic() + 60
         while time.monotonic() < deadline:
             cameras = client.get("/api/status").json()["cameras"]
-            if len(cameras) == 2 and all(c["state"] == "running" for c in cameras):
+            if len(cameras) == 2 and all(c["state"] in RECORDING for c in cameras):
                 break
             time.sleep(0.2)
-        assert [c["state"] for c in cameras] == ["running", "running"], cameras
+        assert all(c["state"] in RECORDING for c in cameras), cameras
         time.sleep(1.0)  # some frames in each session
         assert client.post("/api/recording/stop").json()["running"] is False
 

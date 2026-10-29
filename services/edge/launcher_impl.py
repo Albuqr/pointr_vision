@@ -308,6 +308,9 @@ class Child:
         self.reader: threading.Thread | None = None
         self.session_dir: Path | None = None  # from the "session:" line
         self.opened = threading.Event()  # that line was seen
+        self.loading_model = (
+            False  # the camera printed "device:", which comes right before it loads
+        )
         self.failed_reads = "-"
         self.failure: str | None = None  # why it never recorded
         self.tail: deque[str] = deque(maxlen=TAIL_LINES)  # last output lines, credentials masked
@@ -385,6 +388,8 @@ class Launcher:
             if line.startswith(SESSION_PREFIX):
                 child.session_dir = Path(line[len(SESSION_PREFIX) :])
                 child.opened.set()
+            elif line.startswith("device: "):
+                child.loading_model = True
             elif m := FAILED_READS.search(line):
                 child.failed_reads = m.group(1)
             elif line.startswith("preview_port: "):

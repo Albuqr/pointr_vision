@@ -319,6 +319,7 @@ class Studio:
                 except (OSError, ValueError):
                     pass
             status = session.get("status", "starting" if child.running else "error")
+            run_dir = None
             try:
                 run_dir = next((session_dir / "runs").iterdir()) if session_dir else None
                 frames = self.read_recent_frames(run_dir / "frames.csv") if run_dir else []
@@ -335,6 +336,7 @@ class Studio:
             except (OSError, ValueError, StopIteration, KeyError):
                 fps, people, track_count, drops = None, 0, 0, 0
             events = session.get("events", [])
+            state = camera_state(child, session, run_dir)
             log = self.log(child.cam.camera_id)
             self.note_child(child, log, status, events)
             health = "OK"
@@ -364,7 +366,7 @@ class Studio:
                 {
                     "camera_id": child.cam.camera_id,
                     "name": child.cam.name or child.cam.camera_id,
-                    "state": status,
+                    "state": state,
                     "processed_fps": fps,
                     "people": people,
                     "tracks": track_count,
@@ -378,7 +380,7 @@ class Studio:
                     ),
                     "session_folder": str(session_dir) if session_dir else None,
                     "preview_port": preview_port,
-                    "error": mask_credentials(getattr(child, "failure", None) or "") or None,
+                    "error": camera_error(child, state, events),
                     "calibration_warning": self.calibration_warnings.get(child.cam.camera_id),
                     **log.snapshot(),
                     "calibration": (
@@ -942,6 +944,55 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
         return {"message": "Build the UI with npm run build in services/app/ui"}
 
     return app
+
+
+STATES = (
+    "starting",
+    "loading_model",
+    "waiting_first_frame",
+    "recording",
+    "preview_ready",
+    "stopping",
+    "ended",
+    "interrupted",
+    "error",
+)
+
+
+def camera_state(child, session, run_dir) -> str:
+    """Where one camera is, from the signals the launcher and the session files already carry:
+    its output (device line, session line), session.json status and run.json `ready` (D-052)."""
+    status = session.get("status")
+    if status in ("ended", "interrupted"):
+        return status
+    if getattr(child, "failure", None) or status == "error":
+        return "error"
+    if not child.running:  # gone with no end written: it died, or it never recorded
+        return "error"
+    if getattr(child, "stop_sent", False):
+        return "stopping"
+    if not child.session_dir:
+        return "loading_model" if getattr(child, "loading_model", False) else "starting"
+    ready = {}
+    if run_dir:
+        try:
+            ready = json.loads((run_dir / "run.json").read_text(encoding="utf-8")).get("ready", {})
+        except (OSError, ValueError):
+            pass
+    if not ready.get("first_frame"):
+        return "waiting_first_frame"
+    return "preview_ready" if ready.get("first_preview") else "recording"
+
+
+def camera_error(child, state, events) -> str | None:
+    """Why a camera is in error, credentials masked; None in any other state."""
+    reason = getattr(child, "failure", None)
+    if state != "error":
+        return mask_credentials(reason or "") or None
+    if not reason:
+        last = events[-1].get("detail") if events else None
+        reason = last or "the camera stopped without ending its session"
+    return mask_credentials(str(reason))
 
 
 def preview_get(port: int, path: str, timeout: float) -> http.client.HTTPResponse:

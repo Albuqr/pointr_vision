@@ -37,6 +37,24 @@ type CameraStatus = {
   recent_events?: CameraEvent[];
   calibration?: { calibration_id: string; check_error_m: number } | null;
 };
+const STATE_LABELS: Record<string, string> = {
+  starting: "starting",
+  loading_model: "loading model",
+  waiting_first_frame: "waiting for first frame",
+  recording: "recording",
+  preview_ready: "preview ready",
+  stopping: "stopping",
+  ended: "ended",
+  interrupted: "interrupted",
+  error: "error",
+};
+const PREVIEW_WAIT: Record<string, string> = {
+  starting: "Opening source…",
+  loading_model: "Loading model…",
+  waiting_first_frame: "Waiting for first frame…",
+  recording: "Preparing preview…",
+};
+
 type CameraError = { message: string; detail: string; at: string };
 type CameraEvent = { t_wall: string; kind: string; detail: string | null };
 type IdleCamera = {
@@ -975,7 +993,7 @@ export default function StudioApp() {
                       <h3>{camera.name || camera.camera_id}</h3>
                     </div>
                     <span className={`state ${camera.state}`}>
-                      {camera.state}
+                      {STATE_LABELS[camera.state] ?? camera.state}
                     </span>
                   </div>
                   {camera.preview_port ? (
@@ -986,9 +1004,7 @@ export default function StudioApp() {
                     />
                   ) : (
                     <div className="preview-placeholder">
-                      {camera.state === "starting"
-                        ? "Opening source…"
-                        : "Preview unavailable"}
+                      {PREVIEW_WAIT[camera.state] ?? "Preview unavailable"}
                     </div>
                   )}
                   <div className="metric-strip">
