@@ -1268,3 +1268,20 @@ every camera of the group (D-055); per-camera isolation inside a group is R2a 07
 stays (`group_command=None`) and its process tests use it. No preview window (`--preview`) in a group: Studio shows
 each camera's preview. Not measured: memory and throughput of one process versus two, recorded in R2a-A5.
 **Status.** Accepted.
+
+## D-057 · 2026-10-29 · A refused calibration offers retry or start uncalibrated (contract 0.18.0)
+**Context.** Phase 03 B13 (issue #20, D-048, spec CR-1). Studio refused a calibration at fit time with only a one-line
+message and no way forward; FR-003 says a failed startup check never blocks the session. `checks` and the
+`startup_check_failed` event exist since 0.11.0 but nothing wrote them.
+**Decision.** The refusal carries a structured `refusal` next to `detail` (too few points: how many are there and
+needed; check error over the limit: the per-point check errors, their mean and the limit). Studio keeps each camera's
+last refusal, cleared by a fit or save that succeeds. The operator then chooses, in Studio: retry (the UI keeps the
+placed points) or start that camera uncalibrated (`POST .../calibration/uncalibrated`). The reason is taken from
+Studio's stored refusal, not from the request, so a client cannot invent a failed check. The choice lives in the
+running Studio only; it is not a file. At the next start that camera gets no calibration, even if an older one is saved,
+and its process writes `checks = [calibration, failed, <reason>]` into `run.json` and a `startup_check_failed`
+event whose detail is `calibration: <reason>`. Only the `calibration` check is written; the other four and the
+`passed` entries stay with Track R, so `checks` stays `null` for a camera that was not started this way.
+**Consequences.** Contract 0.18.0, additive (minor): API fields, two Studio audit actions, and the first writer of
+`checks`. No file format changes. Not done: the choice does not survive a Studio restart.
+**Status.** Accepted.
