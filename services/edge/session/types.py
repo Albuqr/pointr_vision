@@ -47,6 +47,7 @@ class RunMeta:
     objects: dict | None = None  # ball and rim layer settings, null when it is off (0.11.0)
     gaps: list | None = None  # null = not measured; SessionWriter.set_final fills it at the end
     outages: list | None = None  # same for the rim sensor outages (0.11.0)
+    group: dict | None = None  # the group run sharing track IDs; null when run-scoped (0.14.0)
 
 
 @dataclass(frozen=True)

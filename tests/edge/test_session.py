@@ -146,6 +146,21 @@ def test_fixture_clip_produces_valid_files(monkeypatch, tmp_path, clips):
     assert tracks[0]["position_method"] == tracks[0]["in_court"] == ""
 
 
+def test_a_camera_without_a_group_writes_unshared_run_scoped_tracks(monkeypatch, tmp_path, clips):
+    """0.14.0 (D-051): no group run, so run.json group is null and every track row is unshared."""
+    out = tmp_path / "sessions"
+    code = run_main(
+        monkeypatch, out, "--source", str(clips["moving"]), "--link", "file",
+        detector=EvenFrameDetector(),
+    )  # fmt: skip
+    assert code == 0
+    session, run, _, tracks = session_files(out)
+    validate("session", session)
+    validate("run", run)
+    assert session["group_id"] is None and run["group"] is None
+    assert tracks and {r["link"] for r in tracks} == {"unshared"}
+
+
 def test_calibrated_run_writes_metre_positions_and_provenance(monkeypatch, tmp_path, clips):
     class TwoPersonDetector(EvenFrameDetector):
         def detect(self, frame):

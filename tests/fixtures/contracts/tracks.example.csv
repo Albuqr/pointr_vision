@@ -1,0 +1,4 @@
+seq,track_id,x1,y1,x2,y2,confidence,state,athlete_id,player_number,id_source,link,x_m,y_m,calibration_id,position_method,in_court
+12,3,410.00,220.00,470.00,400.00,0.8800,observed,,7,jersey_vote,position,6.2500,4.1000,8d0f6c2a-4b1e-4f3a-9c7d-2e5b8a1f0c34,box_bottom_center,true
+12,5,900.00,240.00,950.00,390.00,0.7100,observed,,,,unshared,15.3000,2.0000,8d0f6c2a-4b1e-4f3a-9c7d-2e5b8a1f0c34,box_bottom_center,false
+13,4,120.00,200.00,170.00,380.00,,predicted,,,,appearance,,,,,
