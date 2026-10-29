@@ -1,6 +1,6 @@
 # Data contracts
 
-Contract version: **0.15.0**. Any change bumps the version (minor for additive fields, major
+Contract version: **0.16.0**. Any change bumps the version (minor for additive fields, major
 for removals or meaning changes) and needs a `DECISIONS.md` entry. JSON Schemas in
 `contracts/` are written from this file and tests check them against it (D-009).
 
@@ -63,7 +63,7 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
 
 ```json
 {
-  "contract_version": "0.15.0",
+  "contract_version": "0.16.0",
   "session_id": "uuid",
   "device_id": "uuid",
   "camera_id": "cam1 | null",
@@ -131,7 +131,7 @@ calibration used by this session and records its mean held-out check residual in
 
 ```json
 {
-  "contract_version": "0.15.0",
+  "contract_version": "0.16.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "mode": "live | replay",
@@ -168,7 +168,9 @@ calibration used by this session and records its mean held-out check residual in
             "params": {}},
   "ready": {"model_loaded": {"t_wall": "2026-10-07T17:59:52Z", "t_pc": 1226.1},
             "first_frame": {"t_wall": "2026-10-07T18:00:00.6Z", "t_pc": 1234.7},
-            "first_preview": null}
+            "first_preview": null},
+  "power": {"start": {"ac": true, "battery_percent": 87},
+            "end": {"ac": false, "battery_percent": 84}}
 }
 ```
 
@@ -249,6 +251,13 @@ treat as not measured. `model_loaded`: the detector is loaded and warmed up (`nu
 (`null` without `--http-preview`, and when no frame reached it); a client connecting later does not move it.
 The entries are written as they happen, so a run stopped early keeps the steps it reached. A replay
 fills the same entries, with the frame times of the replay.
+`power` (0.16.0, D-053) is the PC's power state, so a slow run, live or replay, can be read against battery
+saving. `start` is read when the run opens and `end` when it closes; each is `{ac, battery_percent}`. `ac`
+is `true` on mains power, `false` on battery, and `null` when the OS cannot say. `battery_percent` is an
+integer 0 to 100, and `null` when there is no battery (a desktop) or the OS cannot say; a value is never
+guessed. Only Windows has a reader (`GetSystemPowerStatus`); elsewhere both fields are `null`. `end` is
+`null` in a run that crashed before closing. A file from before 0.16.0 has no `power` key, which readers
+treat as not measured.
 For ByteTrack timestamp mode, `lost_track_buffer` is a count of 30 FPS frames and the
 effective lost-track duration is `lost_track_buffer / 30` seconds, rounded to the nearest
 frame when configured with `--track-lost-secs`.
@@ -362,7 +371,7 @@ One report per run, one per camera: there is no fusion across cameras.
 
 ```json
 {
-  "contract_version": "0.15.0",
+  "contract_version": "0.16.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "camera_id": "cam1 | null",
@@ -663,7 +672,7 @@ recorded video and is compared with `frames.csv` `t_video`; shots and tracks joi
 
 ```json
 {
-  "contract_version": "0.15.0",
+  "contract_version": "0.16.0",
   "fusion_id": "uuid",
   "group_id": "token",
   "created_at": "2026-12-01T18:50:00Z",

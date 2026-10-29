@@ -1200,3 +1200,15 @@ happens to connect says nothing about the camera. The block is always present in
 steps that did not happen; the writer saves each step as it happens, so a run stopped early keeps what it reached.
 **Consequences.** Contract 0.15.0, additive (minor). Calibrations saved under earlier versions stay loadable.
 **Status.** Accepted.
+
+## D-053 · 2026-10-29 · Power state in run.json (contract 0.16.0)
+**Context.** Phase 03 B6 (issue #26, D-044). Battery saving is a suspect for the slow runs of the 2026-10-22 field
+test, and nothing in the files said whether the notebook was plugged in.
+**Decision.** `run.json` gets a `power` block with `start` and `end`, each `{ac, battery_percent}`. Both ends,
+because a notebook can be unplugged mid-run and the start alone would then read as mains. Every field is `null`
+when the OS cannot say (no battery on a desktop, unknown line status, a non-Windows OS), never a guess: Windows
+reports 255 for "unknown" and the reader maps it to `null`. Windows is read with `GetSystemPowerStatus` through
+`ctypes`, so no dependency is added. A replay records it too, since a replay is also a speed measurement on this
+machine. `end` is `null` when the run never closed. The block is a run field, not a session event, like `ready` (D-052).
+**Consequences.** Contract 0.16.0, additive (minor). Older files have no `power`, read as not measured.
+**Status.** Accepted.

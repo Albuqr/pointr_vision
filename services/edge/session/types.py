@@ -49,6 +49,7 @@ class RunMeta:
     outages: list | None = None  # same for the rim sensor outages (0.11.0)
     group: dict | None = None  # the group run sharing track IDs; null when run-scoped (0.14.0)
     ready: dict | None = None  # steps already reached at run start, e.g. model_loaded (0.15.0)
+    power_start: dict | None = None  # power state read at run start; the end comes via set_final
 
 
 @dataclass(frozen=True)

@@ -1,5 +1,5 @@
 {
-  "contract_version": "0.15.0",
+  "contract_version": "0.16.0",
   "run_id": "c2b9e6f4-1d3a-4c8e-9f7b-5a0d2e4c6b81",
   "session_id": "3f1c2a8e-5b7d-4e9a-8c21-6d4f0b9e7a13",
   "mode": "live",
@@ -55,5 +55,9 @@
     "model_loaded": {"t_wall": "2026-10-07T17:59:52Z", "t_pc": 1226.1},
     "first_frame": {"t_wall": "2026-10-07T18:00:00.6Z", "t_pc": 1234.7},
     "first_preview": null
+  },
+  "power": {
+    "start": {"ac": true, "battery_percent": 87},
+    "end": {"ac": false, "battery_percent": 84}
   }
 }

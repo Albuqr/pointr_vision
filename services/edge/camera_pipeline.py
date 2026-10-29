@@ -19,6 +19,7 @@ from services.edge.capture.health import HealthConfig, HealthMonitor
 from services.edge.capture.types import HealthEvent, SourceInfo, utc_now
 from services.edge.contract import VIDEO_FILE
 from services.edge.perception.loop import Processor
+from services.edge.power import read_power
 from services.edge.session.types import FrameRecord, RunCounts, RunMeta, SessionEvent, SessionMeta
 from services.edge.ui.preview import HudInfo
 
@@ -296,6 +297,10 @@ class CameraPipeline:
                 detail = f"recording stopped: {recorder.error!r}"
                 self.log_event(HealthEvent("error", utc_now(), time.perf_counter(), detail))
                 session_status = "error"
+        try:
+            writer.set_final(power_end=read_power())
+        except Exception as e:  # the end state is lost, the rest of the shutdown is not
+            print(f"warning: power state at the end not recorded: {e!r}", file=sys.stderr)
         counts = RunCounts(
             capture.captured, processor.processed, capture.dropped, processor.unprocessed,
             rec_dropped,
