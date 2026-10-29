@@ -1288,3 +1288,21 @@ button:focus-visible,
   font-size: 12px;
   line-height: 1.5;
 }
+.session-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px 16px;
+  margin: 10px 0 0;
+}
+.session-facts dt {
+  color: var(--muted);
+  font-size: 10px;
+}
+.session-facts dd {
+  margin: 2px 0 0;
+  font-size: 12px;
+}
+.session-list .session-missing {
+  margin: 8px 0 0;
+  color: var(--orange-dark);
+}

@@ -79,12 +79,33 @@ class RequestError extends Error {
   }
 }
 type Session = {
-  camera_id: string;
-  group_id: string;
-  status: string;
+  camera_id: string | null;
+  group_id: string | null;
+  status: string | null;
   folder: string;
-  summary: string | null;
+  started_at: string | null;
+  duration: number | null;
+  fps: number | null;
+  captured: number | null;
+  dropped: number | null;
+  drop_rate: number | null;
+  events: Record<string, number>;
+  missing: string[];
 };
+function formatDuration(seconds: number | null) {
+  if (seconds === null) return "unknown";
+  const total = Math.round(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return h > 0 ? `${h} h ${m} min` : m > 0 ? `${m} min ${s} s` : `${s} s`;
+}
+function formatEvents(events: Record<string, number>) {
+  const kinds = Object.entries(events);
+  if (kinds.length === 0) return "none";
+  const total = kinds.reduce((sum, [, n]) => sum + n, 0);
+  return `${total} (${kinds.map(([kind, n]) => `${kind.replaceAll("_", " ")} ${n}`).join(", ")})`;
+}
 type Point = {
   id: string;
   image_px: [number, number];
@@ -1710,8 +1731,8 @@ export default function StudioApp() {
                 <span>NO SESSIONS</span>
                 <b>Nothing recorded yet</b>
                 <p>
-                  Completed recordings will appear here with their movement
-                  summary.
+                  Completed recordings will appear here with when they were
+                  recorded, duration, frame rate, drops and events.
                 </p>
               </div>
             ) : (
@@ -1720,14 +1741,61 @@ export default function StudioApp() {
                   <article key={session.folder}>
                     <div className="session-head">
                       <b>{session.camera_id || "Camera"}</b>
-                      <span>{session.status}</span>
+                      <span>{session.status ?? "status unknown"}</span>
                     </div>
                     <small>
-                      Group {session.group_id} · {session.folder}
+                      {session.started_at
+                        ? new Date(session.started_at).toLocaleString()
+                        : "Time unknown"}
+                      {" · "}
+                      {session.folder}
                     </small>
-                    <p>
-                      {session.summary ?? "No report summary is available."}
-                    </p>
+                    <dl className="session-facts">
+                      <div>
+                        <dt>Cameras</dt>
+                        <dd>
+                          {session.group_id
+                            ? sessions
+                                .filter((s) => s.group_id === session.group_id)
+                                .map((s) => s.camera_id || "Camera")
+                                .join(", ")
+                            : session.camera_id || "Camera"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Duration</dt>
+                        <dd>{formatDuration(session.duration)}</dd>
+                      </div>
+                      <div>
+                        <dt>Frame rate</dt>
+                        <dd>
+                          {session.fps === null
+                            ? "unknown"
+                            : `${session.fps.toFixed(1)} fps`}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Dropped</dt>
+                        <dd>
+                          {session.dropped === null
+                            ? "unknown"
+                            : `${session.dropped} of ${session.captured}${
+                                session.drop_rate === null
+                                  ? ""
+                                  : ` (${session.drop_rate.toFixed(0)}%)`
+                              }`}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Events</dt>
+                        <dd>{formatEvents(session.events)}</dd>
+                      </div>
+                    </dl>
+                    {session.missing.length > 0 && (
+                      <p className="session-missing">
+                        Not available: {session.missing.join("; ")}
+                      </p>
+                    )}
                   </article>
                 ))}
               </div>
