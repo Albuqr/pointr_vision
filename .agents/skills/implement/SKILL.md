@@ -15,3 +15,5 @@ Run typechecking regularly, single test files regularly, and the full test suite
 Once done, call the Skill tool with "code-review" to review the work.
 
 Commit your work to the current branch.
+
+Branches: start each ticket on a fresh branch cut from the latest `origin/main`, never on a branch whose PR has already merged. Once the PR is accepted, close the branch: delete it locally and on the remote, then leave the checkout on an up-to-date `main`. Open the PR with `Closes #<n>`.
