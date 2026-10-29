@@ -10,6 +10,10 @@ CONTRACT_VERSION = "0.17.0"
 # 2026-10-20); an MKV stays readable up to the last few seconds.
 VIDEO_FILE = "video.mkv"
 
+# The detail of the `stopped` event of Studio's stop (DATA_CONTRACTS section 2, D-049): source, then
+# a sentence.
+UI_STOP_DETAIL = "ui: stop requested in Studio"
+
 # CSV column names of the Track R formats (DATA_CONTRACTS.md sections 11 to 15, D-034 to D-039).
 # tests/test_contracts_track_r.py compares each tuple with its table in the doc. The code that
 # writes these files arrives in the slice named next to each one (docs/phases/PHASE_R.md).

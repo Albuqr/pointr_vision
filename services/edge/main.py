@@ -44,7 +44,7 @@ from services.edge.capture.sources import (
     open_source,
 )
 from services.edge.capture.types import Frame, HealthEvent, utc_now
-from services.edge.contract import VIDEO_FILE
+from services.edge.contract import UI_STOP_DETAIL, VIDEO_FILE
 from services.edge.perception.detector import DET_SIZE_MULTIPLE
 from services.edge.perception.loop import Processor, delay_stats, rates
 from services.edge.power import read_power
@@ -58,8 +58,6 @@ from services.edge.ui.preview import run_preview
 EXIT_OPEN_FAILED = 2
 EXIT_CAPTURE_ERROR = 1
 EXIT_INTERRUPTED = 130
-# the `stopped` event of Studio's stop (DATA_CONTRACTS section 2, D-049): source, then a sentence
-UI_STOP_DETAIL = "ui: stop requested in Studio"
 
 
 def positive(cast):
@@ -218,10 +216,10 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     return args
 
 
-def print_event(ev: HealthEvent, t0: float | None) -> None:
+def print_event(ev: HealthEvent, t0: float | None, prefix: str = "") -> None:
     rel = f"+{ev.t_mono - t0:.2f}s" if t0 is not None else "-"
     try:
-        print(f"[{ev.t_wall}] {rel} {ev.kind}: {ev.detail}", flush=True)
+        print(f"{prefix}[{ev.t_wall}] {rel} {ev.kind}: {ev.detail}", flush=True)
     except OSError:  # the launcher that read this pipe is gone: the event still goes to the file
         pass
 
@@ -471,8 +469,8 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_INTERRUPTED
 
 
-def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
-    config = HealthConfig(
+def health_config(args: argparse.Namespace) -> HealthConfig:
+    return HealthConfig(
         lost_reads=args.lost_reads,
         lost_secs=args.lost_secs,
         frozen_diff=args.frozen_diff,
@@ -480,6 +478,32 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
         dark_level=args.dark_level,
         dark_secs=args.dark_secs,
     )
+
+
+def start_http_preview(port: int, pipeline: CameraPipeline):
+    """The camera's loopback preview server, started and fed by its processing thread."""
+    from services.edge.ui.http_preview import HttpPreview
+
+    preview = HttpPreview(
+        port,
+        lambda: pipeline.monitor.state,
+        pipeline.hud,
+        lambda error: pipeline.log_event(
+            HealthEvent(
+                "error", utc_now(), time.perf_counter(), f"preview encoding failed: {error!r}"
+            )
+        ),
+        raw_snapshot=pipeline.capture.raw_snapshot,
+        calibration=pipeline.calibration,
+        on_first_preview=pipeline.mark_preview_ready,
+    )
+    preview.start()
+    pipeline.processor.on_preview = preview.publish
+    return preview
+
+
+def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
+    config = health_config(args)
     events: Counter[str] = Counter()
     events_lock = threading.Lock()  # called from the capture, processing and main threads
 
@@ -616,26 +640,7 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
         if stop_early.is_set():
             raise KeyboardInterrupt
         if args.http_preview is not None:
-            from services.edge.ui.http_preview import HttpPreview
-
-            http_preview = HttpPreview(
-                args.http_preview,
-                lambda: pipeline.monitor.state,
-                pipeline.hud,
-                lambda error: log_event(
-                    HealthEvent(
-                        "error",
-                        utc_now(),
-                        time.perf_counter(),
-                        f"preview encoding failed: {error!r}",
-                    )
-                ),
-                raw_snapshot=capture.raw_snapshot,
-                calibration=calibration,
-                on_first_preview=pipeline.mark_preview_ready,
-            )
-            http_preview.start()
-            processor.on_preview = http_preview.publish
+            http_preview = start_http_preview(args.http_preview, pipeline)
             print(f"preview_port: {http_preview.port}", flush=True)
         pipeline.start()
         if args.preview:

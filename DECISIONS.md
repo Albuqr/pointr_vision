@@ -1246,3 +1246,25 @@ running. Calibration per camera comes with R2a 05; the launcher and Studio with 
 is one processing thread per camera sharing one detector; the group tracker state the matcher needs is shared
 across those threads under a lock.
 **Status.** Accepted.
+
+## D-056 · 2026-10-29 · The launcher and Studio start a group as one process
+**Context.** R2a 04 (issue #10): Studio and `scripts/run_cameras.py` must start a group through the group runner
+(D-055) instead of one `services.edge.main` per camera, and Studio's per-camera status, preview and stop must keep
+working.
+**Decision.** Two or more cameras start `python -m services.edge.group_main`, one process; one camera starts
+`services.edge.main` as before. The group process gets each camera's own `services.edge.main` arguments as a JSON
+list (`launcher.camera_args`), so the two entry points read the same options. It speaks the child protocol per
+camera: each line about one camera starts with `[camera_id] ` (`session:`, `preview_port:`, events, counts,
+report), and lines about the group (`device:`, a failure to start) have none. The launcher keeps one `Child` per
+camera, all sharing the one process; it routes each prefixed line to its camera and the others to every camera,
+and sends the stop line once per process. Studio is unchanged: it still reads `launcher.children`. Each camera
+keeps its preview server, its calibration (one that cannot be used is an error event and that camera records
+uncalibrated, so it never blocks the group) and its tracker settings. One detector means one `det_size`: when the
+cameras ask for different sizes the group uses the largest one asked for (a camera that asks for none, the
+model's own, gets it too), with a warning line. Studio's `stop ui` ends every
+session `ended` with a `stopped` event (D-049). `UI_STOP_DETAIL` moved to `contract.py` so both entry points share it.
+**Consequences.** No contract change. A source that cannot open, or any failure before the group starts, stops
+every camera of the group (D-055); per-camera isolation inside a group is R2a 07. The launcher's per-camera mode
+stays (`group_command=None`) and its process tests use it. No preview window (`--preview`) in a group: Studio shows
+each camera's preview. Not measured: memory and throughput of one process versus two, recorded in R2a-A5.
+**Status.** Accepted.

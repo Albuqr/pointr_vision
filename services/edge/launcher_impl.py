@@ -1,17 +1,20 @@
-"""Record from several cameras at once: one Pointr process per camera (D-022).
+"""Record from several cameras at once: one Pointr process for the group (R2a 04, ADR 0007).
 
     python scripts/run_cameras.py --config cams.json --out C:/pointr_sessions [--preview]
 
 cams.json is a list of {"camera_id", "source", "link", "det_size"?, "preview"?,
 "track_lost_secs"?, "track_activation"?, "track_min_frames"?}; see
-docs/cameras.example.json. Every camera is its own session, started one at a time (each start
-waits for the child's "session:" line), and all share one group_id. There is no fusion across
-cameras. Every child output line is prefixed with [camera_id].
+docs/cameras.example.json. Every camera is its own session, and all share one group_id. Two or
+more cameras run in one process (services.edge.group_main) with one detector; a single camera runs
+services.edge.main in its own process, as before (D-022). The launcher waits for each camera's
+"session:" line. Every output line is prefixed with [camera_id] ([group] for a line about the
+whole group).
 
-Ctrl+C here stops ALL children the way Ctrl+C stops one: the launcher writes "stop" to each
-child's stdin and waits, so every session ends "interrupted" or "ended", never "running".
-Killing a child is the last resort after --stop-timeout and is marked "killed" in the table.
-A child that fails to start does not stop the others.
+Ctrl+C here stops ALL processes the way Ctrl+C stops one: the launcher writes "stop" to each
+process's stdin and waits, so every session ends "interrupted" or "ended", never "running".
+Killing a process is the last resort after --stop-timeout and is marked "killed" in the table.
+With one process per camera (group_command None), a child that fails to start does not stop the
+others.
 """
 
 import argparse
@@ -63,6 +66,7 @@ KEYS = {
 DEFAULT_PORTS = {"http": 80, "https": 443, "rtsp": 554}
 SESSION_PREFIX = "session: "  # printed by services.edge.main once the source has opened
 FAILED_READS = re.compile(r"\bfailed_reads=(\d+)")
+CAMERA_LINE = re.compile(r"\[([^\]\s]+)\] (.*)")  # a group process's line about one camera
 TAIL_LINES = 20  # last output lines of a child kept for the Studio error panel
 OK_STATUSES = ("ended", "interrupted")
 
@@ -268,8 +272,18 @@ class Options:
 
 def child_command(cam: Camera, opts: Options) -> list[str]:
     """The command line of one camera's process: services.edge.main with its identity."""
+    return [sys.executable, "-u", "-m", "services.edge.main", *camera_args(cam, opts)]
+
+
+def group_command(cams: list[Camera], opts: Options) -> list[str]:
+    """The command line of a group's one process: each camera's own arguments as a JSON list."""
+    args = [json.dumps(camera_args(c, opts)) for c in cams]
+    return [sys.executable, "-u", "-m", "services.edge.group_main", *args]
+
+
+def camera_args(cam: Camera, opts: Options) -> list[str]:
+    """One camera's arguments of services.edge.main."""
     cmd = [
-        sys.executable, "-u", "-m", "services.edge.main",
         f"--source={cam.source}", f"--link={cam.link}",
         f"--camera-id={cam.camera_id}", f"--group-id={opts.group_id}",
         f"--out={opts.out}", "--stop-on-stdin",
@@ -300,7 +314,8 @@ def child_command(cam: Camera, opts: Options) -> list[str]:
 
 
 class Child:
-    """One camera's process and what the launcher learned from its output."""
+    """One camera's process (shared by every camera of a group) and what the launcher learned
+    from its output about that camera."""
 
     def __init__(self, cam: Camera):
         self.cam = cam
@@ -334,10 +349,12 @@ class Launcher:
         command=child_command,
         start_timeout: float = 180.0,
         stop_timeout: float = 45.0,
+        group_command=group_command,  # None: one process per camera, also for a group
     ):
         self.cameras = cameras
         self.opts = opts
         self.command = command
+        self.group_command = group_command
         self.start_timeout = start_timeout
         self.stop_timeout = stop_timeout
         self.children: list[Child] = []
@@ -355,7 +372,7 @@ class Launcher:
 
     # -- start ---------------------------------------------------------------------------------
 
-    def spawn(self, child: Child) -> None:
+    def spawn(self, children: list[Child], command: list[str]) -> None:
         env = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"}
         # Windows: no console of its own and its own process group, so neither a console event
         # (Ctrl+C, Ctrl+Break, closing the window) nor the launcher's death kills a child: the
@@ -365,8 +382,8 @@ class Launcher:
             if sys.platform == "win32"
             else {"start_new_session": True}
         )
-        child.proc = subprocess.Popen(
-            self.command(child.cam, self.opts),
+        proc = subprocess.Popen(
+            command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -378,57 +395,89 @@ class Launcher:
             env=env,
             **group,
         )
-        child.reader = threading.Thread(target=self.read, args=(child,), daemon=True)
-        child.reader.start()
+        reader = threading.Thread(target=self.read, args=children, daemon=True)
+        for child in children:
+            child.proc, child.reader = proc, reader
+        reader.start()
 
-    def read(self, child: Child) -> None:
-        for raw in child.proc.stdout:
+    def read(self, *children: Child) -> None:
+        """Drain the process of these cameras. A group's line about one camera ("[cam1] ...")
+        goes to that camera; any other line to every camera of the process."""
+        by_id = {c.cam.camera_id: c for c in children}
+        for raw in children[0].proc.stdout:
             line = raw.rstrip("\r\n")
-            child.tail.append(mask_credentials(line))
-            if line.startswith(SESSION_PREFIX):
-                child.session_dir = Path(line[len(SESSION_PREFIX) :])
-                child.opened.set()
-            elif line.startswith("device: "):
-                child.loading_model = True
-            elif m := FAILED_READS.search(line):
-                child.failed_reads = m.group(1)
-            elif line.startswith("preview_port: "):
-                try:
-                    child.preview_port = int(line.split(":", 1)[1].strip())
-                    child.preview_ready = True
-                except ValueError:
-                    child.failure = "invalid preview port reported"
-            elif line.startswith("error: ") and child.failure is None:
-                child.failure = mask_credentials(line.removeprefix("error: ").strip())
+            m = CAMERA_LINE.fullmatch(line) if len(children) > 1 else None
+            if m and m.group(1) in by_id:
+                targets, line, tag = [by_id[m.group(1)]], m.group(2), m.group(1)
+            else:
+                targets = children
+                tag = "group" if len(children) > 1 else children[0].cam.camera_id
+            for child in targets:
+                self.note(child, line)
             # never raises: the pipe must be drained
-            self.say(f"[{child.cam.camera_id}] {mask_credentials(line)}")
+            self.say(f"[{tag}] {mask_credentials(line)}")
+
+    @staticmethod
+    def note(child: Child, line: str) -> None:
+        """What one output line says about a camera."""
+        child.tail.append(mask_credentials(line))
+        if line.startswith(SESSION_PREFIX):
+            child.session_dir = Path(line[len(SESSION_PREFIX) :])
+            child.opened.set()
+        elif line.startswith("device: "):
+            child.loading_model = True
+        elif m := FAILED_READS.search(line):
+            child.failed_reads = m.group(1)
+        elif line.startswith("preview_port: "):
+            try:
+                child.preview_port = int(line.split(":", 1)[1].strip())
+                child.preview_ready = True
+            except ValueError:
+                child.failure = "invalid preview port reported"
+        elif line.startswith("error: ") and child.failure is None:
+            child.failure = mask_credentials(line.removeprefix("error: ").strip())
 
     def start_one(self, cam: Camera) -> None:
-        """Start one camera and wait until its session exists, it exits, or the timeout."""
-        child = Child(cam)
-        self.children.append(child)
+        self.start([Child(cam)], self.command(cam, self.opts))
+
+    def start_group(self, cams: list[Camera]) -> None:
+        self.start([Child(c) for c in cams], self.group_command(cams, self.opts))
+
+    def start(self, children: list[Child], command: list[str]) -> None:
+        """Start one process for these cameras and wait until each has its session, the process
+        exits, or the timeout."""
+        self.children.extend(children)
+        names = ", ".join(c.cam.camera_id for c in children)
         try:
-            self.spawn(child)
+            self.spawn(children, command)
         except OSError as e:
-            child.failure = mask_credentials(f"failed to start: {e}")
-            self.say(f"[launcher] {cam.camera_id}: {child.failure}")
+            for child in children:
+                child.failure = mask_credentials(f"failed to start: {e}")
+            self.say(f"[launcher] {names}: {children[0].failure}")
             return
-        self.say(f"[launcher] starting {cam.camera_id} ({mask_credentials(cam.source)})")
+        sources = ", ".join(
+            f"{c.cam.camera_id} ({mask_credentials(c.cam.source)})" for c in children
+        )
+        self.say(f"[launcher] starting {sources}")
         deadline = time.monotonic() + self.start_timeout
-        while not child.opened.is_set():
-            if not child.running:
-                child.reader.join(5)  # the last lines, "session:" among them, may be in the pipe
+        while waiting := [c for c in children if not c.opened.is_set()]:
+            if not children[0].running:
+                # the last lines, "session:" among them, may be in the pipe
+                children[0].reader.join(5)
                 break
             if time.monotonic() > deadline:
-                child.failure = f"failed: no session after {self.start_timeout:g} s"
-                self.say(f"[launcher] {cam.camera_id}: {child.failure}; stopping it")
-                self.stop([child])
+                for child in waiting:
+                    child.failure = f"failed: no session after {self.start_timeout:g} s"
+                self.say(f"[launcher] {names}: {waiting[0].failure}; stopping it")
+                self.stop(children)
                 return
-            child.opened.wait(0.2)
-        if not child.opened.is_set():
-            if child.failure is None:
-                child.failure = f"failed to start (exit {child.proc.returncode})"
-            self.say(f"[launcher] {cam.camera_id}: {child.failure}, the others go on")
+            waiting[0].opened.wait(0.2)
+        for child in children:
+            if not child.opened.is_set():
+                if child.failure is None:
+                    child.failure = f"failed to start (exit {child.proc.returncode})"
+                others = ", the others go on" if len(children) == 1 else ""
+                self.say(f"[launcher] {child.cam.camera_id}: {child.failure}{others}")
 
     # -- stop ----------------------------------------------------------------------------------
 
@@ -439,9 +488,13 @@ class Launcher:
         if source not in (None, "ui"):  # the child knows no other: it would end interrupted
             raise ValueError(f"unknown stop source {source!r}")
         line = f"stop {source}\n" if source else "stop\n"
+        sent = set()  # the cameras of a group share one process: one line for it
         for child in children:
             if child.running and not child.stop_sent:
                 child.stop_sent = True
+                if child.proc in sent:
+                    continue
+                sent.add(child.proc)
                 try:
                     child.proc.stdin.write(line)
                     child.proc.stdin.flush()
@@ -452,7 +505,8 @@ class Launcher:
             while child.running:
                 if time.monotonic() > deadline:
                     self.say(f"[launcher] {child.cam.camera_id} did not stop: killing it")
-                    child.killed = True
+                    for other in children:
+                        other.killed = other.killed or other.proc is child.proc
                     kill_tree(child.proc)
                     break
                 time.sleep(0.1)
@@ -495,8 +549,11 @@ class Launcher:
         )
         reason = None
         try:
-            for cam in self.cameras:  # one at a time: first starts share device_id, RAM spikes
-                self.start_one(cam)
+            if self.group_command and len(self.cameras) > 1:
+                self.start_group(self.cameras)
+            else:
+                for cam in self.cameras:  # one at a time: first starts share device_id, RAM spikes
+                    self.start_one(cam)
             while any(c.running for c in self.children):
                 time.sleep(0.2)
             reason = "[launcher] every camera has stopped"

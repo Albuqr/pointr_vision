@@ -69,9 +69,12 @@ pointr/
       group_runner.py        the cameras of a group in one process (R2a, ADR 0007): one
                              CameraPipeline per camera, one shared detector, track IDs unique
                              within the group run (D-055)
+      group_main.py          a group's one process: main.py's job for every camera of the
+                             group, through the group runner (R2a 04, D-056)
       main.py                CLI entry point
     app/                     Pointr Studio: local FastAPI + React UI (cameras, recording,
-                             per-camera calibration); starts the edge CLI once per camera
+                             per-camera calibration); starts a group as one process through
+                             the launcher (a camera alone as its own edge CLI)
     sync_agent/
     api/                     cloud API (FastAPI)
     data/                    analytics, later
@@ -178,10 +181,12 @@ capture thread ──▶ proc_queue (maxsize=1, drop oldest, count drops) ──
 - **Shutdown.** q, Ctrl+C, source end or exception all go through one shutdown path: stop
   capture, drain queues with a timeout, close writer, write final `session.json` in a
   `finally` block.
-- **Several cameras (D-022).** One OS process per camera, each with its own capture, model,
-  writer, session and clock; no fusion across cameras. `scripts/run_cameras.py` is a supervisor,
-  not a layer: it starts the processes one at a time, prefixes their output and stops them
-  through a stop channel, the child's stdin (a `stop` line, or the pipe closing when the
+- **Several cameras (D-022, ADR 0007, D-056).** Two or more cameras run in one OS process
+  (`services.edge.group_main`, the group runner): one detector, and per camera its own capture,
+  writer, session and clock. A camera alone runs in its own process (`services.edge.main`), as
+  before. `scripts/run_cameras.py` (and Studio, through it) is a supervisor, not a layer: it
+  starts the process, routes each `[camera_id] ` output line of a group to that camera, and stops
+  it through a stop channel, the child's stdin (a `stop` line, or the pipe closing when the
   launcher dies, becomes the Ctrl+C path of that process: the same shutdown as above). A
   `stop ui` line (Studio's stop button, D-049) takes the same path but ends the session `ended`
   with a `stopped` event instead of `interrupted`. A child's `session.json` carries `camera_id`
