@@ -1,6 +1,6 @@
 # Data contracts
 
-Contract version: **0.17.0**. Any change bumps the version (minor for additive fields, major
+Contract version: **0.18.0**. Any change bumps the version (minor for additive fields, major
 for removals or meaning changes) and needs a `DECISIONS.md` entry. JSON Schemas in
 `contracts/` are written from this file and tests check them against it (D-009).
 
@@ -63,7 +63,7 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
 
 ```json
 {
-  "contract_version": "0.17.0",
+  "contract_version": "0.18.0",
   "session_id": "uuid",
   "device_id": "uuid",
   "camera_id": "cam1 | null",
@@ -131,7 +131,7 @@ calibration used by this session and records its mean held-out check residual in
 
 ```json
 {
-  "contract_version": "0.17.0",
+  "contract_version": "0.18.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "mode": "live | replay",
@@ -203,7 +203,11 @@ clock; sensor events (section 12) and the fusion (section 15) use that.
 `checks` (0.11.0, D-041) is `null` until the startup checks have run, then one entry per check
 (spec FR-003): `cameras`, `calibration`, `identity`, `id_persistence`, `sensor`. `detail` is a sentence
 (for `identity` it names the roster the operator typed). A `failed` result never blocks the session; it is
-also written as a `startup_check_failed` session event. `clock` (0.11.0, D-035) is `null` when no sensor
+also written as a `startup_check_failed` session event. Of the checks only `calibration` is written so far
+(0.18.0, D-057): when the operator starts a camera uncalibrated after Studio refused its calibration, that
+camera's `checks` is `[{"check": "calibration", "result": "failed", "detail": <the refusal's message>, "t_wall": ...}]`
+and its session has a `startup_check_failed` event with `detail` `calibration: <the refusal's message>`; the
+camera's `tracks.csv` is then written as for any uncalibrated camera (section 5). `clock` (0.11.0, D-035) is `null` when no sensor
 and no latency test were used. `clock.domain` is always `perf_counter`: every process on the PC shares it.
 `clock.sensors` has one entry per rim sensor (up to two, one per rim) and is empty without a sensor. Their offsets are `t_pc - t_sensor` in seconds (add the offset to a
 sensor time to get PC time): `offset_start_s` is the first estimate of the run and `offset_end_s` the last;
@@ -371,7 +375,7 @@ One report per run, one per camera: there is no fusion across cameras.
 
 ```json
 {
-  "contract_version": "0.17.0",
+  "contract_version": "0.18.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "camera_id": "cam1 | null",
@@ -545,17 +549,34 @@ All paths are served on loopback by `python -m services.app`.
   `calibration_mean_m`, `check_mean_m`, `check_max_m`, `forced`, `point_errors_m` (in the order
   of the points sent), `projected_court_lines`, `court`, `ransac_threshold_m` and
   `ransac_dropped_points` (indices of fit points RANSAC left out); `PUT` adds `calibration` (the
-  saved document) and `path`. A refusal is `422` with `{"detail": message}`: too few points, a
-  check point on a fit point, fit points collinear or bunched on the court or collinear in the
-  image, a singular homography, a limit above 2.0 m, a point outside the frame or court. `409`
-  when the frame token is stale.
+  saved document) and `path`. A refusal is `422` with `{"detail": message, "refusal": {...}}`:
+  too few points, a check point on a fit point, fit points collinear or bunched on the court or
+  collinear in the image, a singular homography, a limit above 2.0 m, a point outside the frame or
+  court, a mean check error over the limit. `409` when the frame token is stale. `refusal.kind`
+  (0.18.0, D-057) is `too_few_points` (`have`, `need`, `role`: `calibration` or `check`),
+  `check_error_over_limit` (`check_errors_m` with `check_point_indices`, indices into the points
+  sent, plus `check_mean_m` and `max_check_error_m`) or `invalid` (the message says why). Studio
+  keeps the last refusal of each camera until a fit or a save of that camera succeeds.
+- `POST /api/cameras/{id}/calibration/uncalibrated` (0.18.0, D-057) is the operator's choice, after
+  a refusal, to start that camera uncalibrated: `409` when the camera has no refusal, else
+  `{camera_id, reason}` where `reason` is the refusal's message on one line, cut to 300 characters. `DELETE` on the
+  same path takes the choice back (`{camera_id}`); a successful `PUT` of a calibration for the
+  camera does too. The choice is kept by the running Studio, not in a file. While it holds, every
+  start (`POST /api/recording/start`) does not use that camera's saved calibration, if any,
+  and records the camera as in section 3 `checks`: a `calibration` check `failed` whose `detail`
+  is the reason, plus a `startup_check_failed` session event with `detail` `calibration: <reason>`. A camera already recording is not changed. The other
+  cameras are started as before. Both calls write a Studio audit entry (`calibration_uncalibrated`,
+  `calibration_uncalibrated_clear`).
 - `GET /api/cameras/{id}/calibration` returns the active document, `null` when there is none, or
   `422` when it cannot be read;
   `GET /api/cameras/{id}/calibration/compare` returns `{audit_frame, fresh_frame,
   difference_score, warning}` (base64 JPEGs) for the saved audit frame against a fresh one.
 - `GET /api/status` cameras carry `calibration` (`{calibration_id, check_error_m}` or `null`) and
-  `calibration_warning` (why a saved calibration was not used, or `null`). A camera whose frame
+  `calibration_warning` (why a saved calibration was not used, or `null`; for a camera started
+  uncalibrated after a refusal it holds the refusal). A camera whose frame
   size differs from the calibration at its first frame fails with both sizes in `error`.
+  `GET /api/status` also carries `uncalibrated` (0.18.0): `{camera_id: reason}` for every camera
+  whose starts are uncalibrated by the operator's choice (empty when none).
 
 ## 10. Studio camera settings (`%LOCALAPPDATA%/pointr/cameras.json`)
 
@@ -587,7 +608,7 @@ operator did and what failed; sessions do not carry a copy (D-054). Fields of ev
 | Field | Meaning |
 |---|---|
 | `t_wall` | UTC ISO-8601 time the action finished |
-| `action` | `camera_add`, `camera_edit`, `camera_remove`, `camera_test`, `recording_start`, `recording_stop`, `calibration_save`, or `error` |
+| `action` | `camera_add`, `camera_edit`, `camera_remove`, `camera_test`, `recording_start`, `recording_stop`, `calibration_save`, `calibration_uncalibrated`, `calibration_uncalibrated_clear`, or `error` |
 | `camera_id` | The camera acted on, or `null` for an action on the whole group |
 | `outcome` | `"ok"`, or the error text |
 | `detail` | Object or `null`: `camera_add` and `camera_edit` hold the saved settings; `recording_start` holds `cameras`, the settings of every camera it started, `skipped` (enabled cameras that did not start, each with its masked `reason`) and `group_id`; `error` holds the `reason` |
@@ -697,7 +718,7 @@ recorded video and is compared with `frames.csv` `t_video`; shots and tracks joi
 
 ```json
 {
-  "contract_version": "0.17.0",
+  "contract_version": "0.18.0",
   "fusion_id": "uuid",
   "group_id": "token",
   "created_at": "2026-12-01T18:50:00Z",

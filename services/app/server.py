@@ -67,6 +67,8 @@ class Studio:
         self.frame_cache = {}
         self.calibration_frames = {}
         self.calibration_warnings: dict[str, str] = {}
+        self.refusals: dict[str, str] = {}  # camera_id -> last calibration refusal (one line)
+        self.uncalibrated: dict[str, str] = {}  # camera_id -> refusal the operator chose to skip
         self.active_group_path = self.config.path.with_name("active_group.json")
         self.recover_interrupted_group()
 
@@ -223,8 +225,15 @@ class Studio:
             # so (a session event, and a warning in the status). One camera never blocks the rest.
             calibration_paths: dict[str, str | None] = {}
             warnings: dict[str, str] = {}
+            failed: dict[str, str] = dict(self.uncalibrated)  # the operator's choice (D-057)
             for camera in cameras:
                 calibration_paths[camera.camera_id] = None
+                if reason := failed.get(camera.camera_id):
+                    warnings[camera.camera_id] = (
+                        f"calibration refused: {reason}; recording without calibration "
+                        "(positions in pixels)"
+                    )
+                    continue
                 try:
                     saved = self.calibrations.load(camera.camera_id)
                 except Exception as exc:
@@ -266,10 +275,11 @@ class Studio:
                         camera.track_min_frames,
                         self.preview_ports[camera.camera_id],
                         calibration_paths[camera.camera_id],
-                        warnings.get(camera.camera_id),
+                        None if camera.camera_id in failed else warnings.get(camera.camera_id),
                         camera.name,
                         camera.fps_cap,
                         camera.enabled,
+                        calibration_failed=failed.get(camera.camera_id),
                     )
                 )
             cameras = configured
@@ -309,6 +319,7 @@ class Studio:
             launcher = self.launcher
             active = self.recording()
             finals = dict(self.final)
+            uncalibrated = dict(self.uncalibrated)
         cameras = []
         for child in getattr(launcher, "children", []):
             session_dir = child.session_dir
@@ -408,6 +419,7 @@ class Studio:
             "cameras": cameras,
             "idle_cameras": idle,
             "config_warning": self.config.warning,
+            "uncalibrated": uncalibrated,
             "final": finals,
         }
 
@@ -594,8 +606,13 @@ class Studio:
                 if court.kind == "fiba_half"
                 else None,
             )
-        except (KeyError, TypeError, ValueError, np.linalg.LinAlgError) as exc:
-            raise HTTPException(422, str(exc) or exc.__class__.__name__) from exc
+        except (KeyError, TypeError, ValueError, np.linalg.LinAlgError, cv2.error) as exc:
+            message = str(exc) or exc.__class__.__name__
+            with self.lock:
+                self.refusals[camera_id] = " ".join(message.split())[:300]  # fits a command line
+            raise CalibrationRefusal(message, getattr(exc, "refusal", {"kind": "invalid"})) from exc
+        with self.lock:
+            self.refusals.pop(camera_id, None)
         result["projected_court_lines"] = projected_court_lines(
             result["homography_image_to_court"], court
         )
@@ -651,7 +668,17 @@ class Studio:
                 raise HTTPException(422, str(exc)) from exc
             result["calibration"] = document
             result["path"] = str(path)
+            with self.lock:
+                self.uncalibrated.pop(camera_id, None)  # a saved calibration is the way forward
         return result
+
+
+class CalibrationRefusal(HTTPException):
+    """A 422 whose body also carries `refusal`: what the operator needs to retry (D-057)."""
+
+    def __init__(self, message, refusal):
+        super().__init__(422, message)
+        self.refusal = refusal
 
 
 def _camera_id(entry):
@@ -672,6 +699,13 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
         studio.stop()
 
     app = FastAPI(lifespan=lifespan)
+
+    @app.exception_handler(CalibrationRefusal)
+    async def calibration_refused(request, exc):
+        return JSONResponse(
+            {"detail": exc.detail, "refusal": exc.refusal}, status_code=exc.status_code
+        )
+
     app.state.studio = studio
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
 
@@ -751,6 +785,9 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
                 raise HTTPException(404, "camera not found")
             studio.save(kept)
         studio.logs.pop(camera_id, None)
+        with studio.lock:
+            studio.refusals.pop(camera_id, None)
+            studio.uncalibrated.pop(camera_id, None)
         return {"ok": True}
 
     @app.delete("/api/cameras/{camera_id}/error")
@@ -810,6 +847,26 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
         payload = await request.json()
         with studio.audited("calibration_save", camera_id):
             return studio.calibration_fit(camera_id, payload, save=True)
+
+    @app.post("/api/cameras/{camera_id}/calibration/uncalibrated")
+    def start_uncalibrated(camera_id: str):
+        """After a refusal: this camera's next start is uncalibrated, recorded as a failed
+        calibration check. The reason is Studio's own record of the refusal (D-057)."""
+        with studio.audited("calibration_uncalibrated", camera_id) as note:
+            with studio.lock:
+                reason = studio.refusals.get(camera_id)
+                if reason is None:
+                    raise HTTPException(409, "this camera has no refused calibration")
+                studio.uncalibrated[camera_id] = reason
+            note["detail"] = {"reason": reason}
+            return {"camera_id": camera_id, "reason": reason}
+
+    @app.delete("/api/cameras/{camera_id}/calibration/uncalibrated")
+    def clear_uncalibrated(camera_id: str):
+        with studio.audited("calibration_uncalibrated_clear", camera_id):
+            with studio.lock:
+                studio.uncalibrated.pop(camera_id, None)
+            return {"camera_id": camera_id}
 
     @app.get("/api/cameras/{camera_id}/calibration/compare")
     def compare_calibration(camera_id: str):

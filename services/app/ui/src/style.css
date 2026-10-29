@@ -878,6 +878,22 @@ td {
   color: #8a4d2e;
   background: #f3e8d8;
 }
+.refusal {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 15px;
+  margin-bottom: 12px;
+  background: #f3e8d8;
+  border-radius: 5px;
+  color: #8a4d2e;
+  font-size: 11px;
+}
+.refusal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
 .compare-panel {
   display: flex;
   flex-wrap: wrap;

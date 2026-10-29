@@ -192,6 +192,15 @@ def check_point_set(points, court_dimensions=None):
             )
 
 
+class CalibrationRefused(ValueError):
+    """A fit refused for a reason the operator can act on; `refusal` says what it saw (the
+    Studio API sends it with the message, D-057)."""
+
+    def __init__(self, message, **refusal):
+        super().__init__(message)
+        self.refusal = refusal
+
+
 def fit_calibration(
     points, max_check_error_m=0.5, save_anyway=False, enforce_limit=True, require_checks=True,
     court_dimensions=None,
@@ -208,9 +217,15 @@ def fit_calibration(
     fit = [point for point in points if point["role"] == "calibration"]
     checks = [point for point in points if point["role"] == "check"]
     if len(fit) < 4:
-        raise ValueError("at least four calibration points are required")
+        raise CalibrationRefused(
+            "at least four calibration points are required",
+            kind="too_few_points", role="calibration", have=len(fit), need=4,
+        )  # fmt: skip
     if require_checks and len(checks) < 2:
-        raise ValueError("at least two separate check points are required")
+        raise CalibrationRefused(
+            "at least two separate check points are required",
+            kind="too_few_points", role="check", have=len(checks), need=2,
+        )  # fmt: skip
     if (
         not math.isfinite(max_check_error_m)
         or max_check_error_m <= 0
@@ -260,9 +275,14 @@ def fit_calibration(
         and check_mean > max_check_error_m
         and not save_anyway
     ):
-        raise ValueError(
+        raise CalibrationRefused(
             f"mean check error {check_mean:.3f} m exceeds {max_check_error_m:.3f} m; "
-            "enable Save anyway to override the error limit"
+            "enable Save anyway to override the error limit",
+            kind="check_error_over_limit",
+            check_point_indices=[i for i, p in enumerate(points) if p["role"] == "check"],
+            check_errors_m=check_errors,
+            check_mean_m=check_mean,
+            max_check_error_m=max_check_error_m,
         )
     return {
         "homography_image_to_court": homography.tolist(),
