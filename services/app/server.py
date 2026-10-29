@@ -12,7 +12,7 @@ import time
 import uuid
 import webbrowser
 from collections import deque
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Literal
 
@@ -22,6 +22,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from services.app.audit import AuditTrail
 from services.app.calibrations import CalibrationStore
 from services.app.camera_log import CameraLog
 from services.app.config import CameraConfig, resolve_camera_source
@@ -54,6 +55,7 @@ class Studio:
         self.out = str(Path(out).resolve())
         self.config = config or CameraConfig()
         self.calibrations = CalibrationStore(self.config.path.parent)
+        self.audit = AuditTrail(self.config.path.with_name("audit.jsonl"))
         self.launcher_factory = launcher_factory
         self.launcher = None
         self.worker = None
@@ -118,7 +120,42 @@ class Studio:
 
     def log(self, camera_id) -> CameraLog:
         with self.lock:
-            return self.logs.setdefault(camera_id, CameraLog())
+            if camera_id not in self.logs:
+                self.logs[camera_id] = CameraLog(
+                    lambda message, detail: self.audit.record(
+                        "error", camera_id, message, {"reason": detail}
+                    )
+                )
+            return self.logs[camera_id]
+
+    @contextmanager
+    def audited(self, action, camera_id=None):
+        """Write one audit entry when the block ends: `ok`, or the error that ended it. The block
+        may fill the yielded dict: `detail`, and `outcome` for a failure it returns, not raises."""
+        note = {}
+        try:
+            yield note
+        except HTTPException as exc:
+            reason = exc.detail
+            if isinstance(reason, dict):  # field errors: the message and each field's own message
+                fields = [str(f.get("message")) for f in reason.get("fields", [])]
+                reason = "; ".join([str(reason.get("message")), *fields])
+            self.audit.record(action, camera_id, str(reason), note.get("detail"))
+            raise
+        except Exception as exc:
+            self.audit.record(action, camera_id, f"{type(exc).__name__}: {exc}", note.get("detail"))
+            raise
+        self.audit.record(action, camera_id, note.get("outcome") or "ok", note.get("detail"))
+
+    def camera_settings(self, camera):
+        return {
+            "camera_id": camera.camera_id,
+            "name": camera.name,
+            "source": camera.source,
+            "link": camera.link,
+            "det_size": camera.det_size,
+            "fps_cap": camera.fps_cap,
+        }
 
     def note_child(self, child, log, state, events):
         """Copy a child's news into its camera log: session events, and, once, why it ended
@@ -614,6 +651,10 @@ class Studio:
         return result
 
 
+def _camera_id(entry):
+    return str(entry.get("camera_id")) if isinstance(entry, dict) else None
+
+
 def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher):
     studio = Studio(out, config, launcher_factory)
 
@@ -663,9 +704,11 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
     @app.post("/api/cameras")
     async def add_camera(request: Request):
         entry = await request.json()
-        entries = studio.entries()
-        entries.append(entry)
-        studio.save(entries)
+        with studio.audited("camera_add", _camera_id(entry)) as note:
+            entries = studio.entries()
+            entries.append(entry)
+            studio.save(entries)
+            note["detail"] = entry
         return {
             **entry,
             "source": mask_credentials(str(entry["source"])),
@@ -676,16 +719,18 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
     @app.put("/api/cameras/{camera_id}")
     async def edit_camera(camera_id: str, request: Request):
         entry = await request.json()
-        entries = studio.entries()
-        index = next(
-            (i for i, value in enumerate(entries) if value["camera_id"] == camera_id), None
-        )
-        if index is None:
-            raise HTTPException(404, "camera not found")
-        if entry.get("source") == mask_credentials(str(entries[index]["source"])):
-            entry["source"] = entries[index]["source"]
-        entries[index] = entry
-        studio.save(entries)
+        with studio.audited("camera_edit", camera_id) as note:
+            entries = studio.entries()
+            index = next(
+                (i for i, value in enumerate(entries) if value["camera_id"] == camera_id), None
+            )
+            if index is None:
+                raise HTTPException(404, "camera not found")
+            if entry.get("source") == mask_credentials(str(entries[index]["source"])):
+                entry["source"] = entries[index]["source"]
+            entries[index] = entry
+            studio.save(entries)
+            note["detail"] = entry
         return {
             **entry,
             "source": mask_credentials(str(entry["source"])),
@@ -695,11 +740,12 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
 
     @app.delete("/api/cameras/{camera_id}")
     def remove_camera(camera_id: str):
-        entries = studio.entries()
-        kept = [entry for entry in entries if entry["camera_id"] != camera_id]
-        if len(kept) == len(entries):
-            raise HTTPException(404, "camera not found")
-        studio.save(kept)
+        with studio.audited("camera_remove", camera_id):
+            entries = studio.entries()
+            kept = [entry for entry in entries if entry["camera_id"] != camera_id]
+            if len(kept) == len(entries):
+                raise HTTPException(404, "camera not found")
+            studio.save(kept)
         studio.logs.pop(camera_id, None)
         return {"ok": True}
 
@@ -710,7 +756,10 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
 
     @app.post("/api/cameras/{camera_id}/test")
     def test_camera(camera_id: str):
-        return studio.test_camera(camera_id)
+        with studio.audited("camera_test", camera_id) as note:
+            result = studio.test_camera(camera_id)
+            note["outcome"] = result.get("error")
+        return result
 
     @app.get("/api/court")
     def court_geometry(kind: str = "custom", length_m: float = 28.0, width_m: float = 15.0):
@@ -754,7 +803,9 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
 
     @app.put("/api/cameras/{camera_id}/calibration")
     async def save_camera_calibration(camera_id: str, request: Request):
-        return studio.calibration_fit(camera_id, await request.json(), save=True)
+        payload = await request.json()
+        with studio.audited("calibration_save", camera_id):
+            return studio.calibration_fit(camera_id, payload, save=True)
 
     @app.get("/api/cameras/{camera_id}/calibration/compare")
     def compare_calibration(camera_id: str):
@@ -788,11 +839,18 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
 
     @app.post("/api/recording/start")
     def start_recording():
-        return studio.start()
+        with studio.audited("recording_start") as note:
+            status = studio.start()
+            note["detail"] = {
+                "group_id": studio.group_id,
+                "cameras": [studio.camera_settings(c) for c in studio.launcher.cameras],
+            }
+        return status
 
     @app.post("/api/recording/stop")
     def stop_recording():
-        return studio.stop(source="ui")
+        with studio.audited("recording_stop"):
+            return studio.stop(source="ui")
 
     @app.get("/api/status")
     def recording_status():
