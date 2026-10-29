@@ -5,7 +5,9 @@ from services.edge.launcher_impl import (
     ConfigError,
     Launcher,
     Options,
+    camera_args,
     child_command,
+    group_command,
     load_config,
     main,
     parse_config,
@@ -13,10 +15,12 @@ from services.edge.launcher_impl import (
 
 __all__ = [
     "Camera",
+    "camera_args",
     "ConfigError",
     "Launcher",
     "Options",
     "child_command",
+    "group_command",
     "load_config",
     "main",
     "parse_config",

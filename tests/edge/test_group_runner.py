@@ -14,6 +14,7 @@ from services.edge.group_runner import GroupCamera, run_group
 from services.edge.main import parse_args, run_meta
 from services.edge.session import writer as writer_mod
 from services.edge.session.writer import FileSessionWriter
+from tests.edge.test_calibration_size import calibration_file
 from tests.edge.test_session import (
     EvenFrameDetector,
     OneTrackPerDetection,
@@ -42,25 +43,27 @@ class CountingDetector(EvenFrameDetector):
 
 
 def run_two(
-    clips, out: Path, detector, record=False, second=None, stop=None, on_event=None
+    clips, out: Path, detector, record=False, second=None, calibrations=None, **kw
 ) -> dict[str, str]:
     args = parse_args(["--source", "unused"])  # the CLI's defaults, as the launcher passes them
     config = HealthConfig()
+    calibrations = calibrations or {}
     cameras = [
-        GroupCamera("cam1", FileSource(str(clips["moving"]), realtime=False)),
-        GroupCamera("cam2", FileSource(str(second or clips["frozen"]), realtime=False)),
+        GroupCamera(cid, FileSource(str(clip), realtime=False), "file", calibrations.get(cid))
+        for cid, clip in (("cam1", clips["moving"]), ("cam2", second or clips["frozen"]))
     ]
     return run_group(
         "g1",
         cameras,
         detector,
-        OneTrackPerDetection,
+        lambda camera_id: OneTrackPerDetection(),
         out,
         config,
-        lambda info: run_meta(args, info, config, detector, OneTrackPerDetection(), None),
+        lambda camera_id, info: run_meta(
+            args, info, config, detector, OneTrackPerDetection(), None
+        ),
         record=record,
-        stop=stop,
-        on_event=on_event,
+        **kw,
     )
 
 
@@ -145,7 +148,7 @@ def test_a_camera_id_given_twice_is_refused_before_anything_opens(clips, tmp_pat
     source = FileSource(str(clips["moving"]), realtime=False)
     cameras = [GroupCamera("cam1", source), GroupCamera("cam1", source)]
     with pytest.raises(ValueError, match="twice"):
-        run_group("g1", cameras, None, None, tmp_path, HealthConfig(), lambda i: None)
+        run_group("g1", cameras, None, None, tmp_path, HealthConfig(), lambda c, i: None)
     assert not any(tmp_path.iterdir())
 
 
@@ -206,6 +209,54 @@ def test_a_source_that_cannot_open_leaves_no_session_and_closes_the_others(clips
         GroupCamera("cam2", FileSource(str(tmp_path / "missing.mp4"), realtime=False)),
     ]
     with pytest.raises(SourceOpenError):
-        run_group("g1", cameras, None, None, tmp_path / "out", HealthConfig(), lambda i: None)
+        run_group("g1", cameras, None, None, tmp_path / "out", HealthConfig(), lambda c, i: None)
     assert not (tmp_path / "out").exists() or not any((tmp_path / "out").iterdir())
     assert first.closed
+
+
+def test_each_camera_records_with_its_own_calibration_and_a_bad_one_does_not_stop_the_group(
+    clips, tmp_path
+):
+    """Studio passes each camera's saved calibration; one that cannot be used is an event and that
+    camera records uncalibrated, while the group starts (spec story 7)."""
+    good = calibration_file(tmp_path)  # made for cam1 at the clips' 640x360
+    statuses = run_two(
+        clips, tmp_path / "out", EvenFrameDetector(), calibrations={"cam1": good, "cam2": good}
+    )
+    assert statuses == {"cam1": "ended", "cam2": "ended"}
+    files = camera_files(tmp_path / "out")
+    session, run, _, tracks = files["cam1"]
+    assert session["calibration"] and run["calibration"]
+    assert any(t["x_m"] for t in tracks)
+    session, run, _, tracks = files["cam2"]
+    assert session.get("calibration") is None and run.get("calibration") is None
+    [problem] = [e for e in session["events"] if "calibration not used" in e["detail"]]
+    assert problem["kind"] == "error" and "cam1" in problem["detail"]
+    assert all(t["x_m"] == "" for t in tracks)
+
+
+def test_a_ui_stop_ends_every_session_normally_with_a_stopped_event(clips, tmp_path):
+    """Studio's stop (D-049) reaches the group as Ctrl+C with the source "ui": a normal end."""
+
+    class CtrlC(threading.Event):
+        def wait(self, timeout=None):
+            raise KeyboardInterrupt
+
+    statuses = run_two(clips, tmp_path, EvenFrameDetector(), stop=CtrlC(), ui_stop=lambda: True)
+    assert statuses == {"cam1": "ended", "cam2": "ended"}
+    for session, _, _, _ in camera_files(tmp_path).values():
+        kinds = [e["kind"] for e in session["events"]]
+        assert session["status"] == "ended" and kinds.count("stopped") == 1
+        assert "interrupted" not in kinds
+
+
+def test_each_opened_session_is_handed_over_before_its_camera_starts(clips, tmp_path):
+    """The hook the group process uses to print each session folder and start its preview."""
+    seen = []
+
+    def on_session(camera_id, pipeline):
+        seen.append((camera_id, pipeline.writer.dir.name, pipeline.capture.t0))
+
+    run_two(clips, tmp_path, None, on_session=on_session)
+    assert [(c, t0) for c, _, t0 in seen] == [("cam1", None), ("cam2", None)]  # not started
+    assert {d for _, d, _ in seen} == {p.name for p in tmp_path.iterdir() if p.is_dir()}

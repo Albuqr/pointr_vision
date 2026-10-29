@@ -34,9 +34,11 @@ def fake_command(modes: dict[str, str]):
 
 
 def launcher(tmp_path: Path, modes: dict[str, str], **kw) -> rc.Launcher:
+    """One fake process per camera: the process mechanics (start, stop, kill) are the same for a
+    group's one process, which the real end-to-end tests below cover."""
     cams = [rc.Camera(cid, f"src-{cid}", "wifi") for cid in modes]
     opts = rc.Options(str(tmp_path), GROUP)
-    return rc.Launcher(cams, opts, command=fake_command(modes), **kw)
+    return rc.Launcher(cams, opts, command=fake_command(modes), group_command=None, **kw)
 
 
 def run_then_ctrl_c(lau: rc.Launcher, ready, presses: int = 1) -> int:
@@ -227,7 +229,8 @@ def test_start_log_masks_url_userinfo_and_query_secrets(tmp_path, monkeypatch, c
     camera = rc.Camera("cam1", source, "wifi")
     lau = rc.Launcher([camera], rc.Options(str(tmp_path), GROUP))
 
-    def opened(self, child):
+    def opened(self, children, command):
+        [child] = children
         child.proc = SimpleNamespace(poll=lambda: None)
         child.opened.set()
 
@@ -350,8 +353,9 @@ def test_the_launcher_ends_by_itself_when_every_camera_has_stopped(tmp_path):
     lau = launcher(tmp_path, {"cam1": "ok", "cam2": "ok"})
     real = lau.spawn
 
-    def spawn_then_stop(child):
-        real(child)
+    def spawn_then_stop(children, command):
+        real(children, command)
+        [child] = children
         child.proc.stdin.write("stop\n")  # the child ends on its own, as after q
         child.proc.stdin.flush()
 
@@ -461,7 +465,8 @@ def test_a_stop_before_the_threads_start_still_ends_the_session(monkeypatch, tmp
 
 
 def test_launcher_with_real_children_end_to_end(tmp_path, long_clips, capsys):
-    """Two real processes, started one at a time, stopped by one Ctrl+C: two valid sessions."""
+    """A group of two real cameras is one real process (R2a 04), stopped by one Ctrl+C: two valid
+    sessions."""
     out = tmp_path / "out"
     cams = [rc.Camera(f"cam{i + 1}", str(p), "file") for i, p in enumerate(long_clips)]
     lau = rc.Launcher(cams, rc.Options(str(out), GROUP, no_detect=True))
@@ -473,6 +478,8 @@ def test_launcher_with_real_children_end_to_end(tmp_path, long_clips, capsys):
         return up
 
     assert run_then_ctrl_c(lau, ready) == 0
+    [proc] = {c.proc for c in lau.children}
+    assert "services.edge.group_main" in proc.args
     docs = []
     for c in ("cam1", "cam2"):
         [folder] = out.glob(f"{c}_*")
@@ -742,3 +749,67 @@ def test_a_locked_device_id_is_never_overwritten(tmp_path, monkeypatch):
         writer_mod.device_id(tmp_path)
     monkeypatch.undo()
     assert (tmp_path / "device_id").read_text().strip() == first
+
+
+# -- a group's one process (R2a 04) -----------------------------------------------------------
+
+
+def test_a_groups_lines_reach_the_camera_they_name(tmp_path):
+    class Proc:
+        stdout = [
+            "device: cpu\n",
+            "[cam2] session: C:/out/cam2_x\n",
+            "[cam1] session: C:/out/cam1_y\n",
+            "[cam1] preview_port: 51234\n",
+            "[cam2] t0_wall=1 captured=3 dropped=0 failed_reads=7 processed=3\n",
+            "error: the group did not run: boom\n",
+        ]
+
+    cams = [rc.Camera("cam1", "0", "usb"), rc.Camera("cam2", "1", "usb")]
+    lau = rc.Launcher(cams, rc.Options(str(tmp_path), GROUP))
+    one, two = (rc.Child(c) for c in cams)
+    one.proc = two.proc = Proc()
+    lau.read(one, two)
+    assert one.loading_model and two.loading_model  # a line about the group reaches every camera
+    assert (one.session_dir, two.session_dir) == (Path("C:/out/cam1_y"), Path("C:/out/cam2_x"))
+    assert (one.preview_ready, one.preview_port, two.preview_ready) == (True, 51234, False)
+    assert (one.failed_reads, two.failed_reads) == ("-", "7")
+    assert one.failure == two.failure == "the group did not run: boom"
+    assert list(two.tail)[:2] == ["device: cpu", "session: C:/out/cam2_x"]  # for the error panel
+
+
+def test_a_camera_without_a_group_runs_in_its_own_process(tmp_path):
+    """One camera runs services.edge.main as before; two cameras run one group process."""
+    calls = []
+
+    def command(cam, opts):
+        calls.append(("camera", cam.camera_id))
+        return fake_command({cam.camera_id: "ok"})(cam, opts)
+
+    def group(cams, opts):
+        calls.append(("group", tuple(c.camera_id for c in cams)))
+        return [sys.executable, "-c", "pass"]
+
+    def lau(*ids):
+        cams = [rc.Camera(cid, f"src-{cid}", "wifi") for cid in ids]
+        opts = rc.Options(str(tmp_path), GROUP)
+        return rc.Launcher(cams, opts, command=command, group_command=group)
+
+    run_then_ctrl_c(lau("cam1"), all_ticking(tmp_path, ["cam1"]))
+    two = lau("cam1", "cam2")
+    two.run()  # the stand-in exits at once, with no session
+    assert len({c.proc for c in two.children}) == 1
+    assert [c.failure for c in two.children] == ["failed to start (exit 0)"] * 2
+    assert calls == [("camera", "cam1"), ("group", ("cam1", "cam2"))]
+
+
+def test_the_group_process_gets_each_cameras_own_arguments():
+    cams = [
+        rc.Camera("cam1", "0", "usb", det_size=640, calibration_path="c1.json"),
+        rc.Camera("cam2", "http://10.0.0.5:4747/video", "wifi", http_preview_port=5000),
+    ]
+    opts = rc.Options("C:/out", GROUP, device="cpu")
+    cmd = rc.group_command(cams, opts)
+    assert cmd[:4] == [sys.executable, "-u", "-m", "services.edge.group_main"]
+    assert [json.loads(a) for a in cmd[4:]] == [rc.camera_args(c, opts) for c in cams]
+    assert rc.child_command(cams[0], opts)[4:] == rc.camera_args(cams[0], opts)
