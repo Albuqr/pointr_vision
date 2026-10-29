@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:pointr:contracts:0.15.0:run",
+  "$id": "urn:pointr:contracts:0.16.0:run",
   "title": "run.json",
   "description": "DATA_CONTRACTS.md section 3. Missing values are null, never 0.",
   "type": "object",
@@ -8,10 +8,10 @@
   "required": [
     "contract_version", "run_id", "session_id", "mode", "input", "detector", "tracker",
     "health", "runtime", "started_at", "t0_wall", "ended_at", "counts", "calibration",
-    "checks", "clock", "t0_mono", "objects", "gaps", "outages", "group", "ready"
+    "checks", "clock", "t0_mono", "objects", "gaps", "outages", "group", "ready", "power"
   ],
   "properties": {
-    "contract_version": {"const": "0.15.0"},
+    "contract_version": {"const": "0.16.0"},
     "run_id": {"$ref": "#/$defs/uuid4"},
     "session_id": {"$ref": "#/$defs/uuid4"},
     "mode": {"enum": ["live", "replay"]},
@@ -290,6 +290,32 @@
           "properties": {
             "t_wall": {"$ref": "#/$defs/utc"},
             "t_pc": {"type": "number", "minimum": 0}
+          }
+        }
+      }
+    },
+    "power": {
+      "type": "object",
+      "description": "the PC's power state at the start and the end of the run, D-053",
+      "additionalProperties": false,
+      "required": ["start", "end"],
+      "properties": {
+        "start": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["ac", "battery_percent"],
+          "properties": {
+            "ac": {"type": ["boolean", "null"], "description": "null when the OS cannot say"},
+            "battery_percent": {"type": ["integer", "null"], "minimum": 0, "maximum": 100}
+          }
+        },
+        "end": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["ac", "battery_percent"],
+          "properties": {
+            "ac": {"type": ["boolean", "null"], "description": "null when the OS cannot say"},
+            "battery_percent": {"type": ["integer", "null"], "minimum": 0, "maximum": 100}
           }
         }
       }

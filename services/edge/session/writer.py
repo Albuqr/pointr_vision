@@ -261,6 +261,7 @@ class FileSessionWriter:
             "outages": run.outages,
             "group": run.group,
             "ready": {**dict.fromkeys(READY_STEPS), **(run.ready or {})},
+            "power": {"start": run.power_start, "end": None},  # 0.16.0, D-053
         }
         self._frames_f = open(self._run_dir / "frames.csv", "w", newline="", encoding="utf-8")
         self._tracks_f = open(self._run_dir / "tracks.csv", "w", newline="", encoding="utf-8")
@@ -283,8 +284,9 @@ class FileSessionWriter:
         self._put(("t0", t0_wall, t0))
 
     def set_final(self, **blocks) -> None:
-        """Run.json blocks known only at the end (gaps, outages, clock); call before close()."""
-        unknown = set(blocks) - {"gaps", "outages", "clock"}
+        """Run.json blocks known only at the end (gaps, outages, clock, power_end); call before
+        close()."""
+        unknown = set(blocks) - {"gaps", "outages", "clock", "power_end"}
         if unknown:
             raise ValueError(f"unknown run.json blocks: {sorted(unknown)}")
         if self.status is not None:
@@ -577,7 +579,10 @@ class FileSessionWriter:
 
     def _finish_json(self, status: str, counts: RunCounts, ended_at: str) -> None:
         with self._lock:
-            self._run_doc.update(self._final)
+            final = dict(self._final)
+            if "power_end" in final:
+                self._run_doc["power"] = {**self._run_doc["power"], "end": final.pop("power_end")}
+            self._run_doc.update(final)
             self._run_doc["ended_at"] = ended_at
             self._run_doc["counts"] = asdict(counts)
             write_json(self._run_dir / "run.json", self._run_doc)

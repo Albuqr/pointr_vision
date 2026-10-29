@@ -47,6 +47,7 @@ from services.edge.capture.types import Frame, HealthEvent, utc_now
 from services.edge.contract import VIDEO_FILE
 from services.edge.perception.detector import DET_SIZE_MULTIPLE
 from services.edge.perception.loop import Processor, delay_stats, rates
+from services.edge.power import read_power
 from services.edge.recording.recorder import FileRecorder
 from services.edge.replay.resolve import ReplayError, resolve_replay
 from services.edge.reports.build import format_summary, write_report
@@ -341,6 +342,7 @@ def run_meta(args, info, config: HealthConfig, detector, tracker, gpu, replay=No
             },
         },
         started_at=utc_now(),
+        power_start=read_power(),
     )
 
 
