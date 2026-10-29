@@ -3,7 +3,7 @@
 docs/DATA_CONTRACTS.md, the schemas in contracts/ and the fixtures carry the same number;
 tests/test_contracts.py compares them. Change it here and nowhere else."""
 
-CONTRACT_VERSION = "0.16.0"
+CONTRACT_VERSION = "0.17.0"
 
 # The raw recording of a live session (D-042). MKV, not MP4: an MP4 written by
 # OpenCV has no index until it is closed, so a killed session leaves an unreadable file (measured

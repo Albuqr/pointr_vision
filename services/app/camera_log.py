@@ -7,6 +7,7 @@ Every string goes through mask_credentials on the way in: nothing here can leak 
 import datetime as dt
 import threading
 from collections import deque
+from collections.abc import Callable
 
 from services.edge.session.writer import mask_credentials
 
@@ -19,7 +20,8 @@ def now_iso() -> str:
 
 
 class CameraLog:
-    def __init__(self):
+    def __init__(self, on_error: Callable[[str, str], None] | None = None):
+        self.on_error = on_error  # told of every error set, already masked (audit trail)
         self.lock = threading.Lock()
         self.last_error: dict | None = None
         self.events: deque[dict] = deque(maxlen=EVENT_LIMIT)  # oldest first
@@ -33,6 +35,9 @@ class CameraLog:
                 "detail": mask_credentials(detail)[-DETAIL_LIMIT:],
                 "at": now_iso(),
             }
+            message, detail = self.last_error["message"], self.last_error["detail"]
+        if self.on_error:
+            self.on_error(message, detail)
 
     def clear_error(self) -> None:
         with self.lock:

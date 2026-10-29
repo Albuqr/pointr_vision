@@ -1,6 +1,6 @@
 # Data contracts
 
-Contract version: **0.16.0**. Any change bumps the version (minor for additive fields, major
+Contract version: **0.17.0**. Any change bumps the version (minor for additive fields, major
 for removals or meaning changes) and needs a `DECISIONS.md` entry. JSON Schemas in
 `contracts/` are written from this file and tests check them against it (D-009).
 
@@ -63,7 +63,7 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
 
 ```json
 {
-  "contract_version": "0.16.0",
+  "contract_version": "0.17.0",
   "session_id": "uuid",
   "device_id": "uuid",
   "camera_id": "cam1 | null",
@@ -131,7 +131,7 @@ calibration used by this session and records its mean held-out check residual in
 
 ```json
 {
-  "contract_version": "0.16.0",
+  "contract_version": "0.17.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "mode": "live | replay",
@@ -371,7 +371,7 @@ One report per run, one per camera: there is no fusion across cameras.
 
 ```json
 {
-  "contract_version": "0.16.0",
+  "contract_version": "0.17.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "camera_id": "cam1 | null",
@@ -578,6 +578,31 @@ list and produces a visible warning; it is not silently replaced with the backup
 configuration is a local Studio setting and does not alter session, run, report, or calibration
 field meanings. This additive settings contract is recorded under contract version 0.10.0.
 
+### Studio audit trail (`%LOCALAPPDATA%/pointr/audit.jsonl`, 0.17.0)
+
+One file next to `cameras.json`, append-only JSON Lines: one object per line, UTF-8, written and
+flushed to disk before the action's response is returned. It is the Studio's record of what the
+operator did and what failed; sessions do not carry a copy (D-054). Fields of every entry:
+
+| Field | Meaning |
+|---|---|
+| `t_wall` | UTC ISO-8601 time the action finished |
+| `action` | `camera_add`, `camera_edit`, `camera_remove`, `camera_test`, `recording_start`, `recording_stop`, `calibration_save`, or `error` |
+| `camera_id` | The camera acted on, or `null` for an action on the whole group |
+| `outcome` | `"ok"`, or the error text |
+| `detail` | Object or `null`: `camera_add` and `camera_edit` hold the saved settings; `recording_start` holds `cameras`, the settings of every camera it started, `skipped` (enabled cameras that did not start, each with its masked `reason`) and `group_id`; `error` holds the `reason` |
+
+`error` entries record each error Studio shows for a camera (its last-error panel: a source that
+cannot be opened, a failed test, a camera that stops with an error), including those outside any
+request. A request that fails also writes its own action entry with the error as `outcome`, so one
+failure can appear as both; the action still has exactly one entry of its own. A camera renamed by
+`camera_edit` is logged under the `camera_id` of the request. If an entry cannot be written
+(locked or full disk) the action still completes and Studio logs one line; that entry is lost.
+Every string is masked like all Studio output (URL credentials never reach the file). A crash can
+leave at most one torn last line; readers skip a line that is not valid JSON and read the rest.
+The file is never rewritten or truncated by Studio. It does not alter any session, run, report or
+calibration field.
+
 ## 11. `objects.csv` (0.11.0, Track R)
 
 One row per ball or rim box per processed frame, written by the perception layer from slice R2
@@ -672,7 +697,7 @@ recorded video and is compared with `frames.csv` `t_video`; shots and tracks joi
 
 ```json
 {
-  "contract_version": "0.16.0",
+  "contract_version": "0.17.0",
   "fusion_id": "uuid",
   "group_id": "token",
   "created_at": "2026-12-01T18:50:00Z",
