@@ -12,10 +12,12 @@ import pytest
 from services.edge import contract
 from services.edge.capture.health import HealthConfig
 from services.edge.capture.sources import FileSource, SourceOpenError
+from services.edge.capture.types import Frame
 from services.edge.contract import VIDEO_FILE
-from services.edge.group_runner import GroupCamera, run_group
+from services.edge.group_runner import CameraTracker, GroupCamera, run_group
 from services.edge.main import parse_args, run_meta
-from services.edge.matcher import CourtMatcher, MatcherParams
+from services.edge.matcher import CourtMatcher, GroupTrack, LocalTrack, MatcherParams
+from services.edge.perception.loop import NO_DETECTIONS
 from services.edge.perception.types import Detections
 from services.edge.session import writer as writer_mod
 from services.edge.session.writer import FileSessionWriter
@@ -351,3 +353,60 @@ def test_the_default_matcher_is_recorded_and_a_group_without_detection_records_n
     run_two(clips, tmp_path / "b", None)
     for _, run, _, _ in camera_files(tmp_path / "b").values():
         assert run["group"]["params"] == {}
+
+
+# -- what a camera reports to the matcher ---------------------------------------------------
+
+
+class RecordingMatcher:
+    def __init__(self):
+        self.calls = []
+
+    def update(self, camera_id, t_recv, tracks):
+        self.calls.append((camera_id, t_recv, list(tracks)))
+        return [GroupTrack(t.local_id, 100 + t.local_id, "unshared") for t in tracks]
+
+    def record_params(self):
+        return {}
+
+
+def camera_tracker(positions, size=(640, 360)):
+    matcher = RecordingMatcher()
+    tracker = CameraTracker(OneTrackPerDetection(), "cam1", matcher, positions, size)
+    return tracker, matcher
+
+
+def frame_of(width=640, height=360):
+    return Frame(0, 12.5, "2026-10-29T00:00:00Z", np.zeros((height, width, 3), np.uint8), "s")
+
+
+BOX_DETECTION = Detections(
+    np.array([[10.0, 20.0, 110.0, 220.0]], np.float32),
+    np.array([0.9], np.float32),
+    np.array([1], np.int64),
+)
+
+
+def test_a_camera_reports_the_court_position_of_the_box_bottom_centre_and_gets_group_ids_back():
+    tracker, matcher = camera_tracker(lambda x, y: (x / 10, y / 10))
+    [obs] = tracker.update(BOX_DETECTION, frame_of())
+    assert matcher.calls == [("cam1", 12.5, [LocalTrack(1, (6.0, 22.0))])]
+    assert (obs.track_id, obs.link) == (101, "unshared")
+
+
+def test_a_camera_with_no_position_for_a_track_still_reports_it_and_a_silent_frame_too():
+    for positions, frame in (
+        (None, frame_of()),  # not calibrated
+        (
+            lambda x, y: (1.0, 1.0),
+            frame_of(320, 180),
+        ),  # a frame of another size than the calibration
+        (lambda x, y: None, frame_of()),  # a point that cannot be projected
+        (lambda x, y: 1 / 0, frame_of()),  # a projection that fails
+    ):
+        tracker, matcher = camera_tracker(positions)
+        tracker.update(BOX_DETECTION, frame)
+        assert matcher.calls[0][2] == [LocalTrack(1, None)]
+    tracker, matcher = camera_tracker(lambda x, y: (1.0, 1.0))
+    assert tracker.update(NO_DETECTIONS, frame_of()) == []
+    assert matcher.calls == [("cam1", 12.5, [])]  # the camera reported: nothing in view

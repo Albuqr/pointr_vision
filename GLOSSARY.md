@@ -61,6 +61,15 @@ A temporary ID the tracker gives one detected person, shared by every camera of 
 records: the same track in two cameras is the same person. It is not linked to an athlete.
 _Avoid_: player ID, athlete ID
 
+**Local track**:
+The ID one camera's own tracker gives a person; it means nothing in another camera. The matcher maps each
+local track to a track (the group track ID that is written) by court position and group time, and a row's
+`link` says how.
+
+**Group time**:
+The PC clock with each camera's measured latency taken off its frame's receive time (0 when none was
+measured); the one timeline on which the matcher compares cameras.
+
 **Leave / return**:
 A player going out of one camera's view, and coming back into that same camera's view. Judged per
 camera: out of one camera but in another's view is still a leave for the first.

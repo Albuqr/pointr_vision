@@ -165,3 +165,13 @@ def test_a_position_that_is_not_finite_counts_as_no_position(bad):
     m = CourtMatcher()
     a = feed(m, "A", 0.0, l1=(5.0, 5.0))
     assert feed(m, "B", 0.02, l7=bad)[7][0] != a[1][0]
+
+
+def test_a_new_local_track_links_while_the_old_one_of_its_camera_is_still_remembered():
+    m = CourtMatcher(MatcherParams(lost_s=1.0))
+    a = feed(m, "A", 0.0, l1=(5.0, 5.0))
+    g = feed(m, "B", 0.02, l7=(5.0, 5.0))[7][0]
+    assert g == a[1][0]
+    feed(m, "A", 0.1, l1=(5.0, 5.0))  # B's l7 is not reported any more, but not forgotten yet
+    out = feed(m, "B", 0.12, l8=(5.2, 5.0))  # the tracker restarted the person as l8
+    assert out[8] == (g, "position")

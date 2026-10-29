@@ -169,7 +169,9 @@ class CourtMatcher:
         if drop is not None and drop != keep:
             for member in self._members(drop):
                 self._locals[member].gid = keep
-            self._groups[keep].last_t = max(self._groups[keep].last_t, self._groups[drop].last_t)
+            if self._groups[drop].last_t > self._groups[keep].last_t:  # the later sighting wins
+                self._groups[keep].last_t = self._groups[drop].last_t
+                self._groups[keep].last_xy = self._groups[drop].last_xy
             del self._groups[drop]
         if link:
             self._groups[keep].link = link
