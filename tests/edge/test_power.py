@@ -30,6 +30,7 @@ def status(ac: int, percent: int) -> SystemPowerStatus:
         (1, 255, {"ac": True, "battery_percent": None}),  # a desktop: mains, no battery
         (255, 255, {"ac": None, "battery_percent": None}),  # the OS cannot say
         (255, 60, {"ac": None, "battery_percent": 60}),
+        (1, 101, {"ac": True, "battery_percent": None}),  # out of range is not a charge
     ],
 )
 def test_the_os_answer_is_mapped_and_unknown_is_null(monkeypatch, ac, percent, expected):

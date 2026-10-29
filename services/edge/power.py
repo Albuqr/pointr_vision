@@ -7,8 +7,6 @@ import ctypes
 import sys
 from ctypes import wintypes
 
-UNKNOWN = 255  # SYSTEM_POWER_STATUS: ACLineStatus and BatteryLifePercent when not known
-
 
 class SystemPowerStatus(ctypes.Structure):
     _fields_ = [
@@ -40,5 +38,5 @@ def read_power() -> dict:
     if status is None:
         return {"ac": None, "battery_percent": None}
     ac = {0: False, 1: True}.get(status.ACLineStatus)
-    percent = status.BatteryLifePercent
+    percent = status.BatteryLifePercent  # 255 is "unknown"; only 0 to 100 is a charge
     return {"ac": ac, "battery_percent": percent if percent <= 100 else None}

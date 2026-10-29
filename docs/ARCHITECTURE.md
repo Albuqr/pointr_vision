@@ -129,7 +129,7 @@ class SessionWriter(Protocol):  # run metadata, t0 and counts added by D-020
         self, session_dir: Path | str, run: RunMeta, positions: PositionMap | None = None
     ) -> None: ...  # a replay adds a run to a session (D-042)
     def set_t0(self, t0: float, t0_wall: str) -> None: ...
-    def set_final(self, **blocks) -> None: ...  # gaps, outages, clock; before close (D-041)
+    def set_final(self, **blocks) -> None: ...  # gaps, outages, clock, power_end; before close (D-041, D-053)
     def set_ready(self, step: str, t_wall: str, t_pc: float) -> None: ...  # run.json ready (D-052)
     def set_recording_sha256(self, sha256: str) -> None: ...  # video.mkv hash; before close (D-042)
     def frame(self, rec: FrameRecord) -> None: ...
