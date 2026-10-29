@@ -124,6 +124,11 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="why the launcher did not pass a saved calibration: recorded as an event",
     )
     p.add_argument(
+        "--calibration-failed",
+        help="why Studio refused this camera's calibration and the operator started it "
+        "uncalibrated: recorded as a failed calibration check (D-057)",
+    )
+    p.add_argument(
         "--link",
         choices=["usb", "wifi", "builtin", "file"],
         help="how the source reaches the notebook (recorded, not detected; D-012)",
@@ -341,6 +346,26 @@ def run_meta(args, info, config: HealthConfig, detector, tracker, gpu, replay=No
         },
         started_at=utc_now(),
         power_start=read_power(),
+        checks=failed_calibration_checks(args),
+    )
+
+
+def failed_calibration_checks(args) -> list | None:
+    """run.json `checks` of a camera the operator started uncalibrated after Studio refused its
+    calibration (D-057); None otherwise: the other checks belong to Track R."""
+    if not args.calibration_failed:
+        return None
+    detail = args.calibration_failed
+    return [{"check": "calibration", "result": "failed", "detail": detail, "t_wall": utc_now()}]
+
+
+def calibration_failed_event(args) -> HealthEvent | None:
+    """The `startup_check_failed` event that goes with `failed_calibration_checks`. No t0 yet,
+    so t_mono is null."""
+    if not args.calibration_failed:
+        return None
+    return HealthEvent(
+        "startup_check_failed", utc_now(), None, f"calibration: {args.calibration_failed}"
     )
 
 
@@ -628,6 +653,8 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
     if args.calibration_problem:  # before any run, so no t0: t_mono is null
         problem = args.calibration_problem
         log_event(HealthEvent("error", utc_now(), None, f"calibration not used: {problem}"))
+    if event := calibration_failed_event(args):
+        log_event(event)
 
     http_preview = None
 
