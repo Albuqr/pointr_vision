@@ -1,3 +1,42 @@
+# All text files are stored with LF line endings. A mixed CRLF/LF index caused whole-file diffs
+# (36217e3, b471907) because agents and editors write line endings differently.
+* text=auto eol=lf
+
 # Shell scripts run under bash, which rejects CRLF line endings
 .githooks/* text eol=lf
 *.sh text eol=lf
+
+# Windows batch files need CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary files are never converted
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.bmp binary
+*.ico binary
+*.mp4 binary
+*.mkv binary
+*.mov binary
+*.avi binary
+*.webm binary
+*.pt binary
+*.pth binary
+*.onnx binary
+*.engine binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.7z binary
+*.npy binary
+*.npz binary
+*.parquet binary
+*.db binary
+*.sqlite binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary

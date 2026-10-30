@@ -8,6 +8,11 @@ one approved, bounded v0 deliverable, not a claim that intervening phases are co
 that phase 03 is formally closed. Keep work within Studio and per-camera calibration; the
 explicitly excluded phase work remains deferred.
 
+**R2a follow-up (D-063):** holds the architecture-deepening refactors T1-T12 (scope, tickets and owner
+decisions in `.scratch/architecture-deepening/spec.md`, `brief.md` and `coordination.md`). It is a follow-up to
+Track R phase R2a, not a new numbered phase. The bug tickets B1-B10 (lanes BK, BS, BE) stay under Phase 03, each
+with a failing test first. This does not change which phase is current.
+
 Each phase adds one layer behind an interface and ends with a gate (`GATES.md`). Phases
 00-05 are the first delivery from scope v2: the live pipeline working before the first
 structured test with one person. Later phases follow the scope's progression.

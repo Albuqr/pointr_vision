@@ -1384,3 +1384,29 @@ keeps the `.env` refusal and runs ruff on the staged `.py` files only.
 runs code through a subprocess string) is caught later, by CI or the end-of-session run, not before the commit.
 Supersedes the hook comment's "medium run" and the CLAUDE.md line "Run both before declaring anything done".
 **Status.** Accepted.
+
+## D-063 · 2026-10-30 · Architecture deepening: scope, owner decisions and multi-agent coordination
+**Context.** The 2026-10-30 architecture review (`.scratch/architecture-deepening/brief.md`) found bugs and shallow
+modules across the contract files, the Studio and session folder code, and the edge run. On 2026-10-29 four branches
+in flight at once (R2a 05/06/07/08, B13) conflicted on the same files, and a CRLF churn (36217e3, then b471907)
+rewrote about 2,000 lines because the index mixed CRLF and LF files.
+**Decision.** (0) The bugs B1-B10 are fixed under Phase 03, each with a failing test first, before the refactor
+tickets in their lane. The refactors T1-T12 are the R2a follow-up (`docs/PHASES.md`,
+`.scratch/architecture-deepening/spec.md`). Owner decisions: (2) the schemas drop the version and `contract.py`
+checks it through `validate()`; (6) a single camera whose calibration is refused when the source opens records
+uncalibrated with an event, and is not fatal; (8) an edge-detected calibration refusal is recorded as a failed
+`calibration` check, with a minor bump; (9) a single-session replay uses the live run's calibration, and
+`--calibration` overrides it; (14, 15) the lines the edge prints become DATA_CONTRACTS section 16, with typed
+`error: <kind>: <detail>` lines, old lines parse as `exited`, minor bump. The other rows of brief section 3 take the
+recommended answer unless the owner says otherwise. (1) All text files are LF, forced by `.gitattributes`.
+Coordination (`.scratch/architecture-deepening/coordination.md`), in short: each agent works in its own worktree and
+claims the issue first; lanes and owned files follow section 2; D-063 to D-070 are reserved; only T1 bumps the
+contract before it merges, and later bumps are taken at merge; `docs/BACKLOG.md` is edited only by the owner; branches
+are rebased, not merged; the merge order is fixed; models per provider are Claude Opus as overseer with Sonnet
+subagents, Codex 6.1 sol, Antigravity 3.8 flash.
+**Consequences.** The renormalise commit is listed in `.git-blame-ignore-revs`; enable it locally with
+`git config blame.ignoreRevsFile .git-blame-ignore-revs`. Pull requests on the T0 branch must be merged with a merge
+commit (not squash or rebase) so that hash survives. A file that shows a whole-file diff after a small edit is an
+editor problem to fix, not to commit. Branches cut before T0 merges need a rebase and a renormalise of their own
+changes.
+**Status.** Accepted.
