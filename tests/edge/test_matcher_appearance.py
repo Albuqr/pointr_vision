@@ -168,3 +168,25 @@ def test_params_record_the_appearance_thresholds():
     p = CourtMatcher(MatcherParams(appearance_max_distance=0.2)).record_params()
     assert tuple(p) == contract.MATCHER_PARAMS
     assert p["appearance_max_distance"] == 0.2 and p["max_height_diff"] == 0.4
+
+
+def test_a_court_position_older_than_the_lost_time_does_not_take_over_a_group():
+    """A group kept alive by an uncalibrated camera has an old court position: after the lost
+    time the speed slack would cover the court, so that position no longer decides."""
+    m = CourtMatcher(MatcherParams(lost_s=1.0, max_offset_s=5.0))
+    g = see(m, "A", 0.0, l1=((5.0, 5.0), look(RED, BLUE)))[1][0]
+    for i in range(1, 30):  # B (no position) keeps the group alive, A has lost the person
+        assert see(m, "B", i / 10, l7=(None, look(RED, BLUE, seed=1)))[7][0] == g
+    see(m, "B", 3.0)  # B loses the person too
+    far = see(m, "A", 3.2, l9=((12.0, 5.0), look(GREEN, WHITE)))  # 7 m off, other kit
+    assert far[9][0] != g
+
+
+def test_a_takeover_by_appearance_from_a_new_camera_says_appearance():
+    m = CourtMatcher(MatcherParams(lost_s=1.0, max_offset_s=0.25))
+    a = see(m, "A", 0.0, l1=((5.0, 5.0), look(RED, BLUE)))
+    see(m, "B", 0.02, l7=((5.0, 5.0), look(RED, BLUE, seed=1)))  # linked by position
+    see(m, "A", 0.5)
+    see(m, "B", 0.52)  # both lose the person
+    c = see(m, "C", 0.7, l3=(None, look(RED, BLUE, seed=2)))  # a third, uncalibrated camera
+    assert c[3] == (a[1][0], "appearance")

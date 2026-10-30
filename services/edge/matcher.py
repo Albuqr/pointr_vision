@@ -253,13 +253,17 @@ class CourtMatcher:
             for gid, group in self._groups.items():
                 if any(self._present(k, t) for k in self._members(gid)):
                     continue
-                slack = p.max_speed_mps * max(t - group.last_t, 0.0)
-                if cue := _cue(p, track, group.last_xy, group.last_app, slack):
+                gap = max(t - group.last_t, 0.0)
+                # a court position older than lost_s (a group kept alive by a camera without
+                # one) would get a slack that covers the court: it no longer decides
+                xy = group.last_xy if gap <= p.lost_s else None
+                if cue := _cue(p, track, xy, group.last_app, p.max_speed_mps * gap):
                     pairs.append((cue[0], cue[1], key, gid, cue[2]))
         for _, _, key, gid, link in sorted(pairs):
             if self._locals[key].gid is None and not any(
                 self._present(k, t) for k in self._members(gid)
             ):
+                cameras = {k[0] for k in self._members(gid)}
                 self._join(gid, None, key)
-                if self._linked(gid) and self._groups[gid].link == UNSHARED:  # now two cameras
+                if key[0] not in cameras and self._linked(gid):  # a camera new to the group
                     self._groups[gid].link = link

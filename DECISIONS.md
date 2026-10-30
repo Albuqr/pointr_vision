@@ -1316,7 +1316,9 @@ when one of the two tracks has no court position. Where both have one, position 
 overrides a court-plane distance, and pixel position is never a cue. Position pairs are taken before appearance
 pairs, nearest first, one to one, with the same rules as D-058 (two present tracks of one camera never share a group;
 a lost group is kept for `lost_s` and a new local track close in appearance can take it over, which is the occlusion
-re-link). A group linked across cameras by appearance writes `link=appearance`; `link` stays per group, the cue of
+re-link). A lost group's court position older than `lost_s` no longer decides a takeover (a group kept alive by
+a camera without positions would otherwise get a speed slack covering the court); appearance may still. A group
+linked across cameras by appearance writes `link=appearance`; `link` stays per group, the cue of
 the latest cross-camera link. A camera of a group run of two or more cameras with no valid calibration gets one
 `appearance_only` session event when its session opens. `group.params` gains `appearance_max_distance` (0.3) and
 `max_height_diff` (0.4): starting values, not measured; R2a-A5 scores them on a recorded clip.
