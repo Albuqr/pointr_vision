@@ -161,6 +161,44 @@ def test_model_load_failure_is_an_error_event(monkeypatch):
     assert "model load failed" in ev.detail and "weights download failed" in ev.detail
 
 
+def run_failing_model_load(monkeypatch, capsys) -> tuple[int, str, str]:
+    class NeverOpened:
+        def open(self):
+            raise AssertionError("the source must not open before the model loads")
+
+    def no_network(args, device):
+        raise RuntimeError("weights download failed")
+
+    monkeypatch.setattr(cli, "open_source", lambda ref, size: NeverOpened())
+    monkeypatch.setattr(cli, "load_perception", no_network)
+    monkeypatch.setattr(cli, "resolve_device", lambda requested: ("cpu", None))
+    code = cli.main(["--source", "0"])
+    captured = capsys.readouterr()
+    return code, captured.out, captured.err
+
+
+def test_model_load_failure_prints_error_line_on_stderr(monkeypatch, capsys):
+    code, out, err = run_failing_model_load(monkeypatch, capsys)
+    assert code == EXIT_CAPTURE_ERROR
+    lines = [ln for ln in err.splitlines() if ln.startswith("error: model load failed")]
+    assert len(lines) == 1 and "weights download failed" in lines[0]
+    assert "error: model load failed" in out  # the event line stays
+
+
+@pytest.mark.parametrize("err_first", [False, True])
+def test_model_load_failure_becomes_the_launcher_failure(monkeypatch, capsys, err_first):
+    from services.edge.launcher_impl import Camera, Child, Launcher
+
+    _, out, err = run_failing_model_load(monkeypatch, capsys)
+    out_lines, err_lines = out.splitlines(), err.splitlines()
+    child = Child(Camera("cam1", "0", "usb"))
+    for line in err_lines + out_lines if err_first else out_lines + err_lines:
+        Launcher.note(child, line)
+    assert child.failure is not None
+    assert "model load failed" in child.failure and "weights download failed" in child.failure
+    assert not child.failure.startswith("failed to start")
+
+
 def fake_gpu(monkeypatch, available: bool) -> None:
     import torch
 
