@@ -249,20 +249,10 @@ def test_run_metadata_records_effective_tracker_parameters():
             "high_conf_det_threshold": 0.6,
         }
 
-    args = cli.parse_args(
-        [
-            "--source",
-            "0",
-            "--track-lost-secs",
-            "4",
-            "--track-activation",
-            "0.55",
-            "--track-min-frames",
-            "3",
-        ]
-    )
     info = SourceInfo("camera", "0", 1280, 720, 30.0, "builtin")
-    run = cli.run_meta(args, info, HealthConfig(), Detector(), Tracker(), None)
+    run = cli.run_meta(
+        cli.RunSettings((1280, 720), None), info, HealthConfig(), Detector(), Tracker(), None
+    )
 
     assert run.tracker["params"] == Tracker.params
 

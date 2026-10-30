@@ -16,7 +16,7 @@ from services.edge.capture.sources import FileSource, SourceOpenError
 from services.edge.capture.types import Frame
 from services.edge.contract import VIDEO_FILE
 from services.edge.group_runner import CameraTracker, GroupCamera, run_group
-from services.edge.main import parse_args, run_meta
+from services.edge.main import RunSettings, run_meta
 from services.edge.matcher import CourtMatcher, GroupTrack, MatcherParams
 from services.edge.perception.loop import NO_DETECTIONS
 from services.edge.perception.types import Detections
@@ -52,7 +52,7 @@ class CountingDetector(EvenFrameDetector):
 def run_two(
     clips, out: Path, detector, record=False, second=None, calibrations=None, **kw
 ) -> dict[str, str]:
-    args = parse_args(["--source", "unused"])  # the CLI's defaults, as the launcher passes them
+    settings = RunSettings(None, None)
     config = HealthConfig()
     calibrations = calibrations or {}
     cameras = [
@@ -67,7 +67,7 @@ def run_two(
         out,
         config,
         lambda camera_id, info: run_meta(
-            args, info, config, detector, OneTrackPerDetection(), None
+            settings, info, config, detector, OneTrackPerDetection(), None
         ),
         record=record,
         **kw,
