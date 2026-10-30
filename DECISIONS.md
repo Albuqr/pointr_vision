@@ -1489,3 +1489,4 @@ The owner retained this T7 acceptance criterion and authorized a contract bump a
 this supersedes T7's original no-bump instruction. Counts remain null before finalization.
 Captured-frame accounting and calibration format are unchanged.
 
+\n
