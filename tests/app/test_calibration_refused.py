@@ -4,9 +4,10 @@ start is recorded as a failed calibration check (FR-003, D-057)."""
 from services.edge import group_main
 from services.edge.launcher import Options, child_command
 from services.edge.launcher_impl import Camera
+from tests.edge.fakes import EvenFrameDetector
 from tests.edge.test_group_main import camera
 from tests.edge.test_group_runner import camera_files
-from tests.edge.test_session import EvenFrameDetector, run_main, session_files
+from tests.edge.test_session import run_main, session_files
 from tests.edge.test_session import validate as validate_file
 
 REASON = "mean check error 0.900 m exceeds 0.500 m"

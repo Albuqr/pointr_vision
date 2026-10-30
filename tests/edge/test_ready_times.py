@@ -11,9 +11,8 @@ from services.edge.capture.health import HealthConfig
 from services.edge.capture.types import SourceInfo, utc_now
 from services.edge.session.types import SessionMeta
 from services.edge.session.writer import FileSessionWriter, device_id
-from tests.edge.test_camera_pipeline import _run
+from tests.edge.fakes import EvenFrameDetector, sample_run_meta
 from tests.edge.test_session import (
-    EvenFrameDetector,
     run_main,
     session_files,
     validate,
@@ -90,7 +89,7 @@ def test_a_run_stopped_before_its_first_frame_keeps_the_times_it_reached(tmp_pat
     loaded = {"t_wall": utc_now(), "t_pc": time.perf_counter()}
     meta = SessionMeta(str(uuid.uuid4()), device_id(tmp_path), utc_now(), info, False, "cam1")
     run = replace(
-        _run(),
+        sample_run_meta("clip"),
         health=asdict(HealthConfig()),
         runtime={"python": "3.11.9", "platform": "test", "device": None, "gpu": None,
                  "packages": {"opencv": None, "numpy": None, "torch": None, "supervision": None}},

@@ -24,11 +24,10 @@ from services.edge.session import writer as writer_mod
 from services.edge.session.types import (
     FrameRecord,
     RunCounts,
-    RunMeta,
     SessionEvent,
-    SessionMeta,
 )
 from services.edge.session.writer import FileSessionWriter, device_id, redact
+from tests.edge.fakes import EvenFrameDetector, OneTrackPerDetection, meta, sample_run_meta
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -53,33 +52,6 @@ def session_files(out: Path) -> tuple[dict, dict, list[dict], list[dict]]:
     assert run_dir.name == session["runs"][0]
     run = load(run_dir / "run.json")
     return session, run, rows(run_dir / "frames.csv"), rows(run_dir / "tracks.csv")
-
-
-class EvenFrameDetector:
-    """One person on even seq, none on odd: both kinds of frames must get a row."""
-
-    threshold, det_size, device = 0.5, 384, "cuda"  # "cuda" must be written as cuda:0
-
-    def __init__(self, fail_at: int | None = None):
-        self.fail_at = fail_at
-
-    def detect(self, frame):
-        if frame.seq == self.fail_at:
-            raise RuntimeError("inference exploded")
-        if frame.seq % 2:
-            return NO_DETECTIONS
-        box = np.array([[10.0, 20.0, 110.0, 220.0]], np.float32)
-        return Detections(box, np.array([0.9], np.float32), np.array([1], np.int64))
-
-
-class OneTrackPerDetection:
-    params = {"lost_track_buffer": 30}
-
-    def update(self, dets, frame):
-        return [
-            TrackObs(i + 1, tuple(float(v) for v in box), float(c), None)
-            for i, (box, c) in enumerate(zip(dets.xyxy, dets.confidence, strict=True))
-        ]
 
 
 def run_main(monkeypatch, out: Path, *args: str, detector=None) -> int:
@@ -404,9 +376,9 @@ def test_unsafe_ids_are_rejected_by_the_cli(tmp_path, capsys, flag, bad):
 @pytest.mark.parametrize("bad", ["../evil", "a/b", "a b", "", "x" * 33])
 def test_writer_refuses_an_unsafe_camera_id(tmp_path, bad):
     with pytest.raises(ValueError, match="camera_id"):
-        FileSessionWriter(tmp_path).start(replace(meta(), camera_id=bad), run_meta())
+        FileSessionWriter(tmp_path).start(replace(meta(), camera_id=bad), sample_run_meta())
     with pytest.raises(ValueError, match="group_id"):
-        FileSessionWriter(tmp_path).start(replace(meta(), group_id="a b"), run_meta())
+        FileSessionWriter(tmp_path).start(replace(meta(), group_id="a b"), sample_run_meta())
     assert not any(tmp_path.iterdir())  # nothing was created
 
 
@@ -467,28 +439,6 @@ def test_report_of_a_no_detect_session(monkeypatch, tmp_path, clips):
 # -- the writer on its own -------------------------------------------------------------------
 
 
-def meta(ref: str = "fake", kind: str = "file", link: str | None = "file") -> SessionMeta:
-    info = SourceInfo(kind, ref, 8, 8, None, link)
-    return SessionMeta(str(uuid.uuid4()), str(uuid.uuid4()), "2026-10-13T12:00:00Z", info, False)
-
-
-def run_meta(ref: str = "fake", kind: str = "file") -> RunMeta:
-    packages = {"opencv": "5.0.0", "numpy": "2.0.0", "torch": None, "supervision": None}
-    return RunMeta(
-        str(uuid.uuid4()),
-        "live",
-        {"kind": kind, "ref": ref, "sha256": None, "requested_width": None,
-         "requested_height": None},
-        None,
-        None,
-        {"lost_reads": 30, "lost_secs": 2.0, "frozen_diff": 0.5, "frozen_secs": 2.0,
-         "dark_level": 20.0, "dark_secs": 1.0},
-        {"python": "3.11.9", "platform": "test", "device": None, "gpu": None,
-         "packages": packages},
-        "2026-10-13T12:00:00Z",
-    )  # fmt: skip
-
-
 def rec(seq: int) -> FrameRecord:
     return FrameRecord(seq, 0.1 * seq, 0.1 * seq, 0.1 * seq + 0.05, 0, 0, 0)
 
@@ -498,7 +448,7 @@ COUNTS = RunCounts(3, 3, 0, 0)
 
 def started(out: Path, **kw) -> tuple[FileSessionWriter, Path]:
     w = FileSessionWriter(out, **kw)
-    m, r = meta(), run_meta()
+    m, r = meta(), sample_run_meta()
     w.start(m, r)
     w.set_t0(time.perf_counter(), "2026-10-13T12:00:01Z")
     return w, w.dir / "runs" / r.run_id
@@ -511,7 +461,7 @@ def test_two_runs_never_share_a_folder(tmp_path):
     assert w1.dir != w2.dir and run1 != run2
     w1.close("ended", COUNTS)
     w2.close("ended", COUNTS)
-    m, r = meta(), run_meta()
+    m, r = meta(), sample_run_meta()
     FileSessionWriter(tmp_path).start(m, r)
     with pytest.raises(FileExistsError):
         FileSessionWriter(tmp_path).start(m, r)
@@ -613,7 +563,7 @@ def test_redact(ref, expected):
 def test_stream_credentials_never_reach_the_files(tmp_path):
     url = "rtsp://user:secret@10.0.0.5:554/live"
     w = FileSessionWriter(tmp_path)
-    r = run_meta(url, "stream")
+    r = sample_run_meta(url, "stream")
     w.start(meta(url, "stream", "wifi"), r)
     w.close("ended", COUNTS)
     for path in w.dir.rglob("*.json"):
@@ -736,7 +686,7 @@ def test_run_json_round_trips_filled_track_r_blocks_and_t0_mono(tmp_path):
     import dataclasses
 
     filled = dataclasses.replace(
-        run_meta(),
+        sample_run_meta(),
         checks=[
             {
                 "check": "cameras",

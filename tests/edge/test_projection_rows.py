@@ -14,8 +14,9 @@ from services.edge.perception.types import TrackObs
 from services.edge.reports.build import build_report
 from services.edge.session.types import RunCounts
 from services.edge.session.writer import FileSessionWriter
+from tests.edge.fakes import meta, sample_run_meta
 from tests.edge.test_report import dense, make_run, track_of, value
-from tests.edge.test_session import meta, rec, run_meta
+from tests.edge.test_session import rec
 
 HORIZON = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, -0.01, 1.0]]  # w = 1 - 0.01 * y, 0 at y = 100
 
@@ -33,7 +34,7 @@ def calibration(matrix=HORIZON):
 def tracks_csv(tmp_path, boxes, matrix=HORIZON):
     writer = FileSessionWriter(tmp_path)
     document = calibration(matrix)
-    run = replace(run_meta(), calibration=document)
+    run = replace(sample_run_meta(), calibration=document)
     writer.start(meta(), run, CalibrationPositions(document))
     writer.set_t0(time.perf_counter(), "2026-10-13T12:00:01Z")
     for seq, box in enumerate(boxes):
@@ -74,7 +75,7 @@ HUGE = [[1e308, 0.0, 0.0], [0.0, 1e308, 0.0], [0.0, 0.0, 1.0]]
 def run_calibrated(tmp_path, boxes, positions, matrix=HORIZON):
     """Frames and tracks through a real writer; returns (writer, session.json, frames, tracks)."""
     writer = FileSessionWriter(tmp_path)
-    run = replace(run_meta(), calibration=calibration(matrix))
+    run = replace(sample_run_meta(), calibration=calibration(matrix))
     writer.start(meta(), run, positions)
     writer.set_t0(time.perf_counter(), "2026-10-13T12:00:01Z")
     for seq, box in enumerate(boxes):
@@ -139,7 +140,7 @@ def test_a_raising_projector_gives_empty_positions_and_one_rate_limited_event(tm
 
 def test_a_bad_track_row_does_not_stop_the_writer_or_lose_its_frame(tmp_path):
     writer = FileSessionWriter(tmp_path)
-    run = replace(run_meta(), calibration=calibration())
+    run = replace(sample_run_meta(), calibration=calibration())
     writer.start(meta(), run, CalibrationPositions(calibration()))
     writer.set_t0(time.perf_counter(), "2026-10-13T12:00:01Z")
     for seq in range(3):
@@ -167,6 +168,6 @@ def test_the_writer_does_not_import_the_calibration_package():
 
 
 def test_a_calibrated_run_without_positions_is_refused(tmp_path):
-    run = replace(run_meta(), calibration=calibration())
+    run = replace(sample_run_meta(), calibration=calibration())
     with pytest.raises(ValueError, match="needs positions"):
         FileSessionWriter(tmp_path).start(meta(), run)

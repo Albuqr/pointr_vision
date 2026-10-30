@@ -9,7 +9,8 @@ import time
 import pytest
 
 from services.edge import main as cli
-from tests.edge.test_session import EvenFrameDetector, run_main, session_files, validate
+from tests.edge.fakes import EvenFrameDetector
+from tests.edge.test_session import run_main, session_files, validate
 
 
 class SlowDetector(EvenFrameDetector):

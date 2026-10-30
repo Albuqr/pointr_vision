@@ -12,9 +12,10 @@ from services.edge.capture.sources import FileSource
 from services.edge.capture.types import HealthEvent, utc_now
 from services.edge.contract import VIDEO_FILE
 from services.edge.recording.recorder import FileRecorder
-from services.edge.session.types import RunMeta, SessionMeta
+from services.edge.session.types import SessionMeta
 from services.edge.session.writer import FileSessionWriter, device_id
-from tests.edge.test_session import EvenFrameDetector, OneTrackPerDetection, session_files
+from tests.edge.fakes import EvenFrameDetector, OneTrackPerDetection, sample_run_meta
+from tests.edge.test_session import session_files
 
 
 def run_pipeline(clip: Path, out: Path, *, detector=None, tracker=None, record=False):
@@ -36,30 +37,11 @@ def run_pipeline(clip: Path, out: Path, *, detector=None, tracker=None, record=F
     meta = SessionMeta(
         str(uuid.uuid4()), device_id(out), utc_now(), info, record, "cam1", None, None
     )
-    pipeline.open_session(_run(), meta=meta)
+    pipeline.open_session(sample_run_meta("clip"), meta=meta)
     pipeline.start()
     pipeline.done.wait(30)
     status = pipeline.stop("ended")
     return pipeline, status, reported
-
-
-def _run() -> RunMeta:
-    return RunMeta(
-        run_id=str(uuid.uuid4()),
-        mode="live",
-        input={
-            "kind": "file",
-            "ref": "clip",
-            "sha256": None,
-            "requested_width": None,
-            "requested_height": None,
-        },
-        detector=None,
-        tracker=None,
-        health={},
-        runtime={},
-        started_at=utc_now(),
-    )
 
 
 def test_a_clip_run_through_the_pipeline_leaves_a_complete_session(clips, tmp_path):

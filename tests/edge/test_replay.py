@@ -16,6 +16,7 @@ import pytest
 
 from services.edge import contract
 from services.edge.main import EXIT_OPEN_FAILED
+from tests.edge.fakes import sample_run_meta
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -172,22 +173,6 @@ def test_session_without_a_video_hash_still_replays_with_a_warning(clips, tmp_pa
     assert len(list((folder / "runs").iterdir())) == 2
 
 
-def replay_meta(run_id: str):
-    from services.edge.session.types import RunMeta
-
-    return RunMeta(
-        run_id=run_id,
-        mode="replay",
-        input={"kind": "file", "ref": "x", "sha256": "0" * 64,
-               "requested_width": None, "requested_height": None},
-        detector=None,
-        tracker=None,
-        health={},
-        runtime={"python": "3", "platform": "p", "device": None, "gpu": None, "packages": {}},
-        started_at="2026-10-20T00:00:00Z",
-    )  # fmt: skip
-
-
 def counts():
     from services.edge.session.types import RunCounts
 
@@ -203,7 +188,7 @@ def test_interrupted_replay_is_visible_in_session_json(clips, tmp_path):
     before = json.loads((folder / "session.json").read_text())
     w = FileSessionWriter(tmp_path)
     run_id = "22222222-2222-4222-8222-222222222222"
-    w.start_run(folder, replay_meta(run_id))
+    w.start_run(folder, sample_run_meta(run_id=run_id, mode="replay", sha256="0" * 64))
     w.event(SessionEvent("2026-10-20T00:00:01Z", 1.0, "source_lost", "noise: not kept"))
     w.event(SessionEvent("2026-10-20T00:00:02Z", 2.0, "interrupted", "Ctrl+C"))
     w.close("interrupted", counts())
@@ -222,7 +207,7 @@ def test_replay_that_ends_badly_without_an_event_gets_one(clips, tmp_path):
     folder = record(clips, tmp_path)
     w = FileSessionWriter(tmp_path)
     run_id = "33333333-3333-4333-8333-333333333333"
-    w.start_run(folder, replay_meta(run_id))
+    w.start_run(folder, sample_run_meta(run_id=run_id, mode="replay", sha256="0" * 64))
     w.close("error", counts())
     (event,) = json.loads((folder / "session.json").read_text())["events"]
     assert event["kind"] == "error" and event["detail"].startswith(f"replay {run_id}:")
@@ -234,8 +219,10 @@ def test_two_replays_of_one_session_keep_both_run_ids(clips, tmp_path):
     folder = record(clips, tmp_path)
     a, b = FileSessionWriter(tmp_path), FileSessionWriter(tmp_path)
     ids = ["44444444-4444-4444-8444-444444444444", "55555555-5555-4555-8555-555555555555"]
-    a.start_run(folder, replay_meta(ids[0]))
-    b.start_run(folder, replay_meta(ids[1]))  # started while a is still open
+    a.start_run(folder, sample_run_meta(run_id=ids[0], mode="replay", sha256="0" * 64))
+    b.start_run(
+        folder, sample_run_meta(run_id=ids[1], mode="replay", sha256="0" * 64)
+    )  # started while a is still open
     b.close("ended", counts())
     a.close("ended", counts())  # a's stale copy must not drop b's run
     runs = json.loads((folder / "session.json").read_text())["runs"]

@@ -16,7 +16,8 @@ from services.edge import main as cli
 from services.edge.capture.sources import DEFAULT_CAPTURE_SIZE
 from services.edge.capture.types import Frame, SourceInfo
 from tests.app.test_api import FakeLauncher
-from tests.edge.test_session import EvenFrameDetector, run_main, session_files
+from tests.edge.fakes import EvenFrameDetector
+from tests.edge.test_session import run_main, session_files
 
 ROOT = Path(__file__).resolve().parents[2]
 

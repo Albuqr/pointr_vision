@@ -125,7 +125,7 @@ def test_the_launcher_passes_the_problem_to_the_recorder():
 
 
 def test_the_recorder_writes_the_problem_as_a_session_event(monkeypatch, tmp_path, clips):
-    from tests.edge.test_session import EvenFrameDetector
+    from tests.edge.fakes import EvenFrameDetector
 
     out = tmp_path / "sessions"
     code = run_main(

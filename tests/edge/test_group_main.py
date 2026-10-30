@@ -8,8 +8,8 @@ from services.edge import contract, group_main
 from services.edge.camera_pipeline import CameraPipeline
 from services.edge.capture.sources import FileSource
 from services.edge.main import EXIT_INTERRUPTED, EXIT_OPEN_FAILED, StopRequest
+from tests.edge.fakes import EvenFrameDetector, OneTrackPerDetection
 from tests.edge.test_group_runner import camera_files
-from tests.edge.test_session import EvenFrameDetector, OneTrackPerDetection
 
 
 def camera(camera_id, source, out, *extra):

@@ -22,10 +22,9 @@ from services.edge.perception.loop import NO_DETECTIONS
 from services.edge.perception.types import Detections
 from services.edge.session import writer as writer_mod
 from services.edge.session.writer import FileSessionWriter
+from tests.edge.fakes import EvenFrameDetector, OneTrackPerDetection
 from tests.edge.test_calibration_size import calibration_file
 from tests.edge.test_session import (
-    EvenFrameDetector,
-    OneTrackPerDetection,
     load,
     rows,
     validate,

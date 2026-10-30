@@ -16,6 +16,7 @@ from services.edge.main import parse_args, run_meta
 from services.edge.matcher import CourtMatcher
 from services.edge.perception.types import TrackObs
 from services.edge.session import writer as writer_mod
+from tests.edge.fakes import EvenFrameDetector, OneTrackPerDetection
 from tests.edge.test_group_runner import (
     SAME_PLACE,
     TOLERANT,
@@ -23,7 +24,7 @@ from tests.edge.test_group_runner import (
     calibration_for,
     camera_files,
 )
-from tests.edge.test_session import EvenFrameDetector, OneTrackPerDetection, validate
+from tests.edge.test_session import validate
 
 FAILED_READS = 40  # more than HealthConfig().lost_reads: the camera is declared lost
 

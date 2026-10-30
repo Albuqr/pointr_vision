@@ -21,8 +21,9 @@ from services.edge.perception.loop import NO_DETECTIONS
 from services.edge.perception.types import Detections
 from services.edge.replay.group import live_matcher, resolve_group
 from services.edge.replay.resolve import ReplayError
+from tests.edge.fakes import OneTrackPerDetection
 from tests.edge.test_group_runner import calibration_for
-from tests.edge.test_session import OneTrackPerDetection, load, rows, validate
+from tests.edge.test_session import load, rows, validate
 
 ROOT = Path(__file__).resolve().parents[2]
 ARGS = parse_args(["--source", "unused"])  # the CLI's defaults
