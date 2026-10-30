@@ -678,6 +678,30 @@ def test_error_events_are_counted_and_fail_the_exit_code(tmp_path, capsys):
     assert code == 1
 
 
+@pytest.mark.parametrize(
+    "mode,expected_status",
+    [("null-status", "unknown"), ("null-status-deaf", "unknown (killed)")],
+)
+def test_b7_launcher_summarises_null_status(tmp_path, capsys, mode, expected_status):
+    lau = launcher(tmp_path, {"cam1": mode}, stop_timeout=0.8)
+    code = run_then_ctrl_c(lau, all_ticking(tmp_path, ["cam1"]))
+    output = capsys.readouterr().out
+    table = output[output.index("result:") :].split("report (per camera")[0]
+    assert "cam1" in table
+    assert expected_status in table
+    assert code == 1
+
+
+def test_b7_launcher_skips_and_notes_non_object_events(tmp_path, capsys):
+    lau = launcher(tmp_path, {"cam1": "damaged-events"})
+    code = run_then_ctrl_c(lau, all_ticking(tmp_path, ["cam1"]))
+    output = capsys.readouterr().out
+    table = output[output.index("result:") :].split("report (per camera")[0]
+    assert "cam1" in table and "interrupted" in table
+    assert "1 (skipped 4 non-object events)" in table
+    assert code == 1
+
+
 def test_a_dead_launcher_stops_every_real_child_cleanly(tmp_path, long_clips):
     """The launcher is killed hard (the console closed, taskkill): its pipes close, and each
     child ends its session as interrupted by itself instead of staying 'running'."""

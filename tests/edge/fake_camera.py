@@ -15,6 +15,9 @@ MODES
   deaf     prints the session line and never reacts to stop (it has to be killed)
   noisy    prints a character an ascii console cannot encode, and 120 KB, before session:
   errored  like ok, but its session.json holds an error event when it stops
+  null-status  like ok, but ends with a null status
+  null-status-deaf  like deaf, but leaves a null status
+  damaged-events  like errored, with non-object entries mixed into the events
 """
 
 import json
@@ -46,13 +49,15 @@ def watch_stdin() -> None:
     stop.set()
 
 
-if mode != "deaf":
+if mode not in ("deaf", "null-status-deaf"):
     threading.Thread(target=watch_stdin, daemon=True).start()
 
 session = out / f"{camera_id}_{uuid.uuid4()}"
 run_dir = session / "runs" / str(uuid.uuid4())
 run_dir.mkdir(parents=True)
 doc = {"camera_id": camera_id, "status": "running", "events": []}
+if mode == "null-status-deaf":
+    doc["status"] = None
 (session / "session.json").write_text(json.dumps(doc))
 rows = ["seq,t_recv,t_proc_start,t_proc_end"] + [
     f"{i},{i * 0.1},{i * 0.1},{i * 0.1 + 0.05}" for i in range(11)
@@ -74,8 +79,19 @@ while not stop.wait(0.05):
     print(f"tick {n}", flush=True)
 
 doc["status"] = "interrupted"
+if mode == "null-status":
+    doc["status"] = None
 if mode == "errored":
     doc["events"] = [{"kind": "error", "detail": "capture did not stop in time"}]
+if mode == "damaged-events":
+    doc["events"] = [
+        None,
+        "damaged",
+        7,
+        [],
+        {"kind": "error", "detail": "capture did not stop in time"},
+        {"kind": "stopped", "detail": "stop requested"},
+    ]
 (session / "session.json").write_text(json.dumps(doc))
 (out / f"stopped_{camera_id}").write_text(str(time.time()))
 print(f"session interrupted: {session}", flush=True)
