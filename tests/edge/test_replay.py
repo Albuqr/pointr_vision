@@ -265,7 +265,7 @@ def test_T2_replay_preserves_original_session_metadata(tmp_path, when, damaged):
     path.write_text(json.dumps(original), encoding="utf-8-sig")
     writer = FileSessionWriter(tmp_path)
     run_id = "22222222-2222-4222-8222-222222222222"
-    writer.start_run(tmp_path, replay_meta(run_id))
+    writer.start_run(tmp_path, sample_run_meta(run_id=run_id, mode="replay", sha256="0" * 64))
     try:
         if when == "merge":
             current = {**original, "runs": [run_id]}
@@ -297,14 +297,16 @@ def test_T2_replay_refuses_unreadable_mutation_fields_without_overwriting(
     writer = FileSessionWriter(tmp_path)
     if when == "merge":
         path.write_text(json.dumps(original), encoding="utf-8")
-        writer.start_run(tmp_path, replay_meta(run_id))
+        writer.start_run(tmp_path, sample_run_meta(run_id=run_id, mode="replay", sha256="0" * 64))
         original["runs"] = [run_id]
     original[key] = value
     path.write_text(json.dumps(original), encoding="utf-8-sig")
     before = path.read_bytes()
     with pytest.raises(SessionDamaged, match=f"session damaged:.*{key}"):
         if when == "startup":
-            writer.start_run(tmp_path, replay_meta(run_id))
+            writer.start_run(
+                tmp_path, sample_run_meta(run_id=run_id, mode="replay", sha256="0" * 64)
+            )
         else:
             writer.close("ended", counts())
     assert path.read_bytes() == before
