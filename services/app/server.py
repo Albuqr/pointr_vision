@@ -80,6 +80,8 @@ class Studio:
         for session_file in Path(self.out).glob("*/session.json"):
             try:
                 session = json.loads(session_file.read_text(encoding="utf-8"))
+                if not isinstance(session, dict):
+                    continue
                 if session.get("group_id") != group_id or session.get("status") != "running":
                     continue
                 session["status"] = "interrupted"
@@ -328,6 +330,13 @@ class Studio:
             if session_dir:
                 try:
                     session = json.loads((session_dir / "session.json").read_text(encoding="utf-8"))
+                    if not isinstance(session, dict):
+                        session = {
+                            "status": "error",
+                            "events": [
+                                {"kind": "error", "detail": "session.json: not a JSON object"}
+                            ],
+                        }
                 except (OSError, ValueError):
                     pass
             status = session.get("status", "starting" if child.running else "error")

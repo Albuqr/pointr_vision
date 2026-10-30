@@ -36,7 +36,7 @@ def _find_session(target: str, out_dir: Path) -> Path | None:
             doc = json.loads((folder / "session.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        if doc.get("session_id") == target:
+        if isinstance(doc, dict) and doc.get("session_id") == target:
             return folder
     return None
 
@@ -55,6 +55,8 @@ def resolve_replay(target: str, out_dir: Path | str) -> ReplayTarget:
         raise ReplayError(f"no video file, session folder or session id {target!r}")
     try:
         session = json.loads((folder / "session.json").read_text(encoding="utf-8"))
+        if not isinstance(session, dict):
+            raise ValueError("not a JSON object")
     except (OSError, ValueError) as e:
         raise ReplayError(f"{folder} has no readable session.json: {e}") from e
     # the file the session says it recorded (an older session may be a video.mp4), inside its folder
