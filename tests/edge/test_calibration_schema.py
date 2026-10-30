@@ -140,6 +140,17 @@ def test_a_calibration_saved_under_an_earlier_version_still_loads(version):
     assert validate_calibration(saved)["calibration_id"] == EXAMPLE["calibration_id"]
 
 
+@pytest.mark.parametrize("version", ["0.14.0", "0.15.0", "0.16.0", "0.17.0", "0.18.0"])
+def test_a_calibration_saved_under_0_14_to_0_18_validates_and_loads(version, tmp_path):
+    """Those bumps changed run.json, sessions and API fields, not the calibration format (B6)."""
+    saved = copy.deepcopy(EXAMPLE)
+    saved["contract_version"] = version
+    assert validate_calibration(saved)["contract_version"] == version
+    path = tmp_path / "calibration.json"
+    path.write_text(json.dumps(saved), encoding="utf-8")
+    assert load_calibration(path)["calibration_id"] == EXAMPLE["calibration_id"]
+
+
 def test_half_court_calibration_schema_accepts_type_and_bounds():
     half = half_calibration_for(half_floor_points(clustered=False))
     Draft202012Validator(SCHEMA).validate(half)
