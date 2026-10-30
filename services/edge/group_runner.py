@@ -34,6 +34,7 @@ from services.edge.camera_pipeline import (
 from services.edge.capture.health import HealthConfig
 from services.edge.capture.types import Frame, FrameSource, HealthEvent, SourceInfo, utc_now
 from services.edge.contract import UI_STOP_DETAIL
+from services.edge.main import hold_ctrl_c, release_ctrl_c
 from services.edge.matcher import CourtMatcher, CrossCameraMatcher, LocalTrack
 from services.edge.perception.types import Detections, Detector, Tracker, TrackObs
 from services.edge.recording.recorder import FileRecorder
@@ -169,8 +170,9 @@ def run_group(
     cannot be written) closes every source, ends the sessions already open with an event and
     status error, and is raised. A Ctrl+C or a failure while running ends every session (status
     interrupted or error, with an event) and is raised again, except Studio's stop (`ui_stop()`
-    true when the Ctrl+C arrives), a normal end with a `stopped` event (D-049). A calibration that
-    cannot be used is an event, and that camera records uncalibrated. `on_session` gets each
+    true when the Ctrl+C arrives), a normal end with a `stopped` event (D-049). A Ctrl+C while
+    the sessions open waits until they are all open, then ends them the same way. A calibration
+    that cannot be used is an event, and that camera records uncalibrated. `on_session` gets each
     camera's pipeline once its session is open, before any camera starts. `matcher` links the
     cameras' tracks (default: a CourtMatcher with its default parameters); its parameters go into
     every run's group block. A camera whose source is lost keeps its session open and the others
@@ -190,6 +192,8 @@ def run_group(
     report = on_event or (lambda camera_id, ev, t0: None)
     infos: list[SourceInfo] = []
     opened: list[CameraPipeline] = []  # sessions started
+    held = None
+    stop_early = threading.Event()
     try:
         for cam in cameras:
             info = cam.source.open()
@@ -256,6 +260,8 @@ def run_group(
             else matcher.record_params(),  # no detector, no matching
         }
         device = device_id(out)
+        # a stop from here on waits until every session is open, so it ends them all, not half
+        held = hold_ctrl_c(stop_early)
         for i, p in enumerate(pipelines):
             run = dataclasses.replace(runs[i], group=group)
             if replaying:
@@ -279,7 +285,9 @@ def run_group(
                 p.log_event(HealthEvent("appearance_only", utc_now(), None, APPEARANCE_ONLY))
             if on_session:
                 on_session(camera_ids[i], p)
+        release_ctrl_c(held)
     except BaseException as e:
+        release_ctrl_c(held)
         for p in opened:  # stop() closes its source
             p.log_event(
                 HealthEvent("error", utc_now(), time.perf_counter(), f"group did not start: {e!r}")
@@ -292,6 +300,8 @@ def run_group(
     stop = stop or threading.Event()
     status = "ended"
     try:
+        if stop_early.is_set():  # held while the sessions opened: one shutdown path ends them
+            raise KeyboardInterrupt
         for p in pipelines:
             p.start()
         while not all(p.done.is_set() for p in pipelines) and not stop.wait(0.1):
