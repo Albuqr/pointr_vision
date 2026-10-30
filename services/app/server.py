@@ -203,7 +203,11 @@ class Studio:
         log.set_error(message, "\n".join(lines))
         failure_kind = (
             "source_open_failed"
-            if failure and ("open" in failure.lower() or "source" in failure.lower())
+            if failure
+            and (
+                failure == "cannot open source"
+                or failure.startswith(("cannot open source ", "cannot open source:"))
+            )
             else "start_failed"
         )
         log.add_event(failure_kind if failure else "error", failure or message)
