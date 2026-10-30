@@ -7,6 +7,11 @@ camera go through it in turn. Each camera keeps its own calibration. Track IDs a
 the group run: the cross-camera matcher (R2a 05, `matcher.py`) gives the same ID to a person two
 calibrated cameras both see (or, without a court position, who looks alike: R2a 06), and each
 tracks row says how its track was linked.
+
+Failures (R2a 07): a camera's stream loss or outage is its own (its source_lost and
+source_recovered events); the other cameras keep recording, and a camera that comes back re-links
+through the matcher. A failure in shared code (the detector, the matcher) is a SharedCodeError and
+ends every camera through the one shutdown path.
 """
 
 import dataclasses
@@ -34,13 +39,17 @@ from services.edge.recording.recorder import FileRecorder
 from services.edge.session.types import RunMeta, SessionMeta
 from services.edge.session.writer import FileSessionWriter, device_id
 
-# the appearance_only event's detail (DATA_CONTRACTS section 2, D-059); a calibration that could
+# the appearance_only event's detail (DATA_CONTRACTS section 2, D-060); a calibration that could
 # not be used has its own error event
 APPEARANCE_ONLY = (
     "no valid calibration: tracks link to the other cameras by clothing colour and box height only"
 )
 
 OnGroupEvent = Callable[[str, HealthEvent, float | None], None]  # camera_id, event, run's t0
+
+
+class SharedCodeError(RuntimeError):
+    """A failure in code every camera of the group depends on: it ends the whole group."""
 
 
 @dataclass(frozen=True)
@@ -62,7 +71,10 @@ class SharedDetector:
 
     def detect(self, frame: Frame) -> Detections:
         with self._lock:
-            return self._detector.detect(frame)
+            try:
+                return self._detector.detect(frame)
+            except Exception as e:
+                raise SharedCodeError(f"detector: {e!r}") from e
 
 
 class CameraTracker:
@@ -93,18 +105,24 @@ class CameraTracker:
 
     def update(self, dets: Detections, frame: Frame) -> list[TrackObs]:
         tracks = self._tracker.update(dets, frame)
-        linked = self._matcher.update(  # also with no tracks: the camera reported
-            self._camera_id,
-            frame.t_recv,
-            [
-                LocalTrack(t.track_id, self._court_xy(t.xyxy, frame), describe(frame.image, t.xyxy))
-                for t in tracks
-            ],
-        )
+        local = [
+            LocalTrack(t.track_id, self._court_xy(t.xyxy, frame), describe(frame.image, t.xyxy))
+            for t in tracks
+        ]
+        try:  # also with no tracks: the camera reported
+            linked = self._matcher.update(self._camera_id, frame.t_recv, local)
+        except Exception as e:
+            raise SharedCodeError(f"matcher: {e!r}") from e
         return [
             dataclasses.replace(t, track_id=g.group_id, link=g.link)
             for t, g in zip(tracks, linked, strict=True)
         ]
+
+
+def _raise_shared_failure(pipelines: list[CameraPipeline]) -> None:
+    for p in pipelines:
+        if isinstance(p.processor.error, SharedCodeError):
+            raise p.processor.error
 
 
 def run_group(
@@ -133,7 +151,9 @@ def run_group(
     cannot be used is an event, and that camera records uncalibrated. `on_session` gets each
     camera's pipeline once its session is open, before any camera starts. `matcher` links the
     cameras' tracks (default: a CourtMatcher with its default parameters); its parameters go into
-    every run's group block."""
+    every run's group block. A camera whose source is lost keeps its session open and the others
+    run on; a SharedCodeError in any camera ends every session with status error and the failure as
+    an event, and is raised."""
     camera_ids = [c.camera_id for c in cameras]
     if len(set(camera_ids)) != len(camera_ids):
         raise ValueError(f"a camera_id is given twice: {camera_ids}")
@@ -234,7 +254,8 @@ def run_group(
         for p in pipelines:
             p.start()
         while not all(p.done.is_set() for p in pipelines) and not stop.wait(0.1):
-            pass
+            _raise_shared_failure(pipelines)
+        _raise_shared_failure(pipelines)  # also when the failing camera was the last one running
     except KeyboardInterrupt:
         if ui_stop():  # Studio's stop: a normal end (D-049)
             for p in pipelines:

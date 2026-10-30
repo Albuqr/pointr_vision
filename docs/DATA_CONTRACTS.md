@@ -113,7 +113,7 @@ Event `t_mono` is `null` for events that precede the run's `t0`, such as
 Event kinds: `source_open_failed`, `source_lost`, `source_recovered`,
 `frozen_frames`, `dark_frames`, `writer_backlog`, `recorder_backlog`, `interrupted`, `error`,
 `camera_gap`, `sensor_outage`, `startup_check_failed`, `rim_drift` (those four are 0.11.0, Track R),
-`stopped` (0.12.0, D-049), `appearance_only` (0.20.0, D-059).
+`stopped` (0.12.0, D-049), `appearance_only` (0.20.0, D-060).
 `appearance_only` is written once, when the session opens (so `t_mono` is `null`), for a camera of a group run of
 two or more cameras that has no valid calibration and a matcher running: its tracks cannot be linked by court
 position, so they link to the other cameras by appearance only (section 5). `detail` says why
@@ -256,7 +256,7 @@ time between the two readings, and how old a camera's last update may be and sti
 were lost) and `latency_s` (an object, `camera_id` to the camera latency in s that was subtracted from that
 camera's frame receive time to get group time; `0.0` for a camera with no measured latency). They are starting
 values, not measured ones.
-The appearance fallback (0.20.0, D-059, R2a 06) adds `appearance_max_distance` (largest appearance distance between
+The appearance fallback (0.20.0, D-060, R2a 06) adds `appearance_max_distance` (largest appearance distance between
 two tracks that are linked by appearance: the mean of the Bhattacharyya distances, 0 same to 1 disjoint, of the
 HSV colour histograms of the upper and of the lower part of the two boxes) and `max_height_diff` (largest
 relative difference `|a - b| / max(a, b)` of the two boxes' heights, each a fraction of its frame's height). They
@@ -323,7 +323,7 @@ change from `unshared` to `position` once a second camera sees the person. A fil
 0.14.0 has no `link` column; read it as `unshared`.
 Rows of a track the court-position matcher has linked to a track of another camera carry `position` from
 the frame where the link was made. A track without a court position (its camera has no valid calibration, a frame
-of another size, a point that cannot be projected) is linked by appearance instead (0.20.0, D-059): clothing colour
+of another size, a point that cannot be projected) is linked by appearance instead (0.20.0, D-060): clothing colour
 of the upper and lower box and box height, never pixel position, within `appearance_max_distance` and
 `max_height_diff` (section 3); its group's rows then carry `appearance`. `link` belongs to the track's group, so it
 names the cue of the latest link into that group. A track that is lost and replaced by a new local track of the

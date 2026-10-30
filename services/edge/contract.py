@@ -43,7 +43,7 @@ UNSHARED = "unshared"  # the link of every track row of a run without a group ru
 TRACK_LINKS = ("position", "appearance", UNSHARED)  # tracks.csv link (0.14.0, D-051)
 # Names in run.json group.params when the court-position matcher ran (0.19.0, D-058); the matcher's
 # MatcherParams fields plus the per-camera latency it used; the appearance fallback's two (0.20.0,
-# D-059). A test compares them with the doc.
+# D-060). A test compares them with the doc.
 MATCHER_PARAMS = (
     "match_distance_m", "max_offset_s", "lost_s", "max_speed_mps",
     "appearance_max_distance", "max_height_diff", "latency_s",

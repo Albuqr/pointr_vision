@@ -72,7 +72,7 @@ pointr/
       matcher.py             the cross-camera matcher (R2a 05, D-058): local tracks with court
                              positions and appearance in, group track IDs and links out;
                              pure, no clock
-      appearance.py          a track's appearance descriptor (R2a 06, D-059): clothing colour
+      appearance.py          a track's appearance descriptor (R2a 06, D-060): clothing colour
                              histograms and box height, OpenCV and numpy only
       group_main.py          a group's one process: main.py's job for every camera of the
                              group, through the group runner (R2a 04, D-056)
@@ -203,7 +203,12 @@ capture thread ──▶ proc_queue (maxsize=1, drop oldest, count drops) ──
   launcher dies, becomes the Ctrl+C path of that process: the same shutdown as above). A
   `stop ui` line (Studio's stop button, D-049) takes the same path but ends the session `ended`
   with a `stopped` event instead of `interrupted`. A child's `session.json` carries `camera_id`
-  and `group_id`.
+  and `group_id`. In a group (R2a 07, D-059) a camera's stream loss or outage stays that camera's
+  own (`source_lost` / `source_recovered`), the others keep recording, and a camera that comes
+  back re-links through the matcher; a failure in shared code (detector, matcher) ends every
+  camera through the shutdown path above, each session with status `error` and the failure as
+  an `error` event. A failure of one camera's own code (its tracker, its writer) ends only that
+  camera, as with one process per camera.
 
 ## 6. Local storage
 
