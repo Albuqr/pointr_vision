@@ -27,8 +27,6 @@ ALLOWLIST = {
     # planned in .scratch/architecture-deepening; a ticket removes its entry when it adds the file
     "services/edge/session/folder.py": "created by T2 (#64)",
     "tests/edge/test_session_folder.py": "created by T2 (#64)",
-    "services/edge/calibration/intake.py": "created by T5 (#67)",
-    "tests/edge/test_calibration_intake.py": "created by T5 (#67)",
     "services/edge/child_protocol.py": "created by T6 (#68)",
     "services/edge/run/perception.py": "created by T9 (#71)",
     "services/edge/run/stop.py": "created by T9 (#71)",
