@@ -571,6 +571,11 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
             return run_replay(args, group)
     ref = args.replay or args.source
     replay = None
+    offer = FromFile(args.calibration) if args.calibration else None
+    if offer is None and args.calibration_failed:
+        offer = Refused(args.calibration_failed)
+    elif offer is None and args.calibration_problem:
+        offer = NotUsed(args.calibration_problem)
     try:
         if args.replay:
             replay = resolve_replay(args.replay, args.out)
@@ -582,6 +587,22 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
                 )
             args.link = "file"
             args.camera_id = args.camera_id or replay.camera_id
+            if offer is None and replay.session_dir is not None:
+                from services.edge.session.folder import SessionDamaged, read_session
+
+                saved = read_session(replay.session_dir)
+                try:
+                    if not saved.runs or saved.runs[0] is None:
+                        raise ReplayError("the recorded session has no readable live run")
+                    live = saved.runs[0]
+                    block = live.require().get("calibration")
+                except SessionDamaged as exc:
+                    raise ReplayError(str(exc)) from exc
+                # Tolerant snapshots replace malformed optional fields with None; damage is
+                # a refused offer, while a genuinely absent calibration stays uncalibrated.
+                if any("calibration" in problem for problem in live.problems):
+                    block = {}
+                offer = FromRun(block) if block is not None else None
             source = FileSource(replay.video, realtime=False)  # as fast as processing allows
         else:
             source = open_source(args.source, (args.width, args.height))
@@ -617,18 +638,6 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
         return open_failed(ref, e)
 
     info = dataclasses.replace(info, link=args.link)
-    offer = FromFile(args.calibration) if args.calibration else None
-    if offer is None and args.calibration_failed:
-        offer = Refused(args.calibration_failed)
-    elif offer is None and args.calibration_problem:
-        offer = NotUsed(args.calibration_problem)
-    elif offer is None and replay is not None and replay.session_dir is not None:
-        from services.edge.session.folder import read_session
-
-        saved = read_session(replay.session_dir)
-        if saved.runs and saved.runs[0] is not None:
-            block = saved.runs[0].require().get("calibration")
-            offer = FromRun(block) if block is not None else None
     intake = take_calibration(offer, args.camera_id, (info.width, info.height))
     calibration = intake.calibration
     positions = calibration.positions() if calibration else None

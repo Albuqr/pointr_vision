@@ -390,3 +390,12 @@ def test_built_document_is_taken_by_intake(tmp_path):
 
     assert verdict.refused_at_edge is None
     assert verdict.calibration.session_block()["court"]["type"] == "custom"
+
+
+def test_malformed_file_court_is_refused_instead_of_raising(tmp_path):
+    verdict = take_calibration(
+        FromFile(write(tmp_path, {**document(), "court": None})), "cam1", SIZE
+    )
+    assert verdict.calibration is None
+    assert verdict.checks[0]["result"] == "failed"
+    assert verdict.refused_at_edge

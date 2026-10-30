@@ -222,3 +222,60 @@ def test_t8_session_replay_uses_live_calibration_and_explicit_override(tmp_path,
             (folder / "runs" / session["runs"][-1] / "run.json").read_text(encoding="utf-8")
         )
         assert run["calibration"]["calibration_id"] == expected
+
+
+def test_t8_malformed_replay_calibration_is_a_persisted_failed_check(tmp_path, clips):
+    out = tmp_path / "sessions"
+    assert (
+        cli.main(
+            [
+                "--source",
+                str(clips["moving"]),
+                "--link",
+                "file",
+                "--camera-id",
+                "cam1",
+                "--no-detect",
+                "--out",
+                str(out),
+            ]
+        )
+        == 0
+    )
+    [folder] = [p for p in out.iterdir() if p.is_dir()]
+    session = json.loads((folder / "session.json").read_text(encoding="utf-8"))
+    live_path = folder / "runs" / session["runs"][0] / "run.json"
+    live = json.loads(live_path.read_text(encoding="utf-8"))
+    live_path.write_text(json.dumps({**live, "calibration": []}), encoding="utf-8")
+    assert cli.main(["--replay", str(folder), "--no-detect", "--out", str(out)]) == 0
+    session = json.loads((folder / "session.json").read_text(encoding="utf-8"))
+    run = json.loads(
+        (folder / "runs" / session["runs"][-1] / "run.json").read_text(encoding="utf-8")
+    )
+    assert run["calibration"] is None
+    assert run["checks"][0]["result"] == "failed"
+    assert {e["kind"] for e in session["events"]} == {"error", "startup_check_failed"}
+    assert all(run["run_id"] in e["detail"] for e in session["events"])
+
+
+def test_t8_unreadable_live_run_refuses_replay_before_source_open(monkeypatch, tmp_path, clips):
+    out = tmp_path / "sessions"
+    assert (
+        cli.main(
+            ["--source", str(clips["moving"]), "--link", "file", "--no-detect", "--out", str(out)]
+        )
+        == 0
+    )
+    [folder] = [p for p in out.iterdir() if p.is_dir()]
+    session = json.loads((folder / "session.json").read_text(encoding="utf-8"))
+    (folder / "runs" / session["runs"][0] / "run.json").write_text("[]", encoding="utf-8")
+
+    def unexpected_open(self):
+        raise AssertionError("a damaged live run must be refused before opening the replay source")
+
+    monkeypatch.setattr(cli.FileSource, "open", unexpected_open)
+    assert (
+        cli.main(["--replay", str(folder), "--no-detect", "--out", str(out)])
+        == cli.EXIT_OPEN_FAILED
+    )
+    assert len(json.loads((folder / "session.json").read_text(encoding="utf-8"))["runs"]) == 1

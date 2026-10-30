@@ -609,13 +609,9 @@ class Studio:
         result["projected_court_lines"] = projected_court_lines(
             result["homography_image_to_court"], court
         )
-        result["court"] = {
-            "kind": court.kind,
-            "type": court.kind,
-            "length_m": court.length_m,
-            "width_m": court.width_m,
-            "landmarks": court.landmarks,
-        }
+        from services.edge.calibration.intake import court_document
+
+        result["court"] = court_document(court)
         result["point_errors_m"] = []
         calibration_index = check_index = 0
         for point in points:

@@ -107,8 +107,9 @@ session). The video is raw (no annotations) at a constant frame rate, the source
 frame k is at k / fps, which is `frames.csv` `t_video`. A frame the recorder did not write (a full
 queue, a failed writer, a frame of another size) has an empty `t_video`. A replay run
 (`mode: replay`) adds a run to the session and leaves `recording` alone: in `session.json` only
-`runs` grows, plus an `interrupted` or `error` event whose `detail` starts with `replay <run_id>:`
-when the replay did not end cleanly (D-042); the replay's other events are printed, not written.
+`runs` grows, plus `interrupted`, `error` or `startup_check_failed` events whose `detail` starts
+with `replay <run_id>:` when the replay did not end cleanly or calibration intake failed
+(D-042, D-068); the replay's other events are printed, not written.
 A replay of a bare video file starts a new session with `recording` disabled.
 A replay of a group (0.20.0, D-060: `--replay <group_id>`) adds one replay run, as above, to the session of
 every camera whose `session.json` has that `group_id`; section 3 `group` says what those runs share.

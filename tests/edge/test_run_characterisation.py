@@ -131,7 +131,10 @@ def sess(path: str, status: str = "ended", events=(), *, ran: bool = True, **kw)
     (writer.start_run). ran=False: the run never started, so a replay path still has only the live
     run (its session unchanged)."""
     if path in INTO_SESSION:
-        status, events = "ended", [e for e in events if e in ("interrupted", "error")]
+        status, events = (
+            "ended",
+            [e for e in events if e in ("interrupted", "error", "startup_check_failed")],
+        )
     out = {}
     for cam in CAMERAS[path]:
         base = {
@@ -484,7 +487,7 @@ ROWS += [
             **sess(GROUP_REPLAY),
             "cam1": Sess(
                 "ended",
-                ("error",),  # appearance_only too, but a replay keeps only error/interrupted
+                ("error", "startup_check_failed"),  # appearance_only is not retained by replay
                 checks=("calibration:failed",),
                 runs=2,
                 group=True,

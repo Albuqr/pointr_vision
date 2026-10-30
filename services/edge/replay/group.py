@@ -83,7 +83,11 @@ def _load(path: Path) -> dict:
     from services.edge.session.folder import SessionDamaged, read_run
 
     try:
-        return read_run(path.parent).require()
+        snapshot = read_run(path.parent)
+        document = snapshot.require()
+        if any("calibration" in problem for problem in snapshot.problems):
+            document["calibration"] = {}  # preserve refusal through the tolerant reader
+        return document
     except (SessionDamaged, json.JSONDecodeError) as e:
         raise ReplayError(str(e)) from e
 

@@ -48,9 +48,22 @@ class NotUsed:
 Offer = FromFile | FromRun | Refused | NotUsed | None
 
 
+def court_document(court: Court):
+    """The court block saved by Studio, including the legacy file alias."""
+    return {
+        "kind": court.kind,
+        "type": court.kind,
+        "length_m": court.length_m,
+        "width_m": court.width_m,
+        "landmarks": court.landmarks,
+    }
+
+
 def normalize_document(document):
     """Resolve the saved legacy court alias without changing the caller's document."""
     document = dict(document)
+    if not isinstance(document.get("court", {}), dict):
+        raise ValueError("calibration court must be an object")
     court = dict(document.get("court", {}))
     if "type" not in court and "kind" in court:
         court["type"] = court["kind"]
@@ -290,13 +303,7 @@ def build_document(
         "calibration_id": calibration_id,
         "camera_id": camera_id,
         "created_at": created_at,
-        "court": {
-            "kind": court.kind,
-            "type": court.kind,
-            "length_m": court.length_m,
-            "width_m": court.width_m,
-            "landmarks": court.landmarks,
-        },
+        "court": court_document(court),
         "image_size": {"width": image_size[0], "height": image_size[1]},
         "homography_image_to_court": fit["homography_image_to_court"],
         "points": [
