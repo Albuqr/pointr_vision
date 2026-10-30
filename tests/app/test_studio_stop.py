@@ -12,12 +12,13 @@ from starlette.testclient import TestClient
 
 from services.app.config import CameraConfig
 from services.app.server import create_app
+from services.edge import contract
 from services.edge.launcher_impl import Launcher
 
 ROOT = Path(__file__).resolve().parents[2]
-SESSION_SCHEMA = json.loads((ROOT / "contracts" / "session.schema.json").read_text("utf-8"))
-RUN_SCHEMA = json.loads((ROOT / "contracts" / "run.schema.json").read_text("utf-8"))
-REPORT_SCHEMA = json.loads((ROOT / "contracts" / "report.schema.json").read_text("utf-8"))
+SESSION_SCHEMA = contract.schema("session")
+RUN_SCHEMA = contract.schema("run")
+REPORT_SCHEMA = contract.schema("report")
 
 
 RECORDING = ("recording", "preview_ready")

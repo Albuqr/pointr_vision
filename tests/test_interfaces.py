@@ -2,7 +2,6 @@
 
 import dataclasses
 import inspect
-import json
 import re
 import typing
 from pathlib import Path
@@ -10,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from services.edge import contract
 from services.edge.capture.types import (
     Frame,
     FrameSource,
@@ -140,7 +140,7 @@ def csv_columns(section: str) -> list[str]:
 
 
 def schema_keys(*path: str) -> set[str]:
-    node = json.loads((ROOT / "contracts" / "session.schema.json").read_text(encoding="utf-8"))
+    node = contract.schema("session")
     for key in path:
         node = node["items"] if key == "items" else node["properties"][key]
     return set(node["properties"])

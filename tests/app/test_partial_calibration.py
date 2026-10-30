@@ -2,7 +2,6 @@
 sees. A synthetic pinhole camera on the sideline sees one half of a FIBA full court; the fit and
 check points are its projections of that half's landmarks (no camera, no weights)."""
 
-import json
 import math
 from pathlib import Path
 
@@ -10,6 +9,7 @@ import numpy as np
 import pytest
 from jsonschema import Draft202012Validator
 
+from services.edge import contract
 from services.edge.calibration.court import court_model
 from services.edge.calibration.document import load_calibration
 from services.edge.calibration.homography import CalibrationPositions
@@ -104,8 +104,7 @@ def test_partial_view_calibration_saves_and_reports_each_check_error(client, tmp
     assert result["check_mean_m"] < 1e-6  # exact synthetic projections
     assert result["point_errors_m"][len(FIT) :] == result["check_errors_m"]
     document = result["calibration"]
-    schema = json.loads((ROOT / "contracts/calibration.schema.json").read_text(encoding="utf-8"))
-    Draft202012Validator(schema).validate(document)
+    Draft202012Validator(contract.schema("calibration")).validate(document)
     checks = [p for p in document["points"] if p["role"] == "check"]
     assert [p["residual_m"] for p in checks] == pytest.approx(result["check_errors_m"])
     assert document["errors"]["check_mean_m"] == pytest.approx(result["check_mean_m"])

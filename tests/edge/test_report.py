@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 from jsonschema import Draft202012Validator
 
+from services.edge import contract
 from services.edge.calibration.homography import CalibrationPositions
 from services.edge.contract import CONTRACT_VERSION
 from services.edge.reports import cli
@@ -27,7 +28,7 @@ LEGACY_RUN = ROOT / "tests" / "fixtures" / "sessions" / "legacy_0_9" / "runs" / 
 
 
 def schema(name: str) -> Draft202012Validator:
-    doc = json.loads((ROOT / "contracts" / f"{name}.schema.json").read_text(encoding="utf-8"))
+    doc = contract.schema(name)
     return Draft202012Validator(doc)
 
 

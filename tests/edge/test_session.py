@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 from jsonschema import Draft202012Validator
 
+from services.edge import contract
 from services.edge import main as cli
 from services.edge.capture.health import HealthConfig
 from services.edge.capture.types import SourceInfo
@@ -33,8 +34,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def validate(name: str, doc: dict) -> None:
-    schema = json.loads((ROOT / "contracts" / f"{name}.schema.json").read_text(encoding="utf-8"))
-    Draft202012Validator(schema).validate(doc)
+    Draft202012Validator(contract.schema(name)).validate(doc)
 
 
 def load(path: Path) -> dict:

@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from jsonschema import Draft202012Validator
 
+from services.edge import contract
 from services.edge.calibration.document import load_calibration, validate_calibration
 from services.edge.calibration.homography import (
     fit_calibration,
@@ -85,9 +86,7 @@ def test_high_error_requires_explicit_force_and_records_override():
 
 def test_calibration_document_is_validated_and_loadable(tmp_path):
     fixture = json.loads((ROOT / "tests/fixtures/contracts/calibration.example.json").read_text())
-    Draft202012Validator(
-        json.loads((ROOT / "contracts/calibration.schema.json").read_text())
-    ).validate(fixture)
+    Draft202012Validator(contract.schema("calibration")).validate(fixture)
     validate_calibration(fixture)
     path = tmp_path / "calibration.json"
     path.write_text(json.dumps(fixture), encoding="utf-8")
