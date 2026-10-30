@@ -108,3 +108,31 @@ def test_the_launcher_marks_a_child_loading_its_model_from_its_device_line():
     assert child.loading_model is False
     Launcher.read(launcher, child)
     assert child.loading_model is True
+
+
+def test_camera_state_survives_run_json_with_ready_null(client, tmp_path):
+    first, _ = start_two(client)
+    folder = tmp_path / first.cam.camera_id
+    run = folder / "runs" / "run1"
+    run.mkdir(parents=True, exist_ok=True)
+    (folder / "session.json").write_text(json.dumps({"status": "running", "events": []}), "utf-8")
+    (run / "run.json").write_text(json.dumps({"ready": None}), "utf-8")
+    first.session_dir = folder
+
+    resp = client.get("/api/status")
+    assert resp.status_code == 200
+    assert states(client)["cam1"] == "waiting_first_frame"
+
+
+def test_camera_state_survives_run_json_with_ready_missing(client, tmp_path):
+    first, _ = start_two(client)
+    folder = tmp_path / first.cam.camera_id
+    run = folder / "runs" / "run1"
+    run.mkdir(parents=True, exist_ok=True)
+    (folder / "session.json").write_text(json.dumps({"status": "running", "events": []}), "utf-8")
+    (run / "run.json").write_text(json.dumps({}), "utf-8")
+    first.session_dir = folder
+
+    resp = client.get("/api/status")
+    assert resp.status_code == 200
+    assert states(client)["cam1"] == "waiting_first_frame"
