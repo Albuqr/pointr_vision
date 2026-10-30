@@ -37,6 +37,7 @@ from services.edge.main import (
     start_http_preview,
     stop_on_stdin,
 )
+from services.edge.matcher import CourtMatcher, MatcherParams
 from services.edge.reports.build import format_summary, write_report
 
 
@@ -68,6 +69,12 @@ def group_det_size(sizes: set[int | None]) -> int | None:
     """One detector, one size (D-056): the largest a camera asks for; None (the model's own) when
     none asks for one. A camera that asks for none gets the size another camera asked for."""
     return max((s for s in sizes if s), default=None)
+
+
+def group_matcher(cams: list[argparse.Namespace]) -> CourtMatcher:
+    """The cross-camera matcher (D-058): a group ID is kept as long as the longest lost-track time
+    of the cameras' trackers, so a track the tracker takes back is not forgotten first."""
+    return CourtMatcher(MatcherParams(lost_s=max(a.track_lost_secs for a in cams)))
 
 
 def run(cams: list[argparse.Namespace], stop: StopRequest) -> int:
@@ -144,6 +151,7 @@ def run(cams: list[argparse.Namespace], stop: StopRequest) -> int:
             config,
             make_run,
             record=not first.no_record,
+            matcher=group_matcher(cams),
             on_event=lambda camera_id, ev, t0: print_event(ev, t0, f"[{camera_id}] "),
             on_session=on_session,
             ui_stop=lambda: stop.ui,

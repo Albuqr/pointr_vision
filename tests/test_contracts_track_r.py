@@ -243,6 +243,17 @@ def test_a_run_without_a_group_has_a_null_group_and_a_group_run_validates():
     assert not list(validator("run").iter_errors(run))
 
 
+def test_matcher_params_are_named_in_the_doc_and_a_group_run_with_them_validates():
+    group_text = DOC[DOC.index("The court-position matcher (0.19.0") :]
+    for name in contract.MATCHER_PARAMS:
+        assert f"`{name}`" in group_text.split("`ready`")[0], name
+    params = {"match_distance_m": 0.5, "max_offset_s": 0.25, "lost_s": 1.0, "max_speed_mps": 4.0}
+    run = example("run")
+    run["group"] = {**GROUP, "params": {**params, "latency_s": {"cam1": 0.0, "cam2": 0.08}}}
+    assert not list(validator("run").iter_errors(run))
+    assert set(params) | {"latency_s"} == set(contract.MATCHER_PARAMS)
+
+
 def test_a_group_with_no_matcher_has_empty_params():
     run = example("run")
     run["group"] = {**GROUP, "params": {}}

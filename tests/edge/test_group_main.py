@@ -59,3 +59,8 @@ def test_one_detector_size_for_the_group():
     assert group_main.group_det_size({640}) == 640
     assert group_main.group_det_size({320, 640}) == 640
     assert group_main.group_det_size({None, 320}) == 320  # the only size asked for
+
+
+def test_the_matcher_keeps_a_group_id_as_long_as_the_longest_tracker_lost_time():
+    cams = [group_main.parse_args(["--source=x", f"--track-lost-secs={s}"]) for s in (1.0, 2.5)]
+    assert group_main.group_matcher(cams).record_params()["lost_s"] == 2.5

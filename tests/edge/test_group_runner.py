@@ -2,16 +2,23 @@
 detector. Driven in-process with synthetic clips and a scripted fake detector; the tests read the
 session folders back as a reader of the files would. No camera, weights or network."""
 
+import json
 import threading
 from pathlib import Path
 
+import numpy as np
 import pytest
 
+from services.edge import contract
 from services.edge.capture.health import HealthConfig
 from services.edge.capture.sources import FileSource, SourceOpenError
+from services.edge.capture.types import Frame
 from services.edge.contract import VIDEO_FILE
-from services.edge.group_runner import GroupCamera, run_group
+from services.edge.group_runner import CameraTracker, GroupCamera, run_group
 from services.edge.main import parse_args, run_meta
+from services.edge.matcher import CourtMatcher, GroupTrack, LocalTrack, MatcherParams
+from services.edge.perception.loop import NO_DETECTIONS
+from services.edge.perception.types import Detections
 from services.edge.session import writer as writer_mod
 from services.edge.session.writer import FileSessionWriter
 from tests.edge.test_calibration_size import calibration_file
@@ -106,7 +113,7 @@ def test_the_runs_name_one_group_run_with_every_camera(clips, tmp_path):
     groups = [run["group"] for _, run, _, _ in files.values()]
     assert groups[0] == groups[1]  # one group run, the same block in every camera's run.json
     group = groups[0]
-    assert group["group_id"] == "g1" and group["params"] == {}
+    assert group["group_id"] == "g1" and tuple(group["params"]) == contract.MATCHER_PARAMS
     assert sorted(group["cameras"], key=lambda c: c["camera_id"]) == [
         {"camera_id": cid, "session_id": s["session_id"], "run_id": r["run_id"]}
         for cid, (s, r, _, _) in sorted(files.items())
@@ -260,3 +267,146 @@ def test_each_opened_session_is_handed_over_before_its_camera_starts(clips, tmp_
     run_two(clips, tmp_path, None, on_session=on_session)
     assert [(c, t0) for c, _, t0 in seen] == [("cam1", None), ("cam2", None)]  # not started
     assert {d for _, d, _ in seen} == {p.name for p in tmp_path.iterdir() if p.is_dir()}
+
+
+# -- cross-camera linking by court position (R2a 05, R2a-A2) -------------------------------------
+
+
+class ScriptedBoxes:
+    """The scripted fake detector: one person at a chosen box per camera (by clip), every frame."""
+
+    threshold, det_size, device = 0.5, 384, "cuda"
+
+    def __init__(self, boxes: dict[str, list[float]]):
+        self.boxes = boxes
+
+    def detect(self, frame):
+        box = self.boxes[Path(frame.source_id).name]
+        return Detections(
+            np.array([box], np.float32), np.array([0.9], np.float32), np.array([1], np.int64)
+        )
+
+
+def calibration_for(tmp_path: Path, camera_id: str) -> Path:
+    """The example calibration (the same homography) made for `camera_id` at the clips' size."""
+    doc = json.loads(calibration_file(tmp_path).read_text(encoding="utf-8"))
+    doc["camera_id"] = camera_id
+    path = tmp_path / f"calibration_{camera_id}.json"
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    return path
+
+
+# 5 s: the two clips are processed at their own pace, so the test does not depend on the timing
+TOLERANT = MatcherParams(max_offset_s=5.0)
+SAME_PLACE = {"moving.mp4": [10.0, 20.0, 110.0, 220.0], "frozen.mp4": [12.0, 20.0, 112.0, 220.0]}
+FAR_APART = {"moving.mp4": [10.0, 20.0, 110.0, 220.0], "frozen.mp4": [400.0, 200.0, 500.0, 340.0]}
+
+
+def run_calibrated(clips, tmp_path, boxes, matcher_params=TOLERANT):
+    out = tmp_path / "out"
+    run_two(
+        clips, out, ScriptedBoxes(boxes), matcher=CourtMatcher(matcher_params),
+        calibrations={c: calibration_for(tmp_path, c) for c in ("cam1", "cam2")},
+    )  # fmt: skip
+    return camera_files(out)
+
+
+def test_a_person_at_the_same_court_point_has_one_track_id_in_both_cameras(clips, tmp_path):
+    """R2a-A2."""
+    files = run_calibrated(clips, tmp_path, SAME_PLACE)
+    tracks = {cid: t for cid, (_, _, _, t) in files.items()}
+    ids = {cid: {int(t["track_id"]) for t in rows_} for cid, rows_ in tracks.items()}
+    assert ids["cam1"] == ids["cam2"] and len(ids["cam1"]) == 1
+    # whichever camera is processed first writes unshared rows until the other has been seen, and
+    # which one that is depends on the threads; the linking itself does not
+    links = {t["link"] for rows_ in tracks.values() for t in rows_}
+    assert links == {"unshared", "position"} or links == {"position"}
+    for rows_ in tracks.values():
+        first_position = next((i for i, t in enumerate(rows_) if t["link"] == "position"), None)
+        if first_position is not None:  # a link is not undone while both tracks exist
+            assert {t["link"] for t in rows_[first_position:]} == {"position"}
+
+
+def test_people_at_different_court_points_keep_their_own_track_ids(clips, tmp_path):
+    still = MatcherParams(max_offset_s=5.0, max_speed_mps=0.0)  # nobody walks 4 m in the gap
+    files = run_calibrated(clips, tmp_path, FAR_APART, still)
+    ids = {cid: {t["track_id"] for t in tracks} for cid, (_, _, _, tracks) in files.items()}
+    assert not ids["cam1"] & ids["cam2"]
+    assert {t["link"] for _, _, _, tracks in files.values() for t in tracks} == {"unshared"}
+
+
+def test_the_matching_parameters_are_in_every_runs_group_block(clips, tmp_path):
+    files = run_calibrated(clips, tmp_path, SAME_PLACE, MatcherParams(match_distance_m=0.7))
+    for _, run, _, _ in files.values():
+        validate("run", run)
+        params = run["group"]["params"]
+        assert tuple(params) == contract.MATCHER_PARAMS
+        assert params["match_distance_m"] == 0.7 and params["latency_s"] == {}
+
+
+def test_the_default_matcher_is_recorded_and_a_group_without_detection_records_none(
+    clips, tmp_path
+):
+    run_two(clips, tmp_path / "a", EvenFrameDetector())
+    for _, run, _, _ in camera_files(tmp_path / "a").values():
+        assert tuple(run["group"]["params"]) == contract.MATCHER_PARAMS
+    run_two(clips, tmp_path / "b", None)
+    for _, run, _, _ in camera_files(tmp_path / "b").values():
+        assert run["group"]["params"] == {}
+
+
+# -- what a camera reports to the matcher ---------------------------------------------------
+
+
+class RecordingMatcher:
+    def __init__(self):
+        self.calls = []
+
+    def update(self, camera_id, t_recv, tracks):
+        self.calls.append((camera_id, t_recv, list(tracks)))
+        return [GroupTrack(t.local_id, 100 + t.local_id, "unshared") for t in tracks]
+
+    def record_params(self):
+        return {}
+
+
+def camera_tracker(positions, size=(640, 360)):
+    matcher = RecordingMatcher()
+    tracker = CameraTracker(OneTrackPerDetection(), "cam1", matcher, positions, size)
+    return tracker, matcher
+
+
+def frame_of(width=640, height=360):
+    return Frame(0, 12.5, "2026-10-29T00:00:00Z", np.zeros((height, width, 3), np.uint8), "s")
+
+
+BOX_DETECTION = Detections(
+    np.array([[10.0, 20.0, 110.0, 220.0]], np.float32),
+    np.array([0.9], np.float32),
+    np.array([1], np.int64),
+)
+
+
+def test_a_camera_reports_the_court_position_of_the_box_bottom_centre_and_gets_group_ids_back():
+    tracker, matcher = camera_tracker(lambda x, y: (x / 10, y / 10))
+    [obs] = tracker.update(BOX_DETECTION, frame_of())
+    assert matcher.calls == [("cam1", 12.5, [LocalTrack(1, (6.0, 22.0))])]
+    assert (obs.track_id, obs.link) == (101, "unshared")
+
+
+def test_a_camera_with_no_position_for_a_track_still_reports_it_and_a_silent_frame_too():
+    for positions, frame in (
+        (None, frame_of()),  # not calibrated
+        (
+            lambda x, y: (1.0, 1.0),
+            frame_of(320, 180),
+        ),  # a frame of another size than the calibration
+        (lambda x, y: None, frame_of()),  # a point that cannot be projected
+        (lambda x, y: 1 / 0, frame_of()),  # a projection that fails
+    ):
+        tracker, matcher = camera_tracker(positions)
+        tracker.update(BOX_DETECTION, frame)
+        assert matcher.calls[0][2] == [LocalTrack(1, None)]
+    tracker, matcher = camera_tracker(lambda x, y: (1.0, 1.0))
+    assert tracker.update(NO_DETECTIONS, frame_of()) == []
+    assert matcher.calls == [("cam1", 12.5, [])]  # the camera reported: nothing in view

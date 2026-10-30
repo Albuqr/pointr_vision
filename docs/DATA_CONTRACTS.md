@@ -1,6 +1,6 @@
 # Data contracts
 
-Contract version: **0.18.0**. Any change bumps the version (minor for additive fields, major
+Contract version: **0.19.0**. Any change bumps the version (minor for additive fields, major
 for removals or meaning changes) and needs a `DECISIONS.md` entry. JSON Schemas in
 `contracts/` are written from this file and tests check them against it (D-009).
 
@@ -63,7 +63,7 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
 
 ```json
 {
-  "contract_version": "0.18.0",
+  "contract_version": "0.19.0",
   "session_id": "uuid",
   "device_id": "uuid",
   "camera_id": "cam1 | null",
@@ -131,7 +131,7 @@ calibration used by this session and records its mean held-out check residual in
 
 ```json
 {
-  "contract_version": "0.18.0",
+  "contract_version": "0.19.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "mode": "live | replay",
@@ -244,6 +244,14 @@ A live run and a replay of it are two group runs, so the contract does not make 
 person; a replay is expected to reproduce the live IDs on the same frames (R2a 08), and that is checked,
 not assumed. `params` records the effective parameters of the cross-camera matcher by name, like
 `tracker.params` (`{}` when no matcher ran); the matcher slices list the names here, with a minor bump.
+The court-position matcher (0.19.0, D-058, R2a 05) records `match_distance_m` (largest court-plane distance, m,
+between the positions of two cameras' tracks that are linked), `max_offset_s` (largest time difference, s, in group
+time between the two readings, and how old a camera's last update may be and still count as current), `lost_s`
+(how long a local track that is no longer reported keeps its group ID; set to the tracker's lost-track time),
+`max_speed_mps` (speed, m/s, that widens `match_distance_m` when a new local track takes over a group whose tracks
+were lost) and `latency_s` (an object, `camera_id` to the camera latency in s that was subtracted from that
+camera's frame receive time to get group time; `0.0` for a camera with no measured latency). They are starting
+values, not measured ones.
 `ready` (0.15.0, D-052) says when this camera became ready, one entry per step, so a slow start can be
 placed from the files alone. Each entry is `{t_wall, t_pc}`: the UTC wall time and the raw `perf_counter`
 seconds of the PC clock (the base of `t0_mono`, so `t_pc - t0_mono` is seconds since t0, and negative for
@@ -303,6 +311,9 @@ One row per **processed** frame, including frames with zero detections.
 `link` is the link in force for the row's track when the row was written, so one track's rows may
 change from `unshared` to `position` once a second camera sees the person. A file written before
 0.14.0 has no `link` column; read it as `unshared`.
+Rows of a track the court-position matcher has linked to a track of another camera carry `position` from
+the frame where the link was made; a camera that cannot give a court position (no valid calibration) stays
+`unshared` until the appearance fallback (R2a 06) exists.
 Out-of-court points are retained, with `in_court=false`; they are not clamped to court bounds.
 A point that cannot be projected (on or beyond the camera's horizon, or not finite) keeps its
 pixel box and its `calibration_id`, with `x_m`, `y_m` and `in_court` empty; the writer records
@@ -375,7 +386,7 @@ One report per run, one per camera: there is no fusion across cameras.
 
 ```json
 {
-  "contract_version": "0.18.0",
+  "contract_version": "0.19.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "camera_id": "cam1 | null",
@@ -718,7 +729,7 @@ recorded video and is compared with `frames.csv` `t_video`; shots and tracks joi
 
 ```json
 {
-  "contract_version": "0.18.0",
+  "contract_version": "0.19.0",
   "fusion_id": "uuid",
   "group_id": "token",
   "created_at": "2026-12-01T18:50:00Z",

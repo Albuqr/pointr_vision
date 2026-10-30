@@ -44,7 +44,7 @@ TRACKS_COLUMNS = [
     "player_number", "id_source", "link", "x_m", "y_m", "calibration_id", "position_method",
     "in_court",
 ]  # fmt: skip
-# every row is UNSHARED until the group runner (R2a) passes each row's link (0.14.0, D-051)
+# a row says how its track was linked (TrackObs.link, 0.14.0, D-051); UNSHARED when it could not be
 READY_STEPS = ("model_loaded", "first_frame", "first_preview")  # run.json ready (0.15.0, D-052)
 FLUSH_SECS = 0.5  # flush period; under the contract's "at least once per second"
 METHOD = "box_bottom_center"
@@ -452,7 +452,7 @@ class FileSessionWriter:
                         changed |= self._note_unprojected(why)
                     row = [
                         seq, o.track_id, _num(x1, 2), _num(y1, 2), _num(x2, 2), _num(y2, 2),
-                        _num(o.confidence, 4), _opt(o.state), "", "", "", UNSHARED,
+                        _num(o.confidence, 4), _opt(o.state), "", "", "", o.link,
                         _num(x_m, 4), _num(y_m, 4),
                         calibration_id, position_method, in_court,
                     ]  # fmt: skip
