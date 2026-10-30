@@ -396,7 +396,6 @@ ROWS += [
         sessions=sess(
             SINGLE, events=("error", "startup_check_failed"), checks=("calibration:failed",)
         ),
-        xfail=DRIFT_T8_REFUSAL,
     ),
     Row(
         FILE_REPLAY,
@@ -405,7 +404,6 @@ ROWS += [
         sessions=sess(
             FILE_REPLAY, events=("error", "startup_check_failed"), checks=("calibration:failed",)
         ),
-        xfail=DRIFT_T8_REFUSAL,
     ),
     Row(
         SESSION_REPLAY,
@@ -414,7 +412,6 @@ ROWS += [
         sessions=sess(
             SESSION_REPLAY, events=("error", "startup_check_failed"), checks=("calibration:failed",)
         ),
-        xfail=DRIFT_T8_REFUSAL,
     ),
     Row(  # a group: uncalibrated with an event, but no failed check
         GROUP,
@@ -430,7 +427,6 @@ ROWS += [
                 links=ALL_LINKS,
             ),
         },
-        xfail=DRIFT_T8_REFUSAL,
     ),
     Row(  # the operator started it uncalibrated after Studio refused it (D-057)
         SINGLE,
@@ -479,7 +475,6 @@ ROWS += [
         fault="calibration_live",
         code=EXIT_OK,
         sessions=sess(SESSION_REPLAY, calibrated=True),
-        xfail=DRIFT_T8_REPLAY,
     ),
     Row(  # the saved homography is singular: cam1 replays uncalibrated, with an event (B5, #62)
         GROUP_REPLAY,
@@ -490,6 +485,7 @@ ROWS += [
             "cam1": Sess(
                 "ended",
                 ("error",),  # appearance_only too, but a replay keeps only error/interrupted
+                checks=("calibration:failed",),
                 runs=2,
                 group=True,
                 links=ALL_LINKS,

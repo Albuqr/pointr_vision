@@ -30,13 +30,12 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from services.edge.calibration.intake import FromFile, FromRun, NotUsed, Refused, take_calibration
 from services.edge.camera_pipeline import (
     CameraPipeline,
     CameraStats,
     LiveInput,
     ReplayInput,
-    load_camera_calibration,
-    session_calibration,
 )
 from services.edge.capture.health import HealthConfig
 from services.edge.capture.sources import (
@@ -381,7 +380,7 @@ def failed_calibration_checks(refusal: str | None) -> list | None:
     calibration (D-057); None otherwise: the other checks belong to Track R."""
     if not refusal:
         return None
-    return [{"check": "calibration", "result": "failed", "detail": refusal, "t_wall": utc_now()}]
+    return take_calibration(Refused(refusal), None, (0, 0)).checks
 
 
 def calibration_failed_event(refusal: str | None) -> HealthEvent | None:
@@ -389,7 +388,7 @@ def calibration_failed_event(refusal: str | None) -> HealthEvent | None:
     so t_mono is null."""
     if not refusal:
         return None
-    return HealthEvent("startup_check_failed", utc_now(), None, f"calibration: {refusal}")
+    return take_calibration(Refused(refusal), None, (0, 0)).events[0]
 
 
 def ignore_ctrl_c():
@@ -542,7 +541,7 @@ def start_http_preview(port: int, pipeline: CameraPipeline):
             )
         ),
         raw_snapshot=pipeline.raw_snapshot,
-        calibration=pipeline.calibration,
+        calibration=pipeline.calibration.preview_document() if pipeline.calibration else None,
         on_first_preview=pipeline.mark_preview_ready,
     )
     pipeline.on_preview(preview.publish)
@@ -618,14 +617,21 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
         return open_failed(ref, e)
 
     info = dataclasses.replace(info, link=args.link)
-    calibration = positions = None
-    if args.calibration:
-        try:
-            calibration, positions = load_camera_calibration(args.calibration, args.camera_id, info)
-        except (ValueError, OSError) as e:
-            source.close()
-            print(f"error: calibration cannot be used: {e}", file=sys.stderr)
-            return EXIT_CAPTURE_ERROR
+    offer = FromFile(args.calibration) if args.calibration else None
+    if offer is None and args.calibration_failed:
+        offer = Refused(args.calibration_failed)
+    elif offer is None and args.calibration_problem:
+        offer = NotUsed(args.calibration_problem)
+    elif offer is None and replay is not None and replay.session_dir is not None:
+        from services.edge.session.folder import read_session
+
+        saved = read_session(replay.session_dir)
+        if saved.runs and saved.runs[0] is not None:
+            block = saved.runs[0].require().get("calibration")
+            offer = FromRun(block) if block is not None else None
+    intake = take_calibration(offer, args.camera_id, (info.width, info.height))
+    calibration = intake.calibration
+    positions = calibration.positions() if calibration else None
     print(f"source: {info}")
     if isinstance(source, CameraSource):  # streams and files deliver their own size
         print(f"requested {args.width}x{args.height}, camera delivers {info.width}x{info.height}")
@@ -651,7 +657,7 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
                 record,
                 args.camera_id,
                 args.group_id,
-                session_calibration(calibration),
+                calibration.session_block() if calibration else None,
             )
         )
         input = (
@@ -671,7 +677,10 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
         )
         log_event = pipeline.log_event
         pipeline.open_session(
-            run_meta(settings, info, config, detector, tracker, gpu, replay, model_loaded),
+            dataclasses.replace(
+                run_meta(settings, info, config, detector, tracker, gpu, replay, model_loaded),
+                checks=intake.checks,
+            ),
         )
     except OSError as e:
         release_ctrl_c(held)
@@ -680,10 +689,7 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
         return EXIT_CAPTURE_ERROR
     print(f"session: {pipeline.session_dir}")
 
-    if args.calibration_problem:  # before any run, so no t0: t_mono is null
-        problem = args.calibration_problem
-        log_event(HealthEvent("error", utc_now(), None, f"calibration not used: {problem}"))
-    if event := calibration_failed_event(settings.calibration_refusal):
+    for event in intake.events:
         log_event(event)
 
     http_preview = None

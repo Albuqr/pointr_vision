@@ -6,14 +6,13 @@ own refusal reason. The runtime `Calibration` is one immutable type that resolve
 `kind`/`type` court alias once and produces the session block, the run block and the preview court.
 `build_document` makes the calibration file from fitted points, for Studio's fit.
 
-Existing callers still use their own converters; they switch to this module later (T8)."""
+Every run entry point and Studio use this boundary."""
 
 from dataclasses import dataclass
 from pathlib import Path
 
 from services.edge import contract
 from services.edge.calibration.court import Court, court_model
-from services.edge.calibration.document import load_calibration
 from services.edge.calibration.homography import check_homography
 from services.edge.capture.types import HealthEvent, utc_now
 
@@ -47,6 +46,19 @@ class NotUsed:
 
 
 Offer = FromFile | FromRun | Refused | NotUsed | None
+
+
+def normalize_document(document):
+    """Resolve the saved legacy court alias without changing the caller's document."""
+    document = dict(document)
+    court = dict(document.get("court", {}))
+    if "type" not in court and "kind" in court:
+        court["type"] = court["kind"]
+    if "kind" not in court and "type" in court:
+        court["kind"] = court["type"]
+    if court.get("type") != court.get("kind"):
+        raise ValueError("calibration court kind and type must agree")
+    return {**document, "court": court}
 
 
 def _number(value, name):
@@ -161,6 +173,18 @@ class Calibration:
             "image_size": {"width": self.width_px, "height": self.height_px},
         }
 
+    def preview_document(self):
+        """Legacy preview input, assembled only at intake."""
+        return {
+            **self.run_block(),
+            "court": {**self._court_block(), "kind": self.court_type, "landmarks": self.landmarks},
+        }
+
+    def positions(self):
+        from services.edge.calibration.homography import CalibrationPositions
+
+        return CalibrationPositions(self.run_block())
+
     def preview_court(self) -> Court:
         """The court the preview draws over the frame."""
         return court_model(self.court_type, self.length_m, self.width_m, self.landmarks)
@@ -187,7 +211,12 @@ def _failed_check(reason):
 
 def _refusal(reason, *, at_edge):
     checks, event = _failed_check(reason)
-    return Intake(None, (event,), checks, reason if at_edge else None)
+    events = (
+        (HealthEvent("error", event.t_wall, None, f"calibration not used: {reason}"), event)
+        if at_edge
+        else (event,)
+    )
+    return Intake(None, events, checks, reason if at_edge else None)
 
 
 def _size_problem(have, want):
@@ -200,6 +229,8 @@ def _size_problem(have, want):
 
 
 def _from_file(path, camera_id, size):
+    from services.edge.calibration.document import load_calibration
+
     document = load_calibration(path)
     if camera_id is None:
         raise ValueError("--camera-id is required when --calibration is used")
@@ -208,9 +239,10 @@ def _from_file(path, camera_id, size):
     return Calibration.from_document(document)
 
 
-def take_calibration(offer: Offer, camera_id: str | None, size: tuple[int, int]) -> Intake:
+def take_calibration(offer: Offer, camera_id: str | None, size: tuple[int, int] | None) -> Intake:
     """The verdict on a calibration offer for `camera_id` and a capture `size` (width, height).
 
+    `size=None` checks a saved file before a source is opened (Studio pre-start warning).
     Never raises on content: a file or block that cannot be used (ValueError, OSError) becomes an
     edge refusal, recorded as a failed `calibration` check plus a `startup_check_failed` event
     (the same as an operator's refusal, D-057). A non-None calibration has been validated and its
@@ -229,7 +261,7 @@ def take_calibration(offer: Offer, camera_id: str | None, size: tuple[int, int])
             calibration = Calibration.from_run(offer.block)
         else:
             raise TypeError(f"not a calibration offer: {offer!r}")
-        if problem := _size_problem(calibration.image_size, size):
+        if size is not None and (problem := _size_problem(calibration.image_size, size)):
             raise ValueError(problem)
     except (ValueError, OSError) as exc:
         return _refusal(" ".join(str(exc).split()) or exc.__class__.__name__, at_edge=True)

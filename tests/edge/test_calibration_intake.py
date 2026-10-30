@@ -8,7 +8,7 @@ import pytest
 from services.edge import contract
 from services.edge.calibration import intake as intake_module
 from services.edge.calibration.court import court_model
-from services.edge.calibration.document import run_calibration, validate_calibration
+from services.edge.calibration.document import validate_calibration
 from services.edge.calibration.homography import fit_calibration
 from services.edge.calibration.intake import (
     Calibration,
@@ -19,7 +19,6 @@ from services.edge.calibration.intake import (
     build_document,
     take_calibration,
 )
-from services.edge.camera_pipeline import session_calibration
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "tests" / "fixtures" / "contracts" / "calibration.example.json"
@@ -51,7 +50,14 @@ def legacy_kind_only(doc):
 
 
 def run_block():
-    return run_calibration(validate_calibration(document()))
+    doc = document()
+    return {
+        "calibration_id": doc["calibration_id"],
+        "check_error_m": doc["errors"]["check_mean_m"],
+        "homography_image_to_court": doc["homography_image_to_court"],
+        "court": {"type": "custom", "length_m": 3.0, "width_m": 2.0},
+        "image_size": {"width": 640, "height": 480},
+    }
 
 
 def failed(reason):
@@ -182,8 +188,9 @@ def test_edge_refusal_is_a_failed_calibration_check(tmp_path, offer, camera_id, 
     assert fragment in verdict.refused_at_edge
     assert verdict.checks == failed(verdict.refused_at_edge)
     assert [(e.kind, e.t_mono, e.detail) for e in verdict.events] == [
-        ("startup_check_failed", None, f"calibration: {verdict.refused_at_edge}")
-    ]  # no extra error event
+        ("error", None, f"calibration not used: {verdict.refused_at_edge}"),
+        ("startup_check_failed", None, f"calibration: {verdict.refused_at_edge}"),
+    ]
 
 
 def test_operator_refusal_matches_what_main_writes():
@@ -234,8 +241,12 @@ def test_file_offer_is_taken_and_matches_the_existing_converters(tmp_path, legac
     assert (verdict.events, verdict.checks, verdict.refused_at_edge) == ((), None, None)
     assert calibration.image_size == SIZE
     valid = validate_calibration(doc)
-    assert calibration.session_block() == session_calibration(valid)
-    assert calibration.run_block() == run_calibration(valid)
+    assert calibration.session_block() == {
+        "calibration_id": valid["calibration_id"],
+        "check_error_m": valid["errors"]["check_mean_m"],
+        "court": {"type": "custom", "length_m": 3.0, "width_m": 2.0},
+    }
+    assert calibration.run_block() == run_block()
     assert calibration.preview_court() == court_model(
         "custom", 3.0, 2.0, valid["court"]["landmarks"]
     )
@@ -256,9 +267,11 @@ def test_run_block_round_trips_and_is_taken():
     assert verdict.refused_at_edge is None
     assert verdict.calibration.run_block() == block
     assert Calibration.from_run(verdict.calibration.run_block()).run_block() == block
-    assert verdict.calibration.session_block() == session_calibration(
-        validate_calibration(document())
-    )
+    assert verdict.calibration.session_block() == {
+        "calibration_id": block["calibration_id"],
+        "check_error_m": block["check_error_m"],
+        "court": block["court"],
+    }
 
 
 def test_run_block_is_not_changed_by_intake():

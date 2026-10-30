@@ -14,6 +14,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from services.edge.calibration.intake import Calibration
 from services.edge.capture.capture import Capture
 from services.edge.capture.health import HealthConfig, HealthMonitor
 from services.edge.capture.types import FrameSource, HealthEvent, SourceInfo, utc_now
@@ -66,44 +67,6 @@ class CameraStats:
     frame_size: tuple[int, int] | None = None
 
 
-def load_camera_calibration(path: str, camera_id: str | None, info: SourceInfo):
-    """The calibration document and its position map for this camera and capture size. Raises
-    ValueError or OSError when it cannot be used: the caller stops the camera before any session."""
-    from services.edge.calibration.document import load_calibration
-    from services.edge.calibration.homography import CalibrationPositions
-
-    calibration = load_calibration(path)
-    if camera_id is None:
-        raise ValueError("--camera-id is required when --calibration is used")
-    if calibration["camera_id"] != camera_id:
-        raise ValueError(
-            f"calibration is for camera {calibration['camera_id']!r}, not {camera_id!r}"
-        )
-    size = calibration["image_size"]
-    if (size["width"], size["height"]) != (info.width, info.height):
-        raise ValueError(
-            f"calibration image size {size['width']}x{size['height']} differs from "
-            f"capture size {info.width}x{info.height}"
-        )
-    return calibration, CalibrationPositions(calibration)
-
-
-def session_calibration(calibration: dict | None) -> dict | None:
-    """The calibration block of session.json (DATA_CONTRACTS), or None for an uncalibrated run."""
-    if calibration is None:
-        return None
-    court = calibration["court"]
-    return {
-        "calibration_id": calibration["calibration_id"],
-        "check_error_m": calibration["errors"]["check_mean_m"],
-        "court": {
-            "type": court.get("type", court["kind"]),
-            "length_m": court["length_m"],
-            "width_m": court["width_m"],
-        },
-    }
-
-
 class CameraPipeline:
     """Capture, processing and logging for one camera, from an opened source to a closed session.
 
@@ -119,7 +82,7 @@ class CameraPipeline:
         *,
         detector=None,
         tracker=None,
-        calibration: dict | None = None,
+        calibration: Calibration | None = None,
         positions=None,
         on_event: OnEvent | None = None,
     ):
@@ -171,9 +134,7 @@ class CameraPipeline:
         """Start the session (meta) or add a run to a recorded one (session_dir, a replay), then
         the recorder. Raises OSError when the session cannot be written."""
         if self.calibration is not None:
-            from services.edge.calibration.document import run_calibration
-
-            run = dataclasses.replace(run, calibration=run_calibration(self.calibration))
+            run = dataclasses.replace(run, calibration=self.calibration.run_block())
         # positions only for a calibrated run: an uncalibrated run keeps the two-argument call
         session_dir = self._input.session_dir if isinstance(self._input, ReplayInput) else None
         meta = self._input.meta
@@ -208,7 +169,7 @@ class CameraPipeline:
         in the wrong place, so the camera fails loudly. A later change (a reconnect at another
         resolution) stops the positions and is an event; the rows stay. Return whether this is the
         first-frame failure so its frame and track rows can be queued before stopping the run."""
-        size = self.calibration["image_size"]
+        size = self.calibration.run_block()["image_size"]
         height, width = p.frame.image.shape[:2]
         if (width, height) == (size["width"], size["height"]):
             problem = None

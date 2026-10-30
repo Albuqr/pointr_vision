@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 
 from services.edge.calibration.document import validate_calibration
+from services.edge.calibration.intake import FromFile, take_calibration
 from services.edge.session.types import CAMERA_ID_RE
 
 REPLACE_ATTEMPTS = 20
@@ -88,13 +89,13 @@ class CalibrationStore:
         if parsed_id.version != 4 or str(parsed_id) != calibration_id:
             raise ValueError("invalid active calibration id")
         path = directory / calibration_id / "calibration.json"
-        try:
-            document = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:
-            raise ValueError(f"cannot read saved calibration for {camera_id}: {exc}") from exc
-        document = validate_calibration(document)
-        if document["camera_id"] != camera_id:
-            raise ValueError("saved calibration belongs to another camera")
+        verdict = take_calibration(FromFile(path), camera_id, None)
+        if verdict.refused_at_edge:
+            raise ValueError(verdict.refused_at_edge)
+        # Keep the document API used by comparison and the calibration editor.
+        from services.edge.calibration.document import load_calibration
+
+        document = load_calibration(path)
         return document
 
     def audit_frame(self, document: dict) -> bytes:

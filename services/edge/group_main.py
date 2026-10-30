@@ -135,8 +135,10 @@ def run(cams: list[argparse.Namespace], stop: StopRequest) -> int:
         pipelines[camera_id] = pipeline
         say(camera_id, f"session: {pipeline.session_dir}")
         if a.calibration_problem:  # before any run, so no t0: t_mono is null
-            detail = f"calibration not used: {a.calibration_problem}"
-            pipeline.log_event(HealthEvent("error", utc_now(), None, detail))
+            from services.edge.calibration.intake import NotUsed, take_calibration
+
+            for event in take_calibration(NotUsed(a.calibration_problem), camera_id, (0, 0)).events:
+                pipeline.log_event(event)
         if event := calibration_failed_event(settings[camera_id].calibration_refusal):
             pipeline.log_event(event)
         if a.http_preview is not None:

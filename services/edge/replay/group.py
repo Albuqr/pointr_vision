@@ -79,15 +79,6 @@ def live_group_time(run_dir: Path, t0_mono: float, fps: float) -> Callable[[int]
     return at
 
 
-def as_document(calibration: dict | None) -> dict | None:
-    """run.json calibration as the calibration document the pipeline takes (it reads the check
-    error from `errors` and the court type from `court.kind`)."""
-    if calibration is None:
-        return None
-    court = {"kind": calibration["court"]["type"], **calibration["court"]}
-    return {**calibration, "court": court, "errors": {"check_mean_m": calibration["check_error_m"]}}
-
-
 def _load(path: Path) -> dict:
     from services.edge.session.folder import SessionDamaged, read_run
 
@@ -130,7 +121,7 @@ def resolve_group(target: str, out_dir: Path | str) -> GroupReplay | None:
             recorded = RecordedCamera(
                 replay,
                 session["session_id"],
-                as_document(live.get("calibration")),
+                live.get("calibration"),
                 live_group_time(run_dir, live["t0_mono"], fps),
             )
             source = FileSource(replay.video, realtime=False)  # as fast as processing allows

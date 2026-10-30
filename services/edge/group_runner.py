@@ -25,13 +25,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from services.edge.appearance import describe
-from services.edge.calibration.homography import CalibrationPositions, check_homography
+from services.edge.calibration.intake import FromFile, FromRun, take_calibration
 from services.edge.camera_pipeline import (
     CameraPipeline,
     LiveInput,
     ReplayInput,
-    load_camera_calibration,
-    session_calibration,
 )
 from services.edge.capture.health import HealthConfig
 from services.edge.capture.types import Frame, FrameSource, HealthEvent, SourceInfo, utc_now
@@ -64,7 +62,7 @@ class RecordedCamera:
 
     target: ReplayTarget  # the video and session folder, checked against session.json
     session_id: str
-    calibration: dict | None  # the live run's, as a document (calibration.document)
+    calibration: dict | None  # the live run's saved run block
     group_time: Callable[[int], float]  # video frame seq -> the live run's group time (PC clock)
 
 
@@ -144,15 +142,6 @@ class CameraTracker:
         ]
 
 
-def _saved_positions(doc: dict) -> CalibrationPositions:
-    """The positions of a replayed run's saved calibration; ValueError when it is unusable."""
-    try:
-        check_homography(doc["homography_image_to_court"])
-        return CalibrationPositions(doc)
-    except (KeyError, TypeError) as e:
-        raise ValueError(f"the saved calibration block is malformed: {e!r}") from e
-
-
 def _raise_shared_failure(pipelines: list[CameraPipeline]) -> None:
     for p in pipelines:
         if isinstance(p.error, SharedCodeError):
@@ -210,18 +199,22 @@ def run_group(
         for cam in cameras:
             info = cam.source.open()
             infos.append(dataclasses.replace(info, link=cam.link) if cam.link else info)
-        calibrations = []  # (document, positions, why it was not used) per camera
-        for cam, info in zip(cameras, infos, strict=True):
-            try:
-                calibrations.append(
-                    (doc := cam.replay.calibration, doc and _saved_positions(doc), None)
-                    if replaying
-                    else (*load_camera_calibration(cam.calibration_path, cam.camera_id, info), None)
-                    if cam.calibration_path
-                    else (None, None, None)
-                )
-            except (ValueError, OSError) as e:
-                calibrations.append((None, None, f"calibration not used: {e}"))
+        intakes = [
+            take_calibration(
+                FromRun(cam.replay.calibration)
+                if replaying and cam.replay.calibration is not None
+                else FromFile(cam.calibration_path)
+                if cam.calibration_path
+                else None,
+                cam.camera_id,
+                (info.width, info.height),
+            )
+            for cam, info in zip(cameras, infos, strict=True)
+        ]
+        calibrations = [
+            (i.calibration, i.calibration.positions() if i.calibration else None)
+            for i in intakes
+        ]
         shared_detector = None if detector is None else SharedDetector(detector)
         if detector is not None and matcher is None:
             matcher = CourtMatcher()
@@ -246,11 +239,11 @@ def run_group(
                     record,
                     cam.camera_id,
                     group_id,
-                    session_calibration(calibration),
+                    calibration.session_block() if calibration else None,
                 ),
                 FileRecorder() if record else None,
             )
-            for cam, info, session_id, (calibration, _, _) in zip(
+            for cam, info, session_id, (calibration, _) in zip(
                 cameras, infos, session_ids, calibrations, strict=True
             )
         ]
@@ -267,15 +260,14 @@ def run_group(
                     cam.camera_id,
                     matcher,
                     positions,
-                    calibration
-                    and (calibration["image_size"]["width"], calibration["image_size"]["height"]),
+                    calibration and calibration.image_size,
                     order,
                 ),
                 calibration=calibration,
                 positions=positions,
                 on_event=functools.partial(report, cam.camera_id),
             )
-            for cam, input, (calibration, positions, _) in zip(
+            for cam, input, (calibration, positions) in zip(
                 cameras, inputs, calibrations, strict=True
             )
         ]
@@ -294,11 +286,13 @@ def run_group(
         # a stop from here on waits until every session is open, so it ends them all, not half
         held = hold_ctrl_c(stop_early)
         for i, p in enumerate(pipelines):
-            run = dataclasses.replace(runs[i], group=group)
+            run = dataclasses.replace(
+                runs[i], group=group, checks=intakes[i].checks or runs[i].checks
+            )
             p.open_session(run)
             opened.append(p)
-            if problem := calibrations[i][2]:  # before any run, so no t0: t_mono is null
-                p.log_event(HealthEvent("error", utc_now(), None, problem))
+            for event in intakes[i].events:
+                p.log_event(event)
             if detector is not None and len(cameras) > 1 and calibrations[i][1] is None:
                 p.log_event(HealthEvent("appearance_only", utc_now(), None, APPEARANCE_ONLY))
             if on_session:
