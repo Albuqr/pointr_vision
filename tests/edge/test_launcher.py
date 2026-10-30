@@ -18,6 +18,7 @@ from scripts import run_cameras as rc
 from services.edge import main as cli
 from services.edge.capture.capture import Capture
 from services.edge.main import EXIT_INTERRUPTED
+from services.edge.session.writer import mask_credentials
 
 ROOT = Path(__file__).resolve().parents[2]
 FAKE = Path(__file__).with_name("fake_camera.py")
@@ -798,8 +799,67 @@ def test_a_groups_lines_reach_the_camera_they_name(tmp_path):
     assert (one.session_dir, two.session_dir) == (Path("C:/out/cam1_y"), Path("C:/out/cam2_x"))
     assert (one.preview_ready, one.preview_port, two.preview_ready) == (True, 51234, False)
     assert (one.failed_reads, two.failed_reads) == ("-", "7")
-    assert one.failure == two.failure == "the group did not run: boom"
+    assert one.failure is None and two.failure is None  # a run-time error is not a start failure
+    assert one.run_errors == two.run_errors == ["the group did not run: boom"]
     assert list(two.tail)[:2] == ["device: cpu", "session: C:/out/cam2_x"]  # for the error panel
+
+
+def fake_proc(*lines: str):
+    return SimpleNamespace(stdout=[line + "\n" for line in lines], poll=lambda: None)
+
+
+def group_children(tmp_path, *lines: str):
+    cams = [rc.Camera("cam1", "0", "usb"), rc.Camera("cam2", "1", "usb")]
+    lau = rc.Launcher(cams, rc.Options(str(tmp_path), GROUP))
+    one, two = (rc.Child(c) for c in cams)
+    one.proc = two.proc = fake_proc(*lines)
+    lau.read(one, two)
+    return one, two
+
+
+def test_b2_a_run_error_after_the_session_lines_is_not_a_start_failure(tmp_path):
+    one, two = group_children(
+        tmp_path,
+        "[cam1] session: C:/out/cam1_y",
+        "[cam2] session: C:/out/cam2_x",
+        "error: final session files could not be written: boom",
+    )
+    expected = ["final session files could not be written: boom"]
+    assert one.failure is None and two.failure is None
+    assert one.run_errors == two.run_errors == expected
+
+
+def test_b2_an_error_before_a_cameras_session_line_is_still_its_start_failure(tmp_path):
+    secret = "rtsp://admin:hunter2@10.0.0.9/x"
+    one, two = group_children(
+        tmp_path,
+        "[cam1] session: C:/out/cam1_y",
+        f"error: cannot open source {secret}",
+        "[cam2] session: C:/out/cam2_x",
+    )
+    expected = mask_credentials(f"cannot open source {secret}")
+    assert "hunter2" not in expected
+    assert two.failure == expected and two.run_errors == []
+    assert one.failure is None and one.run_errors == [expected]
+
+
+def test_b2_a_single_cameras_run_error_after_its_session_line(tmp_path):
+    cam = rc.Camera("cam1", "0", "usb")
+    lau = rc.Launcher([cam], rc.Options(str(tmp_path), GROUP))
+    child = rc.Child(cam)
+    child.proc = fake_proc("session: C:/out/cam1_y", "error: camera did not stop cleanly")
+    lau.read(child)
+    assert child.failure is None
+    assert child.run_errors == ["camera did not stop cleanly"]
+
+
+def test_b2_a_single_cameras_error_before_its_session_line_is_a_start_failure(tmp_path):
+    cam = rc.Camera("cam1", "0", "usb")
+    lau = rc.Launcher([cam], rc.Options(str(tmp_path), GROUP))
+    child = rc.Child(cam)
+    child.proc = fake_proc("error: cannot open source")
+    lau.read(child)
+    assert child.failure == "cannot open source"
 
 
 def test_a_camera_without_a_group_runs_in_its_own_process(tmp_path):
