@@ -1474,3 +1474,18 @@ opens stays a run-time error. Emit centralizes camera tags, physical-line splitt
 and stream selection. The launcher and Studio migrate now; real edge emitters follow in T10.
 This additive protocol section changes no stored session/run fields. The calibration format
 and its acceptance range remain unchanged.
+
+## D-067: Narrow camera pipeline and persist failed reads (2026-10-30)
+
+The camera pipeline owns capture, processing, health and writing behind lifecycle methods,
+live views and an immutable CameraStats snapshot. LiveInput and ReplayInput select recording
+and replay behavior at construction; preview callbacks must register before start. The writer
+Protocol explicitly declares its directories, status and done event; its start methods stay
+separate. Callers use pipeline views and snapshots, including benchmark output.
+
+Contract 0.24.0 adds counts.failed_reads: source reads returning no frame, excluding normal
+finite-source end. This preserves the existing runtime counter and source-health behavior.
+The owner retained this T7 acceptance criterion and authorized a contract bump after T6;
+this supersedes T7's original no-bump instruction. Counts remain null before finalization.
+Captured-frame accounting and calibration format are unchanged.
+

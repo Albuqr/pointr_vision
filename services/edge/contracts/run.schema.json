@@ -324,12 +324,13 @@
       "type": ["object", "null"],
       "description": "null until the run ends",
       "additionalProperties": false,
-      "required": ["captured", "processed", "dropped", "unprocessed", "rec_dropped"],
+      "required": ["captured", "processed", "dropped", "unprocessed", "rec_dropped", "failed_reads"],
       "properties": {
         "captured": {"type": "integer", "minimum": 0},
         "processed": {"type": "integer", "minimum": 0},
         "dropped": {"type": "integer", "minimum": 0},
         "unprocessed": {"type": "integer", "minimum": 0},
+        "failed_reads": {"type": "integer", "minimum": 0},
         "rec_dropped": {
           "type": ["integer", "null"],
           "minimum": 0,

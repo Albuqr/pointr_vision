@@ -43,7 +43,7 @@
   "t0_wall": "2026-10-07T18:00:00.500Z",
   "t0_mono": 1234.5678,
   "ended_at": "2026-10-07T18:01:00Z",
-  "counts": {"captured": 10, "processed": 7, "dropped": 2, "unprocessed": 1, "rec_dropped": 0},
+  "counts": {"captured": 10, "processed": 7, "dropped": 2, "unprocessed": 1, "rec_dropped": 0, "failed_reads": 0},
   "calibration": null,
   "checks": null,
   "clock": null,
