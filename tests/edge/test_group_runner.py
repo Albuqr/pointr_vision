@@ -263,7 +263,7 @@ def test_each_opened_session_is_handed_over_before_its_camera_starts(clips, tmp_
     seen = []
 
     def on_session(camera_id, pipeline):
-        seen.append((camera_id, pipeline.writer.dir.name, pipeline.capture.t0))
+        seen.append((camera_id, pipeline.session_dir.name, pipeline.stats().t0))
 
     run_two(clips, tmp_path, None, on_session=on_session)
     assert [(c, t0) for c, _, t0 in seen] == [("cam1", None), ("cam2", None)]  # not started

@@ -16,14 +16,54 @@ from pathlib import Path
 
 from services.edge.capture.capture import Capture
 from services.edge.capture.health import HealthConfig, HealthMonitor
-from services.edge.capture.types import HealthEvent, SourceInfo, utc_now
+from services.edge.capture.types import FrameSource, HealthEvent, SourceInfo, utc_now
 from services.edge.contract import VIDEO_FILE
 from services.edge.perception.loop import Processor
 from services.edge.power import read_power
-from services.edge.session.types import FrameRecord, RunCounts, RunMeta, SessionEvent, SessionMeta
+from services.edge.recording.types import Recorder
+from services.edge.session.types import (
+    FrameRecord,
+    RunCounts,
+    RunMeta,
+    SessionEvent,
+    SessionMeta,
+    SessionWriter,
+)
 from services.edge.ui.preview import HudInfo
 
 OnEvent = Callable[[HealthEvent, float | None], None]  # the event and the run's t0 (None before)
+
+
+@dataclasses.dataclass(frozen=True)
+class LiveInput:
+    source: FrameSource
+    info: SourceInfo
+    meta: SessionMeta
+    recorder: Recorder | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class ReplayInput:
+    source: FrameSource
+    info: SourceInfo
+    session_dir: Path | str | None = None
+    meta: SessionMeta | None = None  # a bare file replay creates a session
+
+
+@dataclasses.dataclass(frozen=True)
+class CameraStats:
+    captured: int = 0
+    processed: int = 0
+    dropped: int = 0
+    unprocessed: int = 0
+    rec_dropped: int | None = None
+    failed_reads: int = 0
+    t0: float | None = None
+    t0_wall: str | None = None
+    first_start: float | None = None
+    last_end: float | None = None
+    delays_ms: tuple[float, ...] = ()
+    frame_size: tuple[int, int] | None = None
 
 
 def load_camera_calibration(path: str, camera_id: str | None, info: SourceInfo):
@@ -68,66 +108,65 @@ class CameraPipeline:
     """Capture, processing and logging for one camera, from an opened source to a closed session.
 
     Use: `open_session(...)`, `start()`, wait on `done` (or stop early), then `stop(status)`,
-    which always writes the final status. `replay` means the frames come from a recorded video:
+    which always writes the final status. ReplayInput means frames come from a recorded video:
     capture is lossless and each frame keeps its own video time."""
 
     def __init__(
         self,
-        source,
-        info: SourceInfo,
-        writer,
+        input: LiveInput | ReplayInput,
+        writer: SessionWriter,
         config: HealthConfig,
         *,
         detector=None,
         tracker=None,
-        recorder=None,
         calibration: dict | None = None,
         positions=None,
-        replay: bool = False,
         on_event: OnEvent | None = None,
     ):
-        self.source = source
-        self.info = info
-        self.writer = writer
-        self.detector = detector
-        self.recorder = recorder
+        self._input = input
+        self._source = input.source
+        self.info = input.info
+        self._writer = writer
+        self._detector = detector
+        recorder = input.recorder if isinstance(input, LiveInput) else None
+        self._recorder = recorder
         self.calibration = calibration
-        self.positions = positions
-        self.replay = replay
+        self._positions = positions
+        self._replay = isinstance(input, ReplayInput)
+        self._started = False
+        self._rec_dropped = None
         self._on_event = on_event or (lambda ev, t0: None)
         self._size_first = True
         self._size_problem: str | None = None
-        self.monitor = HealthMonitor(config)
-        self.capture = Capture(
-            source,
-            self.monitor,
+        self._monitor = HealthMonitor(config)
+        self._capture = Capture(
+            input.source,
+            self._monitor,
             self.log_event,
             on_frame=recorder.write if recorder else None,
-            lossless=replay,
-            on_first_frame=lambda f: self.writer.set_ready("first_frame", f.t_wall, f.t_recv),
+            lossless=self._replay,
+            on_first_frame=lambda f: self._writer.set_ready("first_frame", f.t_wall, f.t_recv),
         )
-        self.processor = Processor(
-            self.capture.proc_queue,
-            self.capture.done,
+        self._processor = Processor(
+            self._capture.proc_queue,
+            self._capture.done,
             detector,
             tracker,
             self.log_event,
             on_processed=self._log_frame,
-            dropped=lambda: self.capture.dropped,
+            dropped=lambda: self._capture.dropped,
         )
 
     @property
     def done(self) -> threading.Event:
         """Set when processing has ended (the source ended, or a failure)."""
-        return self.processor.done
+        return self._processor.done
 
     # -- session ---------------------------------------------------------------------------
 
     def open_session(
         self,
         run: RunMeta,
-        meta: SessionMeta | None = None,
-        session_dir: Path | str | None = None,
     ) -> None:
         """Start the session (meta) or add a run to a recorded one (session_dir, a replay), then
         the recorder. Raises OSError when the session cannot be written."""
@@ -136,28 +175,30 @@ class CameraPipeline:
 
             run = dataclasses.replace(run, calibration=run_calibration(self.calibration))
         # positions only for a calibrated run: an uncalibrated run keeps the two-argument call
+        session_dir = self._input.session_dir if isinstance(self._input, ReplayInput) else None
+        meta = self._input.meta
         if session_dir is not None:
-            self.writer.start_run(session_dir, run, self.positions)
-        elif self.positions:
-            self.writer.start(meta, run, self.positions)
+            self._writer.start_run(session_dir, run, self._positions)
+        elif self._positions:
+            self._writer.start(meta, run, self._positions)
         else:
-            self.writer.start(meta, run)
-        if self.recorder:
-            self.recorder.start(self.writer.dir / VIDEO_FILE, self.info)
+            self._writer.start(meta, run)
+        if self._recorder:
+            self._recorder.start(self._writer.dir / VIDEO_FILE, self.info)
 
     def mark_preview_ready(self) -> None:
         """The first annotated preview image is ready to serve (run.json ready, D-052)."""
-        self.writer.set_ready("first_preview", utc_now(), time.perf_counter())
+        self._writer.set_ready("first_preview", utc_now(), time.perf_counter())
 
     def rel(self, t: float | None) -> float | None:
         """time.perf_counter() to s since the run's t0; None before t0 (D-011, D-014)."""
-        t0 = self.capture.t0
+        t0 = self._capture.t0
         return None if t is None or t0 is None or t < t0 else t - t0
 
     def log_event(self, ev: HealthEvent) -> None:
         """A session event, also reported to the caller."""
-        self.writer.event(SessionEvent(ev.t_wall, self.rel(ev.t_mono), ev.kind, ev.detail))
-        self._on_event(ev, self.capture.t0)
+        self._writer.event(SessionEvent(ev.t_wall, self.rel(ev.t_mono), ev.kind, ev.detail))
+        self._on_event(ev, self._capture.t0)
 
     # -- per frame -------------------------------------------------------------------------
 
@@ -188,12 +229,12 @@ class CameraPipeline:
         return problem, bool(first_frame and problem)
 
     def _log_frame(self, p) -> None:
-        writer, recorder = self.writer, self.recorder
+        writer, recorder = self._writer, self._recorder
         if writer.done.is_set():  # nothing is saved any more: end the run (status error)
             raise RuntimeError("session writer stopped")
-        t0 = self.capture.t0
-        n_dets = None if self.detector is None else len(p.dets.xyxy)
-        n_tracks = None if self.detector is None else len(p.tracks)
+        t0 = self._capture.t0
+        n_dets = None if self._detector is None else len(p.dets.xyxy)
+        n_tracks = None if self._detector is None else len(p.tracks)
         rec = FrameRecord(
             p.frame.seq,
             p.frame.t_recv - t0,
@@ -202,7 +243,11 @@ class CameraPipeline:
             n_dets,
             n_tracks,
             p.dropped_total,
-            recorder.t_video(p.frame.seq) if recorder else p.frame.t_video if self.replay else None,
+            recorder.t_video(p.frame.seq)
+            if recorder
+            else p.frame.t_video
+            if self._replay
+            else None,
         )
         no_positions, first_size_mismatch = (
             self._frame_size_problem(p) if self.calibration is not None else (None, False)
@@ -217,12 +262,12 @@ class CameraPipeline:
             raise RuntimeError(f"calibration cannot be used: the first {no_positions}")
 
     def hud(self) -> HudInfo:
-        latest = self.processor.latest
-        detector = self.detector
+        latest = self._processor.latest
+        detector = self._detector
         return HudInfo(
-            capture_fps=self.capture.fps,
-            dropped=self.capture.dropped,
-            proc_fps=self.processor.fps,
+            capture_fps=self._capture.fps,
+            dropped=self._capture.dropped,
+            proc_fps=self._processor.fps,
             app_delay_ms=latest.app_delay_ms if latest else None,
             people=None if detector is None else (len(latest.dets.xyxy) if latest else 0),
             tracks=None if detector is None else (len(latest.tracks) if latest else 0),
@@ -232,25 +277,26 @@ class CameraPipeline:
 
     def start(self) -> None:
         """Start capture and processing, and give the writer the run's t0."""
-        self.capture.start()
-        self.processor.start()
-        while self.capture.t0_wall is None:  # set first thing by the capture thread
+        self._started = True
+        self._capture.start()
+        self._processor.start()
+        while self._capture.t0_wall is None:  # set first thing by the capture thread
             time.sleep(0.001)
-        self.writer.set_t0(self.capture.t0, self.capture.t0_wall)
+        self._writer.set_t0(self._capture.t0, self._capture.t0_wall)
 
     def stop(self, session_status: str) -> str:
         """The camera's shutdown path: stop capture, drain processing, stop the recorder and
         write the final status. Every wait is bounded. Returns the status written: `ended` turns
         into `error` when capture, processing or the recorder failed."""
         capture, processor, recorder, writer = (
-            self.capture, self.processor, self.recorder, self.writer
+            self._capture, self._processor, self._recorder, self._writer
         )  # fmt: skip
         # capture first, then processing drains the last frame (ARCHITECTURE section 5)
         cap_ok = capture.stop()
         # without a stopped capture there is no last frame to drain: do not wait for it
         proc_ok = processor.stop(10.0 if cap_ok else 0.0)
         if cap_ok:
-            self.source.close()
+            self._source.close()
         if not cap_ok:
             print(
                 "warning: capture thread did not stop in time; source left open; "
@@ -303,8 +349,9 @@ class CameraPipeline:
             print(f"warning: power state at the end not recorded: {e!r}", file=sys.stderr)
         counts = RunCounts(
             capture.captured, processor.processed, capture.dropped, processor.unprocessed,
-            rec_dropped,
+            rec_dropped, capture.failed_reads,
         )  # fmt: skip
+        self._rec_dropped = rec_dropped
         try:
             writer.close(session_status, counts)
         except Exception as e:  # cannot write at all: say so, keep shutting down
@@ -314,4 +361,54 @@ class CameraPipeline:
     @property
     def failed(self) -> bool:
         """Capture or processing ended with an error."""
-        return bool(self.capture.error or self.processor.error)
+        return bool(self._capture.error or self._processor.error)
+
+    @property
+    def session_dir(self) -> Path | None:
+        return self._writer.dir
+
+    @property
+    def run_dir(self) -> Path:
+        return self._writer.run_dir
+
+    @property
+    def status(self) -> str | None:
+        return self._writer.status
+
+    @property
+    def error(self) -> Exception | None:
+        return self._processor.error or self._capture.error
+
+    def health_state(self):
+        return self._monitor.state
+
+    def latest(self):
+        return self._processor.latest
+
+    def raw_snapshot(self):
+        return self._capture.raw_snapshot()
+
+    def on_preview(self, callback) -> None:
+        """Register before start; the callback receives every processed frame."""
+        if self._started:
+            raise RuntimeError("preview must be registered before start")
+        self._processor.on_preview = callback
+
+    def stats(self) -> CameraStats:
+        """A detached snapshot; counters are final after a completed shutdown."""
+        capture, processor = self._capture, self._processor
+        latest = processor.latest
+        return CameraStats(
+            captured=capture.captured,
+            processed=processor.processed,
+            dropped=capture.dropped,
+            unprocessed=processor.unprocessed,
+            rec_dropped=self._rec_dropped,
+            failed_reads=capture.failed_reads,
+            t0=capture.t0,
+            t0_wall=capture.t0_wall,
+            first_start=processor.first_start,
+            last_end=processor.last_end,
+            delays_ms=tuple(processor.delays_ms),
+            frame_size=None if latest is None else latest.frame.image.shape[1::-1],
+        )

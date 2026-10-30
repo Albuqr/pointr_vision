@@ -5,6 +5,7 @@ needs (D-008, completed by D-020).
 """
 
 import re
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -59,6 +60,7 @@ class RunCounts:
     dropped: int
     unprocessed: int
     rec_dropped: int | None = None  # None when recording is disabled
+    failed_reads: int = 0  # read attempts returning no frame; normal source end excluded
 
 
 @dataclass(frozen=True)
@@ -103,6 +105,13 @@ class PositionMap(Protocol):
 
 @runtime_checkable
 class SessionWriter(Protocol):
+    dir: Path | None  # None before start
+    status: str | None  # None before close
+    done: threading.Event
+
+    @property
+    def run_dir(self) -> Path: ...
+
     def start(self, meta: SessionMeta, run: RunMeta, positions: PositionMap | None = None) -> None:
         """positions is required exactly when run.calibration is set."""
         ...

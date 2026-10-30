@@ -811,7 +811,7 @@ one; `differences` is the number of rows in `fusion_diff.csv`.
 | delta | float/empty | the difference in metres for `position`; empty for the other fields |
 
 
-## 16. Edge–Studio child protocol (0.24.0, D-066)
+## 16. Edge–Studio child protocol (0.23.0, D-066)
 
 The launcher starts an edge child and reads its UTF-8 stdout with stderr merged in. The stop
 channel is the child's stdin. These are readable text lines, not JSON. A camera-specific

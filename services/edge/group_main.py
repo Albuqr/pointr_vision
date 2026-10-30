@@ -133,7 +133,7 @@ def run(cams: list[argparse.Namespace], stop: StopRequest) -> int:
     def on_session(camera_id, pipeline):
         a = by_id[camera_id]
         pipelines[camera_id] = pipeline
-        say(camera_id, f"session: {pipeline.writer.dir}")
+        say(camera_id, f"session: {pipeline.session_dir}")
         if a.calibration_problem:  # before any run, so no t0: t_mono is null
             detail = f"calibration not used: {a.calibration_problem}"
             pipeline.log_event(HealthEvent("error", utc_now(), None, detail))
@@ -173,8 +173,8 @@ def run(cams: list[argparse.Namespace], stop: StopRequest) -> int:
             preview.close()
     try:  # the sessions are saved: a stop now only cuts the summaries short
         for camera_id, p in pipelines.items():
-            c, proc = p.capture, p.processor
-            say(camera_id, f"session {p.writer.status}: {p.writer.dir}")
+            c = proc = p.stats()
+            say(camera_id, f"session {p.status}: {p.session_dir}")
             say(
                 camera_id,
                 f"t0_wall={c.t0_wall} captured={c.captured} dropped={c.dropped} "
@@ -182,7 +182,7 @@ def run(cams: list[argparse.Namespace], stop: StopRequest) -> int:
                 f"unprocessed={proc.unprocessed}",
             )
             try:  # a failure is a warning: the session is saved (D-023)
-                say(camera_id, format_summary(write_report(p.writer.run_dir)))
+                say(camera_id, format_summary(write_report(p.run_dir)))
             except Exception as e:
                 print(f"warning: {camera_id}: report not written: {e!r}", file=sys.stderr)
     except KeyboardInterrupt:

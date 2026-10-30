@@ -32,10 +32,12 @@ import numpy as np
 
 from services.edge.camera_pipeline import (
     CameraPipeline,
+    CameraStats,
+    LiveInput,
+    ReplayInput,
     load_camera_calibration,
     session_calibration,
 )
-from services.edge.capture.capture import Capture
 from services.edge.capture.health import HealthConfig
 from services.edge.capture.sources import (
     DEFAULT_CAPTURE_SIZE,
@@ -47,7 +49,7 @@ from services.edge.capture.sources import (
 from services.edge.capture.types import Frame, HealthEvent, utc_now
 from services.edge.contract import UI_STOP_DETAIL, VIDEO_FILE
 from services.edge.perception.detector import DET_SIZE_MULTIPLE
-from services.edge.perception.loop import Processor, delay_stats, rates
+from services.edge.perception.loop import delay_stats, rates
 from services.edge.power import read_power
 from services.edge.recording.recorder import FileRecorder
 from services.edge.replay.resolve import ReplayError, resolve_replay
@@ -532,19 +534,19 @@ def start_http_preview(port: int, pipeline: CameraPipeline):
 
     preview = HttpPreview(
         port,
-        lambda: pipeline.monitor.state,
+        pipeline.health_state,
         pipeline.hud,
         lambda error: pipeline.log_event(
             HealthEvent(
                 "error", utc_now(), time.perf_counter(), f"preview encoding failed: {error!r}"
             )
         ),
-        raw_snapshot=pipeline.capture.raw_snapshot,
+        raw_snapshot=pipeline.raw_snapshot,
         calibration=pipeline.calibration,
         on_first_preview=pipeline.mark_preview_ready,
     )
+    pipeline.on_preview(preview.publish)
     preview.start()
-    pipeline.processor.on_preview = preview.publish
     return preview
 
 
@@ -637,21 +639,6 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
     held = hold_ctrl_c(stop_early)
     record = not args.no_record and replay is None  # a replay already has its video
     session_replay = replay is not None and replay.session_dir is not None
-    pipeline = CameraPipeline(
-        source,
-        info,
-        FileSessionWriter(args.out),
-        config,
-        detector=detector,
-        tracker=tracker,
-        recorder=FileRecorder() if record else None,
-        calibration=calibration,
-        positions=positions,
-        replay=replay is not None,
-        on_event=on_event,
-    )
-    writer, capture, processor = pipeline.writer, pipeline.capture, pipeline.processor
-    log_event = pipeline.log_event
     try:
         meta = (
             None
@@ -667,17 +654,31 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
                 session_calibration(calibration),
             )
         )
+        input = (
+            ReplayInput(source, info, replay.session_dir, meta)
+            if replay is not None
+            else LiveInput(source, info, meta, FileRecorder() if record else None)
+        )
+        pipeline = CameraPipeline(
+            input,
+            FileSessionWriter(args.out),
+            config,
+            detector=detector,
+            tracker=tracker,
+            calibration=calibration,
+            positions=positions,
+            on_event=on_event,
+        )
+        log_event = pipeline.log_event
         pipeline.open_session(
             run_meta(settings, info, config, detector, tracker, gpu, replay, model_loaded),
-            meta=meta,
-            session_dir=replay.session_dir if session_replay else None,
         )
     except OSError as e:
         release_ctrl_c(held)
         source.close()
         print(f"error: cannot write session data under {args.out!r}: {e}", file=sys.stderr)
         return EXIT_CAPTURE_ERROR
-    print(f"session: {writer.dir}")
+    print(f"session: {pipeline.session_dir}")
 
     if args.calibration_problem:  # before any run, so no t0: t_mono is null
         problem = args.calibration_problem
@@ -702,15 +703,15 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
         if args.preview:
             title = f"Pointr {args.camera_id} (q to quit)" if args.camera_id else None
             run_preview(
-                lambda: processor.latest,
-                processor.done,
+                pipeline.latest,
+                pipeline.done,
                 pipeline.hud,
-                lambda: pipeline.monitor.state,
+                pipeline.health_state,
                 until,
                 title,
             )
         else:
-            while not processor.done.wait(0.1):
+            while not pipeline.done.wait(0.1):
                 if until is not None and time.perf_counter() >= until:
                     break
     except KeyboardInterrupt:
@@ -737,11 +738,13 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
             if previous is not None:
                 signal.signal(signal.SIGINT, previous)
         try:
-            print(f"session {writer.status}: {writer.dir}")
+            snapshot = pipeline.stats()
+            print(f"session {pipeline.status}: {pipeline.session_dir}")
             print(
-                f"t0_wall={capture.t0_wall} captured={capture.captured} dropped={capture.dropped} "
-                f"failed_reads={capture.failed_reads} processed={processor.processed} "
-                f"unprocessed={processor.unprocessed} events={dict(events.copy())}"
+                f"t0_wall={snapshot.t0_wall} captured={snapshot.captured} "
+                f"dropped={snapshot.dropped} "
+                f"failed_reads={snapshot.failed_reads} processed={snapshot.processed} "
+                f"unprocessed={snapshot.unprocessed} events={dict(events.copy())}"
             )
             if args.benchmark:
                 det = "off" if detector is None else detector.det_size
@@ -751,16 +754,15 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
                     info.link,
                     det,
                     device,
-                    capture,
-                    processor,
+                    snapshot,
                     preview=args.http_preview is not None or args.preview,
                 )
-            print_report(writer.run_dir)
+            print_report(pipeline.run_dir)
         except KeyboardInterrupt:
             status = EXIT_INTERRUPTED
         except OSError:  # stdout is gone (the launcher died): the files are already saved
             pass
-    if (pipeline.failed or writer.status != session_status) and not status:
+    if (pipeline.failed or pipeline.status != session_status) and not status:
         status = EXIT_CAPTURE_ERROR
     return status
 
@@ -781,25 +783,23 @@ def print_benchmark(
     link: str | None,
     det: int | str,
     device: str,
-    capture: Capture,
-    processor: Processor,
+    snapshot: CameraStats,
     preview: bool = False,
 ) -> None:
     """The A7 baseline block. Every figure comes from this run. The run time is t0 to now,
     so it includes the shutdown (about one inference)."""
-    elapsed = time.perf_counter() - capture.t0 if capture.t0 else 0.0
-    latest = processor.latest
-    frame = f"{latest.frame.image.shape[1]}x{latest.frame.image.shape[0]}" if latest else "-"
+    elapsed = time.perf_counter() - snapshot.t0 if snapshot.t0 else 0.0
+    frame = "-" if snapshot.frame_size is None else "x".join(map(str, snapshot.frame_size))
     proc_fps, drop_rate = rates(
-        capture.captured,
-        capture.dropped,
-        processor.processed,
-        processor.first_start,
-        processor.last_end,
+        snapshot.captured,
+        snapshot.dropped,
+        snapshot.processed,
+        snapshot.first_start,
+        snapshot.last_end,
     )
     fps = "-" if proc_fps is None else f"{proc_fps:.2f}"
     rate = "-" if drop_rate is None else f"{100 * drop_rate:.1f}%"
-    stats = delay_stats(processor.delays_ms)
+    stats = delay_stats(snapshot.delays_ms)
     delay = (
         f"p50 {stats['p50']:.1f}, p95 {stats['p95']:.1f}, max {stats['max']:.1f}" if stats else "-"
     )
@@ -807,10 +807,10 @@ def print_benchmark(
         f"benchmark: {elapsed:.1f} s run ({seconds:g} s requested), link {link}, "
         f"frames {frame}, det-size {det}, device {device}, preview {'on' if preview else 'off'}, "
         f"cpu {platform.processor() or '-'}\n"
-        f"benchmark: captured {capture.captured}, processed {processor.processed} "
-        f"({fps} fps), dropped {capture.dropped} ({rate} of captured), "
-        f"failed reads {capture.failed_reads}, unprocessed {processor.unprocessed}\n"
-        f"benchmark: app delay ms {delay} over {len(processor.delays_ms)} frames"
+        f"benchmark: captured {snapshot.captured}, processed {snapshot.processed} "
+        f"({fps} fps), dropped {snapshot.dropped} ({rate} of captured), "
+        f"failed reads {snapshot.failed_reads}, unprocessed {snapshot.unprocessed}\n"
+        f"benchmark: app delay ms {delay} over {len(snapshot.delays_ms)} frames"
     )
 
 
