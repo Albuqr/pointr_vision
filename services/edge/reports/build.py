@@ -6,7 +6,6 @@ again at any time.
 """
 
 import csv
-import json
 import math
 import statistics
 from collections import defaultdict
@@ -25,6 +24,7 @@ from services.edge.reports.movement import (
     TrackMetrics,
     track_metrics,
 )
+from services.edge.session.folder import read_run, read_session, run_paths
 from services.edge.session.writer import CONTRACT_VERSION, write_json
 
 LOW_FPS = 5.0  # processed fps below this: say that samples are sparse
@@ -160,10 +160,6 @@ class Report:
         }
 
 
-def load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
 def read_csv(path: Path) -> list[dict]:
     with open(path, newline="", encoding="utf-8") as f:
         return list(csv.DictReader(f))
@@ -177,8 +173,7 @@ def seconds_between(start: str | None, end: str | None) -> float | None:
 
 def run_dirs(session_dir: Path) -> list[Path]:
     """The session's run folders, in the order session.json lists them."""
-    ids = load_json(session_dir / "session.json")["runs"]
-    return [session_dir / "runs" / r for r in ids]
+    return run_paths(session_dir)
 
 
 def build_report(
@@ -188,7 +183,8 @@ def build_report(
     unreadable; a run that never finished (no counts, no end time) still reports."""
     run_dir = Path(run_dir)
     params = params or Params()
-    run = load_json(run_dir / "run.json")
+    run_snapshot = read_run(run_dir)
+    run = run_snapshot.require("run_id", "session_id")
     calibration = run.get("calibration")
     positions = positions or (
         CalibrationPositions(calibration) if calibration else PixelPositions()
@@ -204,7 +200,8 @@ def build_report(
     )
     if params.walking_below <= params.stationary_below:
         raise ValueError("walking threshold must be greater than stationary threshold")
-    session = load_json(run_dir.parent.parent / "session.json")
+    session_snapshot = read_session(run_dir.parent.parent)
+    session = session_snapshot.require("status", "events")
     bad = 0  # rows that do not parse (a truncated last line): skipped and said
     frames = []
     for r in read_csv(run_dir / "frames.csv"):
@@ -251,7 +248,7 @@ def build_report(
     ]
 
     stats = session_stats(run, session, frames, tracks, params)
-    notes = []
+    notes = list(session_snapshot.problems + run_snapshot.problems)
     if bad:
         notes.append(f"{bad} malformed CSV row(s) were skipped")
     if no_position:

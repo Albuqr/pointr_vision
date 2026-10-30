@@ -1435,3 +1435,23 @@ approved by the owner on #63 (outside lane K, schema read only swapped for `cont
 older versions still validate by stamping, as before. A test cannot tell a wrong version from a malformed one by the
 schema alone; the version check is `contract.validate`.
 **Status.** Accepted.
+
+## D-065 ? 2026-10-30 ? One session-folder reader and recovery boundary
+**Context.** Studio, the launcher, replay, reports and scoring parsed the same metadata with different
+shape checks and encodings. Some picked a directory entry or the first usable report rather than the last
+listed run. Studio also maintained a second implementation of interrupted-session marking.
+**Decision.** `services/edge/session/folder.py` owns `read_session`, `read_run`, session/group discovery,
+run ordering and `mark_interrupted`. Reads return frozen snapshots with recursively immutable metadata,
+optional fields and a tuple of problems. JSON is decoded with `utf-8-sig`, accepting a BOM. Strict consumers
+use `require` and receive `SessionDamaged(ValueError)` when their required content is unavailable; unrelated
+optional damage does not prevent a read. The latest run is always the final entry of session.json's runs
+list, including when its files are damaged. Group replay deliberately selects the first (live) run.
+Studio status, camera readiness, sessions page and recovery, launcher summaries, replay lookup and discovery,
+reports and scoring all use this boundary. The camera log ingests the same snapshot's validated events.
+Interrupted marking now lives in `folder.py`, called by Studio recovery after the child has gone away;
+it preserves unknown fields, writes atomically, and reports problems instead of erasing malformed events.
+**Consequences.** Damaged sessions remain visible with their readable fields. Reports do not fall back to an
+older run, and scoring does not infer order from directory names when session.json is damaged. The reader
+reports skipped non-object events; the launcher displays that count and reports include reader problems as
+caveats. The writer's live-session lifecycle remains unchanged. No format change or contract-version bump.
+**Status.** Accepted.

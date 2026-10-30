@@ -74,6 +74,10 @@ def test_B1_recording_status_describes_non_object_session(tmp_path, damaged_json
         assert cameras["cam1"]["state"] == "error"
         assert "session.json" in cameras["cam1"]["error"]
         assert "not a JSON object" in cameras["cam1"]["error"]
+        assert any(
+            event["kind"] == "error" and "not a JSON object" in str(event["detail"])
+            for event in cameras["cam1"]["recent_events"]
+        )
         assert cameras["cam2"]["state"] == "recording"
         assert (first.session_dir / "session.json").read_text(encoding="utf-8") == damaged_json
 

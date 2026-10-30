@@ -88,24 +88,28 @@ def as_document(calibration: dict | None) -> dict | None:
 
 
 def _load(path: Path) -> dict:
+    from services.edge.session.folder import SessionDamaged, read_run
+
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as e:
-        raise ReplayError(f"cannot read {path}: {e}") from e
+        return read_run(path.parent).require()
+    except (SessionDamaged, json.JSONDecodeError) as e:
+        raise ReplayError(str(e)) from e
 
 
 def resolve_group(target: str, out_dir: Path | str) -> GroupReplay | None:
     """The sessions under out_dir whose group_id is `target`, ready to replay together; None when
     there are none. Raises ReplayError when they cannot be replayed as one group."""
+    from services.edge.session.folder import SessionDamaged, find_sessions, run_paths
+
     out = Path(out_dir)
     found = []
-    for folder in sorted(out.iterdir()) if out.is_dir() else []:
+    for snapshot in find_sessions(out, group_id=target):
         try:
-            session = json.loads((folder / "session.json").read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if isinstance(session, dict) and session.get("group_id") == target:
-            found.append((folder, session))
+            session = snapshot.require("camera_id", "runs", "source", "session_id")
+            run_paths(snapshot.path)  # validate every listed folder name before joining paths
+        except SessionDamaged as error:
+            raise ReplayError(str(error)) from error
+        found.append((snapshot.path, session))
     if not found:
         return None
     cameras, group_runs, params = [], set(), {}

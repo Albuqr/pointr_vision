@@ -43,9 +43,9 @@ from services.edge.perception.detector import DET_SIZE_MULTIPLE  # noqa: E402
 from services.edge.reports.build import (  # noqa: E402
     TABLE_HEADER,
     build_report,
-    run_dirs,
     table_row,
 )
+from services.edge.session.folder import read_session  # noqa: E402
 from services.edge.session.types import CAMERA_ID_RE  # noqa: E402
 from services.edge.session.writer import mask_credentials  # noqa: E402
 
@@ -588,7 +588,10 @@ class Launcher:
             if child.session_dir is None:
                 continue
             try:
-                rows.append(table_row(build_report(run_dirs(child.session_dir)[-1])))
+                latest = read_session(child.session_dir).latest_run
+                if latest is None:
+                    raise ValueError("session damaged: no run recorded")
+                rows.append(table_row(build_report(latest.path)))
             except Exception as e:  # shown, never silent (CLAUDE.md rule 6)
                 self.say(f"[launcher] {child.cam.camera_id}: report failed: {e!r}")
                 rows.append((child.cam.camera_id, *["n/a"] * (len(REPORT_HEADER) - 1)))
@@ -635,29 +638,30 @@ def kill_tree(proc: subprocess.Popen) -> None:
 def error_events(session_dir: Path) -> str:
     """How many `error` events session.json holds (a thread that did not stop in time, a dead
     writer): a session can end `interrupted` and still have lost data."""
-    try:
-        doc = json.loads((session_dir / "session.json").read_text(encoding="utf-8"))
-        events = doc["events"]
-        skipped = sum(not isinstance(e, dict) for e in events)
-        errors = str(sum(e["kind"] == "error" for e in events if isinstance(e, dict)))
-        return f"{errors} (skipped {skipped} non-object events)" if skipped else errors
-    except (OSError, ValueError, KeyError):
+    snapshot = read_session(session_dir)
+    if snapshot.events is None:
         return "-"
+    errors = str(sum(event.get("kind") == "error" for event in snapshot.events))
+    skipped = [
+        problem.split(": ", 1)[-1]
+        for problem in snapshot.problems
+        if "non-object events" in problem
+    ]
+    return f"{errors} ({'; '.join(skipped)})" if skipped else errors
 
 
 def session_status(session_dir: Path) -> str:
-    try:
-        status = json.loads((session_dir / "session.json").read_text(encoding="utf-8"))["status"]
-        return status if isinstance(status, str) else "unknown"
-    except (OSError, ValueError, KeyError):
-        return "unknown"
+    return read_session(session_dir).status or "unknown"
 
 
 def processed_fps(session_dir: Path) -> str:
     """Processed frames over first processing start to last end, as the benchmark computes it
     (loop.rates), from frames.csv; '-' when it cannot be computed."""
     try:
-        [run_dir] = (session_dir / "runs").iterdir()
+        latest = read_session(session_dir).latest_run
+        if latest is None:
+            return "-"
+        run_dir = latest.path
         with open(run_dir / "frames.csv", newline="", encoding="utf-8") as f:
             rows = list(csv.DictReader(f))
         span = float(rows[-1]["t_proc_end"]) - float(rows[0]["t_proc_start"])

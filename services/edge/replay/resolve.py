@@ -1,12 +1,12 @@
 """Find the video a replay reads (PHASE_04, RF09, RNF05)."""
 
 import hashlib
-import json
 from dataclasses import dataclass
 from pathlib import Path
 
 from services.edge.capture.sources import FILE_SUFFIXES
 from services.edge.contract import VIDEO_FILE
+from services.edge.session.folder import SessionDamaged, find_sessions, read_session
 
 
 class ReplayError(Exception):
@@ -31,14 +31,8 @@ def sha256_file(path: Path) -> str:
 
 
 def _find_session(target: str, out_dir: Path) -> Path | None:
-    for folder in sorted(out_dir.iterdir()) if out_dir.is_dir() else []:
-        try:
-            doc = json.loads((folder / "session.json").read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if isinstance(doc, dict) and doc.get("session_id") == target:
-            return folder
-    return None
+    found = find_sessions(out_dir, session_id=target)
+    return found[0].path if found else None
 
 
 def resolve_replay(target: str, out_dir: Path | str) -> ReplayTarget:
@@ -54,11 +48,20 @@ def resolve_replay(target: str, out_dir: Path | str) -> ReplayTarget:
     if folder is None:
         raise ReplayError(f"no video file, session folder or session id {target!r}")
     try:
-        session = json.loads((folder / "session.json").read_text(encoding="utf-8"))
-        if not isinstance(session, dict):
-            raise ValueError("not a JSON object")
-    except (OSError, ValueError) as e:
-        raise ReplayError(f"{folder} has no readable session.json: {e}") from e
+        snapshot = read_session(folder)
+        session = snapshot.require()
+        recording = snapshot.get("recording")
+        if recording is not None:
+            snapshot.require(
+                *(
+                    f"recording.{key}"
+                    for key in ("path", "sha256")
+                    if recording.get(key) is not None
+                ),
+                expected=str,
+            )
+    except SessionDamaged as e:
+        raise ReplayError(str(e)) from e
     # the file the session says it recorded (an older session may be a video.mp4), inside its folder
     name = (session.get("recording") or {}).get("path") or VIDEO_FILE
     video = (folder / name).resolve()

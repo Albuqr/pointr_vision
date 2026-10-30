@@ -33,7 +33,8 @@ from services.edge.capture.sources import DEFAULT_CAPTURE_SIZE, SourceOpenError,
 from services.edge.capture.types import SourceEnded
 from services.edge.contract import CONTRACT_VERSION
 from services.edge.launcher import Camera, ConfigError, Launcher, Options, parse_config
-from services.edge.reports.build import build_report, run_dirs
+from services.edge.reports.build import build_report
+from services.edge.session.folder import find_sessions, mark_interrupted, read_run, read_session
 from services.edge.session.writer import mask_credentials
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -77,28 +78,9 @@ class Studio:
             group_id = json.loads(self.active_group_path.read_text(encoding="utf-8"))["group_id"]
         except (OSError, ValueError, KeyError, TypeError):
             return
-        for session_file in Path(self.out).glob("*/session.json"):
-            try:
-                session = json.loads(session_file.read_text(encoding="utf-8"))
-                if not isinstance(session, dict):
-                    continue
-                if session.get("group_id") != group_id or session.get("status") != "running":
-                    continue
-                session["status"] = "interrupted"
-                session["ended_at"] = dt.datetime.now(dt.UTC).isoformat().replace("+00:00", "Z")
-                session.setdefault("events", []).append(
-                    {
-                        "t_wall": session["ended_at"],
-                        "t_mono": None,
-                        "kind": "interrupted",
-                        "detail": "app restarted after an unclean shutdown",
-                    }
-                )
-                temporary = session_file.with_suffix(".json.tmp")
-                temporary.write_text(json.dumps(session, indent=2) + "\n", encoding="utf-8")
-                os.replace(temporary, session_file)
-            except (OSError, ValueError, KeyError, TypeError):
-                continue
+        for session in find_sessions(self.out, group_id=group_id):
+            for problem in mark_interrupted(session):
+                self.audit.record("recovery", session.get("camera_id"), problem)
         self.active_group_path.unlink(missing_ok=True)
 
     def entries(self):
@@ -161,12 +143,12 @@ class Studio:
             "fps_cap": camera.fps_cap,
         }
 
-    def note_child(self, child, log, state, events):
+    def note_child(self, child, log, state, events, session):
         """Copy a child's news into its camera log: session events, and, once, why it ended
         or never recorded, and run-time errors once each (the error stays until dismissed or
         the camera next starts)."""
         if child.session_dir:
-            log.ingest_session_events(str(child.session_dir), events)
+            log.ingest_session(session)
             key = f"{child.session_dir}#run_errors"
             run_errors = list(getattr(child, "run_errors", ()))
             with log.lock:  # two polls at once must not report the same error twice
@@ -340,25 +322,16 @@ class Studio:
         for child in getattr(launcher, "children", []):
             session_dir = child.session_dir
             alive = child.running  # before the files: once gone, what they say is final
-            session = {}
-            if session_dir:
-                try:
-                    session = json.loads((session_dir / "session.json").read_text(encoding="utf-8"))
-                    if not isinstance(session, dict):
-                        session = {
-                            "status": "error",
-                            "events": [
-                                {"kind": "error", "detail": "session.json: not a JSON object"}
-                            ],
-                        }
-                except (OSError, ValueError):
-                    pass
-            status = session.get("status", "starting" if child.running else "error")
-            run_dir = None
+            snapshot = read_session(session_dir) if session_dir else None
+            session = snapshot.document() if snapshot else {}
+            if snapshot and snapshot.data is None:
+                session = {
+                    "status": "error",
+                    "events": [{"kind": "error", "detail": "; ".join(snapshot.problems)}],
+                }
+            status = session.get("status") or ("starting" if child.running else "error")
+            run_dir = snapshot.latest_run.path if snapshot and snapshot.latest_run else None
             try:
-                runs = session.get("runs", [])
-                if session_dir and isinstance(runs, list) and runs:
-                    run_dir = session_dir / "runs" / runs[-1]
                 frames = self.read_recent_frames(run_dir / "frames.csv") if run_dir else []
                 frame = frames[-1] if frames else {}
                 elapsed = (
@@ -372,10 +345,10 @@ class Studio:
                 drops = int(frame.get("dropped_total") or 0)
             except (OSError, ValueError, KeyError):
                 fps, people, track_count, drops = None, 0, 0, 0
-            events = session.get("events", [])
+            events = session.get("events") or []
             state = camera_state(child, alive, session, run_dir)
             log = self.log(child.cam.camera_id)
-            self.note_child(child, log, status, events)
+            self.note_child(child, log, status, events, snapshot)
             health = "OK"
             for event in events:
                 health = {
@@ -952,13 +925,7 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
 
     @app.get("/api/sessions")
     def sessions():
-        base = Path(studio.out).resolve()
-        rows = []
-        if base.exists():
-            for path in base.iterdir():
-                if path.is_symlink() or not path.is_dir() or not (path / "session.json").is_file():
-                    continue
-                rows.append(session_row(path))
+        rows = [session_row(session.path) for session in find_sessions(studio.out)]
         rows.sort(key=lambda row: str(row["started_at"] or ""), reverse=True)
         return rows
 
@@ -1022,14 +989,8 @@ def camera_state(child, alive, session, run_dir) -> str:
         return "stopping"
     if not child.session_dir:
         return "loading_model" if getattr(child, "loading_model", False) else "starting"
-    ready = {}
-    if run_dir:
-        try:
-            loaded = json.loads((run_dir / "run.json").read_text(encoding="utf-8")).get("ready")
-            if isinstance(loaded, dict):
-                ready = loaded
-        except (OSError, ValueError):
-            pass
+    ready = read_run(run_dir).ready if run_dir else None
+    ready = ready or {}
     if not ready.get("first_frame"):
         return "waiting_first_frame"
     return "preview_ready" if ready.get("first_preview") else "recording"
@@ -1101,13 +1062,11 @@ def session_row(path: Path) -> dict:
         "missing": [],
     }
     missing = row["missing"]
-    try:
-        value = json.loads((path / "session.json").read_text(encoding="utf-8"))
-        if not isinstance(value, dict):
-            raise ValueError("not a JSON object")
-    except (OSError, ValueError) as error:
-        missing.append(f"session.json: {_why(error)}")
+    snapshot = read_session(path)
+    missing.extend(snapshot.problems)
+    if snapshot.data is None:
         return row
+    value = snapshot.document()
     for key in ("camera_id", "group_id", "status", "started_at"):
         row[key] = value.get(key)
     try:
@@ -1121,29 +1080,21 @@ def session_row(path: Path) -> dict:
         row["events"] = dict(Counter(str(e.get("kind")) for e in events if isinstance(e, dict)))
     else:
         missing.append("events not readable in session.json")
-    try:
-        run_folders = run_dirs(path)
-    except (OSError, ValueError, KeyError, TypeError) as error:
-        missing.append(f"runs: {_why(error)}")
-        return row
-    if not run_folders:
+    latest = snapshot.latest_run
+    if latest is None:
         missing.append("no run recorded in this session")
         return row
-    reason = None
-    for run_dir in run_folders:
-        try:
-            stats = build_report(run_dir).session
-        except Exception as error:  # a damaged run must not hide the session
-            reason = f"report for run {run_dir.name[:8]}: {_why(error)}"
-            continue
-        row.update(
-            fps=stats.processed_fps.value,
-            captured=stats.n_captured,
-            dropped=stats.n_dropped,
-            drop_rate=stats.drop_rate.value,
-        )
-        if stats.n_dropped is None:
-            missing.append("counts not recorded (the run did not end)")
+    try:
+        stats = build_report(latest.path).session
+    except Exception as error:  # a damaged run must not hide the session
+        missing.append(f"report for run {latest.path.name[:8]}: {_why(error)}")
         return row
-    missing.append(reason)
+    row.update(
+        fps=stats.processed_fps.value,
+        captured=stats.n_captured,
+        dropped=stats.n_dropped,
+        drop_rate=stats.drop_rate.value,
+    )
+    if stats.n_dropped is None:
+        missing.append("counts not recorded (the run did not end)")
     return row
