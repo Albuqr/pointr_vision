@@ -12,6 +12,8 @@ from pathlib import Path
 import cv2
 import pytest
 
+from services.edge import contract
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -89,8 +91,7 @@ def test_no_record_leaves_no_video(clips, tmp_path):
 def validate(name: str, doc: dict) -> None:
     from jsonschema import Draft202012Validator
 
-    schema = json.loads((ROOT / "contracts" / f"{name}.schema.json").read_text(encoding="utf-8"))
-    Draft202012Validator(schema).validate(doc)
+    Draft202012Validator(contract.schema(name)).validate(doc)
 
 
 def test_live_files_match_the_schemas(clips, tmp_path):

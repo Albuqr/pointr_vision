@@ -1,8 +1,10 @@
 # Data contracts
 
-Contract version: **0.21.0**. Any change bumps the version (minor for additive fields, major
+Contract version: **0.22.0**. Any change bumps the version (minor for additive fields, major
 for removals or meaning changes) and needs a `DECISIONS.md` entry. JSON Schemas in
-`contracts/` are written from this file and tests check them against it (D-009).
+`services/edge/contracts/` are written from this file and tests check them against it (D-009).
+The schemas hold a semver pattern, not the number: `contract.validate` in `services/edge/contract.py`
+checks that a document carries the current version (0.22.0, D-064: a refactor, no format change).
 
 Conventions: UUIDv4 for every ID generated on the device. Wall times are UTC ISO-8601.
 Durations and offsets in seconds as floats. Monotonic times are seconds relative to the
@@ -63,7 +65,7 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
 
 ```json
 {
-  "contract_version": "0.21.0",
+  "contract_version": "0.22.0",
   "session_id": "uuid",
   "device_id": "uuid",
   "camera_id": "cam1 | null",
@@ -137,7 +139,7 @@ calibration used by this session and records its mean held-out check residual in
 
 ```json
 {
-  "contract_version": "0.21.0",
+  "contract_version": "0.22.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "mode": "live | replay",
@@ -410,7 +412,7 @@ One report per run, one per camera: there is no fusion across cameras.
 
 ```json
 {
-  "contract_version": "0.21.0",
+  "contract_version": "0.22.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "camera_id": "cam1 | null",
@@ -753,7 +755,7 @@ recorded video and is compared with `frames.csv` `t_video`; shots and tracks joi
 
 ```json
 {
-  "contract_version": "0.21.0",
+  "contract_version": "0.22.0",
   "fusion_id": "uuid",
   "group_id": "token",
   "created_at": "2026-12-01T18:50:00Z",

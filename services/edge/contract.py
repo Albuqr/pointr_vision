@@ -1,9 +1,66 @@
-"""The contract version of the files this code writes and the Studio saves.
+"""The contract version of the files this code writes and the Studio saves, and the schemas.
 
-docs/DATA_CONTRACTS.md, the schemas in contracts/ and the fixtures carry the same number;
-tests/test_contracts.py compares them. Change it here and nowhere else."""
+The version lives here only. The JSON schemas in services/edge/contracts/ carry a semver
+pattern, not a number; `validate` compares a document's version with CONTRACT_VERSION. A bump
+touches this file, the header and example blocks of docs/DATA_CONTRACTS.md, and DECISIONS.md."""
 
-CONTRACT_VERSION = "0.21.0"
+import copy
+import functools
+import json
+import re
+from importlib.resources import files
+
+from jsonschema import Draft202012Validator, ValidationError
+
+CONTRACT_VERSION = "0.22.0"
+
+# Calibration file format -> (lowest contract version that wrote it, inclusive; highest, inclusive,
+# None = up to CONTRACT_VERSION). A bump that leaves the calibration format unchanged needs no
+# edit here; a bump that changes it adds a format and closes the previous range (D-064).
+CALIBRATION_FORMAT = "1"
+CALIBRATION_FORMATS = {"1": ("0.8.0", None)}
+
+_SEMVER = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
+
+
+def parse_version(version) -> tuple[int, int, int]:
+    """Strict `X.Y.Z` to a tuple of ints, so 0.10.0 sorts after 0.9.0. ValueError otherwise."""
+    match = _SEMVER.fullmatch(version) if isinstance(version, str) else None
+    if match is None:
+        raise ValueError(f"not a version X.Y.Z: {version!r}")
+    return tuple(int(part) for part in match.groups())
+
+
+@functools.cache
+def _load_schema(name):
+    path = files("services.edge").joinpath("contracts", f"{name}.schema.json")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def schema(name) -> dict:
+    """The packaged JSON schema `name` (calibration, fusion, report, run, session); a copy."""
+    return copy.deepcopy(_load_schema(name))
+
+
+def validate(name, doc) -> None:
+    """Raise jsonschema.ValidationError unless `doc` carries CONTRACT_VERSION and fits schema."""
+    found = doc.get("contract_version") if isinstance(doc, dict) else None
+    if found != CONTRACT_VERSION:
+        raise ValidationError(
+            f"contract_version {found!r} is not the current contract version {CONTRACT_VERSION!r}"
+        )
+    Draft202012Validator(schema(name)).validate(doc)
+
+
+def accepts_calibration(version) -> bool:
+    """True when a calibration saved under `version` is in the current format's range."""
+    try:
+        found = parse_version(version)
+        low, high = CALIBRATION_FORMATS[CALIBRATION_FORMAT]
+        return parse_version(low) <= found <= parse_version(high or CONTRACT_VERSION)
+    except ValueError:
+        return False
+
 
 # The raw recording of a live session (D-042). MKV, not MP4: an MP4 written by
 # OpenCV has no index until it is closed, so a killed session leaves an unreadable file (measured

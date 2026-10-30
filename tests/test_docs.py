@@ -32,6 +32,9 @@ ALLOWLIST = {
     "services/edge/child_protocol.py": "created by T6 (#68)",
     "services/edge/run/perception.py": "created by T9 (#71)",
     "services/edge/run/stop.py": "created by T9 (#71)",
+    # removed by T1 (D-064); named in older DECISIONS entries and the planning docs
+    "contracts/report.schema.json": "moved to services/edge/contracts/ (D-064)",
+    "services/edge/calibration/calibration.schema.json": "duplicate deleted (D-064)",
 }
 
 ID_RE = re.compile(r"^\**`?((?:[A-Z][A-Za-z0-9]*-)*[A-Z]\d+[a-z]?)`?\**$")

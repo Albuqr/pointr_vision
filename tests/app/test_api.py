@@ -3,7 +3,6 @@ import subprocess
 import sys
 import threading
 import time
-from pathlib import Path
 
 import cv2
 import numpy as np
@@ -15,6 +14,7 @@ from scripts import run_cameras
 from services.app import __main__ as app_cli
 from services.app.config import CameraConfig
 from services.app.server import create_app
+from services.edge import contract
 from services.edge.launcher import Camera, Options, child_command
 from services.edge.launcher_impl import Launcher
 from tests.fixtures.make_clips import make_clips
@@ -418,8 +418,7 @@ def test_calibration_fit_save_and_load_round_trip(client, tmp_path):
     assert saved.status_code == 200, saved.text
     document = saved.json()["calibration"]
     assert client.get("/api/cameras/clip/calibration").json() == document
-    schema_path = Path(__file__).resolve().parents[2] / "contracts/calibration.schema.json"
-    Draft202012Validator(json.loads(schema_path.read_text(encoding="utf-8"))).validate(document)
+    Draft202012Validator(contract.schema("calibration")).validate(document)
     assert (
         client.get("/api/cameras/clip/calibration/compare").json()["difference_score"] is not None
     )

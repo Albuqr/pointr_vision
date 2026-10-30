@@ -21,13 +21,14 @@ def load(path: Path) -> dict:
 
 
 def validator(name: str) -> Draft202012Validator:
-    s = load(ROOT / "contracts" / f"{name}.schema.json")
+    s = contract.schema(name)
     Draft202012Validator.check_schema(s)
     return Draft202012Validator(s)
 
 
 def example(name: str) -> dict:
-    return load(ROOT / "tests" / "fixtures" / "contracts" / f"{name}.example.json")
+    stored = load(ROOT / "tests" / "fixtures" / "contracts" / f"{name}.example.json")
+    return {**stored, "contract_version": contract.CONTRACT_VERSION}  # stamped (D-064)
 
 
 def mutate(doc: dict, path: tuple, value) -> dict:
@@ -326,7 +327,7 @@ def test_an_identical_camera_entry_listed_twice_fails():
         (("counts", "merged_frames"), 1),
         (("counts", "extra"), 1),
         (("extra",), 1),
-        (("contract_version",), "0.10.0"),
+        (("contract_version",), "v0"),
         (("params",), DELETE),
         (("counts",), DELETE),
     ],
@@ -379,7 +380,7 @@ def test_every_enumerated_value_is_named_in_its_doc_section(marker, end, values)
 
 
 def enum_of(schema_name: str, *path: str) -> set:
-    node = load(ROOT / "contracts" / f"{schema_name}.schema.json")
+    node = contract.schema(schema_name)
     for key in path:
         node = node[key]
     return set(node["enum"])

@@ -1410,3 +1410,28 @@ commit (not squash or rebase) so that hash survives. A file that shows a whole-f
 editor problem to fix, not to commit. Branches cut before T0 merges need a rebase and a renormalise of their own
 changes.
 **Status.** Accepted.
+
+## D-064 · 2026-10-30 · contract.py owns the contract version; schemas packaged once, without the version
+**Context.** The version was written in five places that tests compared by hand: CONTRACT_VERSION, the DATA_CONTRACTS
+header, every schema's `const` and `$id`, the fixtures, and `ACCEPTED_VERSIONS` in the calibration loader. The
+calibration schema existed twice (`contracts/` and `services/edge/calibration/`, byte-identical), and the loader's
+hand-written list of accepted versions had already gone stale once (BACKLOG row on 0.14-0.18, B6).
+**Decision.** Amends D-009: the schemas no longer carry the version (a semver `pattern`, and an `$id` without it);
+`contract.validate(name, doc)` refuses a document whose `contract_version` is not CONTRACT_VERSION, then checks the
+schema. Amends D-027: which calibration versions load is a format-range table, `CALIBRATION_FORMATS` (format 1 covers
+0.8.0 up to and including the current version, compared as numbers, so 0.10.0 is after 0.9.0), not a hand list; a
+bump that leaves the calibration format alone needs no edit there. This closes the BACKLOG row on 0.14-0.18 and B6.
+The schemas live only in `services/edge/contracts/` and ship as package data (`pyproject.toml`); the top-level
+`contracts/` folder and the duplicate are gone, and `contract.schema(name)` reads them through `importlib.resources`.
+A version bump now touches three files: `contract.py`, the DATA_CONTRACTS header and example blocks, and this file.
+The fixtures in `tests/fixtures/contracts/` are stored at 0.22.0 and stamped with CONTRACT_VERSION when a test loads
+them; a separate test checks that each stored version is semver, not newer than the code, and that the calibration
+fixture passes `accepts_calibration`. Contract version 0.22.0: a refactor, no format change. Test-file exceptions
+approved by the owner on #63 (outside lane K, schema read only swapped for `contract.schema(name)`):
+`tests/app/test_api.py`, `tests/app/test_partial_calibration.py`, `tests/app/test_studio_stop.py`,
+`tests/edge/test_calibration.py`, `tests/edge/test_replay.py`, `tests/edge/test_record_live.py`,
+`tests/edge/test_report.py`, `tests/test_interfaces.py`, `tests/edge/test_session.py`.
+**Consequences.** Anything that read `contracts/*.schema.json` by path must use `contract.schema`. Saved files at
+older versions still validate by stamping, as before. A test cannot tell a wrong version from a malformed one by the
+schema alone; the version check is `contract.validate`.
+**Status.** Accepted.

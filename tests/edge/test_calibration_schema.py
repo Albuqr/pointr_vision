@@ -3,7 +3,9 @@ load, and what it rejects fails here, not later inside the preview or the writer
 
 import copy
 import json
-from importlib.resources import files
+import subprocess
+import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -12,21 +14,50 @@ from starlette.testclient import TestClient
 
 from services.app.config import CameraConfig
 from services.app.server import create_app
+from services.edge import contract
 from services.edge.calibration.document import load_calibration, validate_calibration
 from services.edge.calibration.homography import fit_calibration, point_residuals
 from tests.app.test_api import FakeLauncher
 from tests.fixtures.make_clips import make_clips
 
 ROOT = Path(__file__).resolve().parents[2]
-SCHEMA = json.loads((ROOT / "contracts/calibration.schema.json").read_text(encoding="utf-8"))
-PACKAGED_SCHEMA = files("services.edge.calibration").joinpath("calibration.schema.json")
-EXAMPLE = json.loads(
-    (ROOT / "tests/fixtures/contracts/calibration.example.json").read_text(encoding="utf-8")
-)
+SCHEMA = contract.schema("calibration")
+EXAMPLE = {
+    **json.loads(
+        (ROOT / "tests/fixtures/contracts/calibration.example.json").read_text(encoding="utf-8")
+    ),
+    "contract_version": contract.CONTRACT_VERSION,
+}
 
 
-def test_runtime_schema_is_packaged_and_matches_the_contract_copy():
-    assert json.loads(PACKAGED_SCHEMA.read_text(encoding="utf-8")) == SCHEMA
+def test_schemas_load_from_an_installed_package_not_the_source_tree(tmp_path):
+    """A zip of the package files stands in for an installed copy: the schema must come through
+    importlib.resources, not through a path built from the source tree."""
+    archive = tmp_path / "installed.zip"
+    package = ROOT / "services"
+    with zipfile.ZipFile(archive, "w") as bundle:
+        for source in (
+            package / "__init__.py",
+            package / "edge" / "__init__.py",
+            package / "edge" / "contract.py",
+            *sorted((package / "edge" / "contracts").glob("*.schema.json")),
+        ):
+            if source.exists():
+                bundle.write(source, source.relative_to(ROOT).as_posix())
+    code = (
+        "import sys; sys.path.insert(0, sys.argv[1]);"
+        "from services.edge import contract;"
+        "assert sys.argv[1] in contract.__file__, contract.__file__;"
+        "assert contract.schema('calibration')['type'] == 'object';"
+        "assert contract.schema('run')['type'] == 'object'"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", code, str(archive)],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def mutated(edit):
@@ -153,7 +184,7 @@ def test_a_calibration_saved_under_0_14_to_0_18_validates_and_loads(version, tmp
 
 def test_half_court_calibration_schema_accepts_type_and_bounds():
     half = half_calibration_for(half_floor_points(clustered=False))
-    Draft202012Validator(SCHEMA).validate(half)
+    contract.validate("calibration", half)
     assert validate_calibration(half)["court"]["type"] == "fiba_half"
 
 
@@ -204,5 +235,5 @@ def test_saved_files_contain_only_schema_keys_even_if_the_client_sends_more(tmp_
         )
         assert saved.status_code == 200, saved.text
         document = client.get("/api/cameras/clip/calibration").json()
-    Draft202012Validator(SCHEMA).validate(document)
+    contract.validate("calibration", document)
     assert all(set(p) == {"image_px", "court_m", "role", "residual_m"} for p in document["points"])

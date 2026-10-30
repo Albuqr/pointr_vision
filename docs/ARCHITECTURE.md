@@ -48,7 +48,6 @@ pointr/
   CLAUDE.md
   DECISIONS.md
   docs/                      architecture, contracts, requirements, phases, gates
-  contracts/                 JSON Schemas written from DATA_CONTRACTS.md, checked by tests
   services/
     edge/
       calibration/           court model, homography fit and projection, calibration file
@@ -63,7 +62,9 @@ pointr/
       reports/               post-session coverage and failure reports
       store/                 SQLite access (registrations, session index, outbox)
       ui/                    preview window (phase 1-5), local web UI (phase 6+)
-      contract.py            CONTRACT_VERSION, the one place the file-format version is written
+      contract.py            CONTRACT_VERSION, the one place the file-format version is written;
+                             schema(), validate(), accepts_calibration()
+      contracts/             JSON Schemas written from DATA_CONTRACTS.md, checked by tests (package data)
       camera_pipeline.py     one camera's wiring (capture, recorder, writer, calibration checks,
                              frame and track logging, final status); composes the Protocols,
                              is not one; used by main.py, reused per camera by R2a's group runner

@@ -6,11 +6,15 @@ import re
 import uuid
 from pathlib import Path
 
+import jsonschema
 import pytest
 from jsonschema import Draft202012Validator
 
+from services.edge import contract
+
 ROOT = Path(__file__).resolve().parents[1]
-SCHEMAS = ROOT / "contracts"
+SCHEMA_NAMES = ["session", "run", "report", "calibration", "fusion"]
+SCHEMA_DIR = ROOT / "services" / "edge" / "contracts"
 EXAMPLES = ROOT / "tests" / "fixtures" / "contracts"
 DOC = (ROOT / "docs" / "DATA_CONTRACTS.md").read_text(encoding="utf-8")
 DELETE = object()
@@ -21,7 +25,7 @@ def load(path: Path) -> dict:
 
 
 def schema(name: str) -> dict:
-    return load(SCHEMAS / f"{name}.schema.json")
+    return contract.schema(name)
 
 
 def validator(name: str) -> Draft202012Validator:
@@ -30,8 +34,13 @@ def validator(name: str) -> Draft202012Validator:
     return Draft202012Validator(s)
 
 
-def example(name: str) -> dict:
+def stored_example(name: str) -> dict:
     return load(EXAMPLES / f"{name}.example.json")
+
+
+def example(name: str) -> dict:
+    """The stored fixture, stamped with the current contract version (D-064)."""
+    return {**stored_example(name), "contract_version": contract.CONTRACT_VERSION}
 
 
 def mutate(doc: dict, path: tuple, value) -> dict:
@@ -56,17 +65,46 @@ def doc_example(section: str) -> dict:
     return json.loads(m.group(1))
 
 
-@pytest.mark.parametrize("name", ["session", "run", "report", "calibration", "fusion"])
+@pytest.mark.parametrize("name", SCHEMA_NAMES)
 def test_example_validates(name):
-    validator(name).validate(example(name))
+    contract.validate(name, example(name))
 
 
-@pytest.mark.parametrize("name", ["session", "run", "report", "calibration", "fusion"])
-def test_versions_agree(name):
-    v = doc_version()
-    assert schema(name)["properties"]["contract_version"]["const"] == v
-    assert example(name)["contract_version"] == v
-    assert f"urn:pointr:contracts:{v}:" in schema(name)["$id"]
+def test_validate_rejects_a_document_of_another_version():
+    with pytest.raises(jsonschema.ValidationError, match="0.21.0"):
+        contract.validate("run", {**example("run"), "contract_version": "0.21.0"})
+    with pytest.raises(jsonschema.ValidationError):
+        contract.validate(
+            "run", {k: v for k, v in example("run").items() if k != "contract_version"}
+        )
+
+
+def test_the_doc_header_is_the_code_version():
+    assert doc_version() == contract.CONTRACT_VERSION
+
+
+def test_every_doc_example_block_carries_the_code_version():
+    versions = re.findall(r'"contract_version":\s*"([^"]*)"', DOC)
+    assert versions, "no example block with a contract_version"
+    assert set(versions) == {contract.CONTRACT_VERSION}
+
+
+@pytest.mark.parametrize("name", SCHEMA_NAMES)
+def test_schemas_carry_no_version_number(name):
+    text = (SCHEMA_DIR / f"{name}.schema.json").read_text(encoding="utf-8")
+    assert not re.search(r"\d+\.\d+\.\d+", text)
+    assert "contract_version" in schema(name)["properties"]
+    assert "const" not in schema(name)["properties"]["contract_version"]
+
+
+@pytest.mark.parametrize("name", SCHEMA_NAMES)
+def test_stored_fixture_versions_are_semver_and_not_newer_than_the_code(name):
+    stored = contract.parse_version(stored_example(name)["contract_version"])
+    assert stored <= contract.parse_version(contract.CONTRACT_VERSION)
+
+
+def test_the_stored_calibration_fixture_is_accepted_by_the_loader():
+    assert contract.accepts_calibration(stored_example("calibration")["contract_version"])
 
 
 @pytest.mark.parametrize(
@@ -159,7 +197,7 @@ BROKEN = {
     "session": [
         (("session_id",), DELETE),
         (("ended_at",), DELETE),
-        (("contract_version",), "0.1.0"),
+        (("contract_version",), "v0"),
         (("status",), "finished"),
         (("session_id",), "not-a-uuid"),
         (("device_id",), UUID1),
@@ -196,7 +234,7 @@ BROKEN = {
         (("extra",), 1),
     ],
     "report": [
-        (("contract_version",), "0.6.0"),
+        (("contract_version",), "v0"),
         (("run_id",), DELETE),
         (("run_id",), "not-a-uuid"),
         (("camera_id",), "a b"),
@@ -229,7 +267,7 @@ BROKEN = {
         (("runtime", "python"), "py3"),
         (("counts", "rec_dropped"), -1),
         (("contract_version",), DELETE),
-        (("contract_version",), "0.1.0"),
+        (("contract_version",), "v0"),
         (("mode",), "test"),
         (("input", "kind"), "usb"),
         (("input", "sha256"), 0),
