@@ -88,7 +88,7 @@ def make_run(
         run["runtime"].update(device=None, gpu=None)
     n = len(frames)
     run["counts"] = {"captured": n * 4, "processed": n, "dropped": n * 3, "unprocessed": 0,
-                     "rec_dropped": None} if finished else None  # fmt: skip
+                     "rec_dropped": None, "failed_reads": 0} if finished else None  # fmt: skip
     run["ended_at"] = "2026-10-13T12:02:00Z" if finished else None
     run["t0_wall"] = "2026-10-13T12:00:00Z"
     schema("session").validate(session)
@@ -589,7 +589,7 @@ def test_a_run_that_captured_nothing_does_not_say_it_did_not_end(tmp_path):
     run_dir = make_run(tmp_path, [], [])
     run = json.loads((run_dir / "run.json").read_text())
     run["counts"] = {"captured": 0, "processed": 0, "dropped": 0, "unprocessed": 0,
-                     "rec_dropped": None}  # fmt: skip
+                     "rec_dropped": None, "failed_reads": 0}  # fmt: skip
     (run_dir / "run.json").write_text(json.dumps(run))
     reason = build_report(run_dir).to_dict()["session"]["drop_rate"]["reason"]
     assert reason == "no frames captured"
