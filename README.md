@@ -119,6 +119,10 @@ file (every frame is processed, at file speed):
 python -m services.edge.main --replay <session id | session folder | video file> --out C:/pointr_sessions
 ```
 
+A group id instead replays every camera of the group together, one new run in each camera's
+session, with the live run's calibration and matcher settings, so the cameras share track IDs as
+they did live (D-060). Pass the detector and tracker options the live run used.
+
 To score a session, write `labels.csv` in its folder (columns `time_s,event,player_number,note`;
 `time_s` is the time in `video.mkv`; events `attempt`, `make`, `miss`, `leave`, `return`), then:
 
