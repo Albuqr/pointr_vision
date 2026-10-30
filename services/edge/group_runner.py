@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from services.edge.appearance import describe
-from services.edge.calibration.homography import CalibrationPositions
+from services.edge.calibration.homography import CalibrationPositions, check_homography
 from services.edge.camera_pipeline import (
     CameraPipeline,
     load_camera_calibration,
@@ -142,6 +142,15 @@ class CameraTracker:
         ]
 
 
+def _saved_positions(doc: dict) -> CalibrationPositions:
+    """The positions of a replayed run's saved calibration; ValueError when it is unusable."""
+    try:
+        check_homography(doc["homography_image_to_court"])
+        return CalibrationPositions(doc)
+    except (KeyError, TypeError) as e:
+        raise ValueError(f"the saved calibration block is malformed: {e!r}") from e
+
+
 def _raise_shared_failure(pipelines: list[CameraPipeline]) -> None:
     for p in pipelines:
         if isinstance(p.processor.error, SharedCodeError):
@@ -179,8 +188,9 @@ def run_group(
     run on; a SharedCodeError in any camera ends every session with status error and the failure as
     an event, and is raised.
     Cameras with `replay` are a group replay (D-060): each adds a run to its recorded
-    session, records nothing and uses the live run's calibration, and their frames reach
-    the trackers and the matcher in the live run's group time, one at a time."""
+    session, records nothing and uses the live run's calibration (an unusable one is an event and
+    that camera replays uncalibrated), and their frames reach the trackers and the matcher in the
+    live run's group time, one at a time."""
     camera_ids = [c.camera_id for c in cameras]
     if len(set(camera_ids)) != len(camera_ids):
         raise ValueError(f"a camera_id is given twice: {camera_ids}")
@@ -202,7 +212,7 @@ def run_group(
         for cam, info in zip(cameras, infos, strict=True):
             try:
                 calibrations.append(
-                    (doc := cam.replay.calibration, doc and CalibrationPositions(doc), None)
+                    (doc := cam.replay.calibration, doc and _saved_positions(doc), None)
                     if replaying
                     else (*load_camera_calibration(cam.calibration_path, cam.camera_id, info), None)
                     if cam.calibration_path
