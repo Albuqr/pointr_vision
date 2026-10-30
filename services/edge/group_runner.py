@@ -227,21 +227,18 @@ def run_group(
             run = dataclasses.replace(runs[i], group=group)
             if replaying:
                 p.open_session(run, session_dir=cameras[i].replay.target.session_dir)
-                opened.append(p)
-                if on_session:
-                    on_session(camera_ids[i], p)
-                continue
-            meta = SessionMeta(
-                session_id=session_ids[i],
-                device_id=device,
-                started_at=utc_now(),
-                source=infos[i],
-                recording_enabled=record,
-                camera_id=camera_ids[i],
-                group_id=group_id,
-                calibration=session_calibration(p.calibration),
-            )
-            p.open_session(run, meta=meta)
+            else:
+                meta = SessionMeta(
+                    session_id=session_ids[i],
+                    device_id=device,
+                    started_at=utc_now(),
+                    source=infos[i],
+                    recording_enabled=record,
+                    camera_id=camera_ids[i],
+                    group_id=group_id,
+                    calibration=session_calibration(p.calibration),
+                )
+                p.open_session(run, meta=meta)
             opened.append(p)
             if problem := calibrations[i][2]:  # before any run, so no t0: t_mono is null
                 p.log_event(HealthEvent("error", utc_now(), None, problem))

@@ -218,6 +218,9 @@ def test_a_target_that_is_no_group_is_none_and_a_mixed_group_is_refused(clips, t
     live.write_text(json.dumps(run), encoding="utf-8")
     with pytest.raises(ReplayError, match="group run"):
         resolve_group("g1", out)
+    (live.parent / "frames.csv").unlink()  # a session not as written: refused, not a traceback
+    with pytest.raises(ReplayError, match="cannot be replayed"):
+        resolve_group("g1", out)
 
 
 def cli(out: Path, *args: str) -> subprocess.CompletedProcess:
@@ -253,11 +256,12 @@ def test_the_command_replays_a_group_by_its_id_and_one_session_alone_as_before(c
     assert load(folders[0] / "runs" / session["runs"][2] / "run.json")["group"] is None
 
 
-def test_the_command_refuses_a_calibration_for_a_group(clips, tmp_path):
+@pytest.mark.parametrize("option", [["--calibration", "x.json"], ["--camera-id", "cam9"]])
+def test_the_command_refuses_a_calibration_or_camera_id_for_a_group(clips, tmp_path, option):
     out = tmp_path / "out"
     for cid, clip in (("cam1", "moving"), ("cam2", "frozen")):
         args = ["--source", str(clips[clip]), "--link", "file", "--camera-id", cid]
         assert cli(out, *args, "--group-id", "g1").returncode == 0
-    result = cli(out, "--replay", "g1", "--calibration", "x.json")
-    assert result.returncode != 0 and "calibration" in result.stderr
+    result = cli(out, "--replay", "g1", *option)
+    assert result.returncode != 0 and option[0] in result.stderr
     assert all(len(r) == 1 for r in runs(out).values())

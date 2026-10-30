@@ -110,25 +110,28 @@ def resolve_group(target: str, out_dir: Path | str) -> GroupReplay | None:
         return None
     cameras, group_runs, params = [], set(), {}
     for folder, session in found:
-        if not session.get("camera_id") or not session.get("runs"):
-            raise ReplayError(f"{folder} has no camera_id or no run")
-        run_dir = folder / "runs" / session["runs"][0]  # the live run: replays come after it
-        live = _load(run_dir / "run.json")
-        if live.get("mode") != "live" or live.get("t0_mono") is None:
-            raise ReplayError(f"{run_dir} is not a live run that started")
-        group = live.get("group") or {}
-        group_runs.add(group.get("group_run_id"))
-        params = group.get("params") or params
-        fps = session["source"].get("reported_fps") or DEFAULT_FPS  # the recorder's rate
-        replay = resolve_replay(str(folder), out)
-        recorded = RecordedCamera(
-            replay,
-            session["session_id"],
-            as_document(live.get("calibration")),
-            live_group_time(run_dir, live["t0_mono"], fps),
-        )
-        source = FileSource(replay.video, realtime=False)  # as fast as processing allows
-        cameras.append(GroupCamera(session["camera_id"], source, "file", replay=recorded))
+        try:
+            if not session.get("camera_id") or not session.get("runs"):
+                raise ReplayError(f"{folder} has no camera_id or no run")
+            run_dir = folder / "runs" / session["runs"][0]  # the live run: replays come after it
+            live = _load(run_dir / "run.json")
+            if live.get("mode") != "live" or live.get("t0_mono") is None:
+                raise ReplayError(f"{run_dir} is not a live run that started")
+            group = live.get("group") or {}
+            group_runs.add(group.get("group_run_id"))
+            params = group.get("params") or params
+            fps = session["source"].get("reported_fps") or DEFAULT_FPS  # the recorder's rate
+            replay = resolve_replay(str(folder), out)
+            recorded = RecordedCamera(
+                replay,
+                session["session_id"],
+                as_document(live.get("calibration")),
+                live_group_time(run_dir, live["t0_mono"], fps),
+            )
+            source = FileSource(replay.video, realtime=False)  # as fast as processing allows
+            cameras.append(GroupCamera(session["camera_id"], source, "file", replay=recorded))
+        except (OSError, ValueError, KeyError, TypeError) as e:  # a session not as written
+            raise ReplayError(f"{folder} cannot be replayed: {e!r}") from e
     if len(group_runs) > 1:
         raise ReplayError(f"the sessions of group {target!r} come from more than one group run")
     return GroupReplay(target, cameras, params)
@@ -188,7 +191,7 @@ def run_replay(args: argparse.Namespace, group: GroupReplay) -> int:
         )
         if any(s != "ended" for s in statuses.values()):
             code = EXIT_CAPTURE_ERROR
-    except KeyboardInterrupt:  # every replay run already ended `interrupted`
+    except KeyboardInterrupt:  # every run already ended (`interrupted`, or `error` if early)
         code = EXIT_INTERRUPTED
     except Exception as e:  # every replay run already ended `error`, with the failure as an event
         print(f"error: the group replay did not run: {e!r}", file=sys.stderr)
