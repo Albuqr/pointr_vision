@@ -25,6 +25,7 @@ import time
 import uuid
 from collections import Counter
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -114,7 +115,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--replay",
         metavar="TARGET",
         help="process a recorded video again as a new run, at file speed, every frame: a session "
-        "id or folder (adds a run to it) or an .mp4/.mov file (starts a new session)",
+        "id or folder (adds a run to it), a group id (adds a run to each camera's session of the "
+        "group, processed together, D-059) or an .mp4/.mov file (starts a new session)",
     )
     p.add_argument("--preview", action="store_true", help="show the preview window")
     p.add_argument("--http-preview", type=int, help="serve annotated loopback preview on this port")
@@ -537,6 +539,15 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
             events[ev.kind] += 1
             print_event(ev, t0)
 
+    if args.replay and not Path(args.replay).exists():  # a group id: replay the group (D-059)
+        from services.edge.replay.group import resolve_group, run_replay
+
+        try:
+            group = resolve_group(args.replay, args.out)
+        except ReplayError as e:
+            return open_failed(args.replay, e)
+        if group is not None:
+            return run_replay(args, group)
     ref = args.replay or args.source
     replay = None
     try:
