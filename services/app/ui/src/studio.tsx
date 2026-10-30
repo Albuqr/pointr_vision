@@ -67,24 +67,59 @@ type Status = {
   cameras: CameraStatus[];
   idle_cameras?: IdleCamera[];
   config_warning?: string | null;
+  uncalibrated?: Record<string, string>; // camera_id -> refusal it will start with
 };
 type FieldIssue = { index: number | null; field: string; message: string };
 
+// why Studio refused a calibration (D-057)
+type Refusal =
+  | { kind: "too_few_points"; role: "calibration" | "check"; have: number; need: number }
+  | {
+      kind: "check_error_over_limit";
+      check_point_indices: number[];
+      check_errors_m: number[];
+      check_mean_m: number;
+      max_check_error_m: number;
+    }
+  | { kind: "invalid" };
 class RequestError extends Error {
   fields: FieldIssue[];
+  refusal?: Refusal;
 
-  constructor(message: string, fields: FieldIssue[] = []) {
+  constructor(message: string, fields: FieldIssue[] = [], refusal?: Refusal) {
     super(message);
     this.fields = fields;
+    this.refusal = refusal;
   }
 }
 type Session = {
-  camera_id: string;
-  group_id: string;
-  status: string;
+  camera_id: string | null;
+  group_id: string | null;
+  status: string | null;
   folder: string;
-  summary: string | null;
+  started_at: string | null;
+  duration: number | null;
+  fps: number | null;
+  captured: number | null;
+  dropped: number | null;
+  drop_rate: number | null;
+  events: Record<string, number>;
+  missing: string[];
 };
+function formatDuration(seconds: number | null) {
+  if (seconds === null) return "unknown";
+  const total = Math.round(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return h > 0 ? `${h} h ${m} min` : m > 0 ? `${m} min ${s} s` : `${s} s`;
+}
+function formatEvents(events: Record<string, number>) {
+  const kinds = Object.entries(events);
+  if (kinds.length === 0) return "none";
+  const total = kinds.reduce((sum, [, n]) => sum + n, 0);
+  return `${total} (${kinds.map(([kind, n]) => `${kind.replaceAll("_", " ")} ${n}`).join(", ")})`;
+}
 type Point = {
   id: string;
   image_px: [number, number];
@@ -138,7 +173,9 @@ async function request<T>(
     const text = await response.text();
     let message = text.replace(/^"|"$/g, "");
     let fields: FieldIssue[] = [];
+    let refusal: Refusal | undefined;
     try {
+      refusal = JSON.parse(text).refusal;
       const detail = JSON.parse(text).detail;
       if (typeof detail === "string") message = detail;
       else if (detail && typeof detail === "object") {
@@ -148,7 +185,7 @@ async function request<T>(
     } catch {
       // not JSON: show the text as it is
     }
-    throw new RequestError(message, fields);
+    throw new RequestError(message, fields, refusal);
   }
   return response.json() as Promise<T>;
 }
@@ -276,6 +313,15 @@ export default function StudioApp() {
   const [maxError, setMaxError] = useState(0.5);
   const [saveAnyway, setSaveAnyway] = useState(false);
   const [fit, setFit] = useState<Fit | null>(null);
+  // the refusal being shown, and the camera whose next start is uncalibrated because of it
+  const [refused, setRefused] = useState<{
+    camera: string;
+    message: string;
+    refusal: Refusal;
+  } | null>(null);
+  const skippedReason = selected
+    ? status.uncalibrated?.[selected]
+    : undefined;
   const [comparison, setComparison] = useState<Comparison | null>(null);
   const [customX, setCustomX] = useState(0);
   const [customY, setCustomY] = useState(0);
@@ -436,6 +482,20 @@ export default function StudioApp() {
     [frame, courtKind, length, width, maxError, saveAnyway, points],
   );
 
+  const showFitError = useCallback(
+    (reason: unknown) => {
+      if (reason instanceof RequestError && reason.refusal) {
+        setRefused({
+          camera: selected,
+          message: reason.message,
+          refusal: reason.refusal,
+        });
+        setError("");
+      } else setError(String(reason));
+    },
+    [selected],
+  );
+
   async function runFit(save = false) {
     if (!selected) return;
     try {
@@ -445,12 +505,36 @@ export default function StudioApp() {
         fitPayload,
       );
       setFit(result);
+      setRefused(null);
       setNotice(
         save
           ? "Calibration saved for this camera."
           : "Fit updated. Check the held-out points before saving.",
       );
       setError("");
+    } catch (reason) {
+      showFitError(reason);
+    }
+  }
+
+  async function startUncalibrated() {
+    try {
+      await request(`/api/cameras/${selected}/calibration/uncalibrated`, "POST");
+      setRefused(null);
+      setNotice(
+        `Camera ${selected} will start uncalibrated; the calibration check is recorded as failed.`,
+      );
+      setError("");
+      void refresh();
+    } catch (reason) {
+      setError(String(reason));
+    }
+  }
+
+  async function undoUncalibrated() {
+    try {
+      await request(`/api/cameras/${selected}/calibration/uncalibrated`, "DELETE");
+      void refresh();
     } catch (reason) {
       setError(String(reason));
     }
@@ -472,12 +556,13 @@ export default function StudioApp() {
       )
         .then((result) => {
           setFit(result);
+          setRefused(null);
           setError("");
         })
-        .catch((reason: unknown) => setError(String(reason)));
+        .catch((reason: unknown) => showFitError(reason));
     }, 180);
     return () => window.clearTimeout(timer);
-  }, [frame, selected, points, fitPayload]);
+  }, [frame, selected, points, fitPayload, showFitError]);
 
   useEffect(() => {
     return () => {
@@ -1602,6 +1687,62 @@ export default function StudioApp() {
                     Save calibration
                   </button>
                 </div>
+                {refused && refused.camera === selected && (
+                  <div className="refusal" role="alert">
+                    <b>Calibration refused</b>
+                    <span>{refused.message}</span>
+                    {refused.refusal.kind === "too_few_points" && (
+                      <span>
+                        {refused.refusal.have} of {refused.refusal.need}{" "}
+                        {refused.refusal.role} points placed; place{" "}
+                        {refused.refusal.need - refused.refusal.have} more.
+                      </span>
+                    )}
+                    {refused.refusal.kind === "check_error_over_limit" && (
+                      <>
+                        {refused.refusal.check_point_indices.map(
+                          (index, position) => (
+                            <span key={index}>
+                              Check point {index + 1}:{" "}
+                              {(
+                                refused.refusal as Extract<
+                                  Refusal,
+                                  { kind: "check_error_over_limit" }
+                                >
+                              ).check_errors_m[position].toFixed(3)}{" "}
+                              m
+                            </span>
+                          ),
+                        )}
+                        <span>
+                          Mean {refused.refusal.check_mean_m.toFixed(3)} m, limit{" "}
+                          {refused.refusal.max_check_error_m.toFixed(3)} m
+                        </span>
+                      </>
+                    )}
+                    <div className="refusal-actions">
+                      <button type="button" onClick={() => setRefused(null)}>
+                        Retry (keep placed points)
+                      </button>
+                      <button type="button" onClick={() => void startUncalibrated()}>
+                        Start this camera uncalibrated
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {skippedReason && (
+                  <div className="refusal" role="status">
+                    <b>Camera {selected} will start uncalibrated</b>
+                    <span>
+                      Recorded as a failed calibration check: {skippedReason}
+                    </span>
+                    <div className="refusal-actions">
+                      <button type="button" onClick={() => void undoUncalibrated()}>
+                        Calibrate it instead
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {fit && (
                   <div
                     className={
@@ -1710,8 +1851,8 @@ export default function StudioApp() {
                 <span>NO SESSIONS</span>
                 <b>Nothing recorded yet</b>
                 <p>
-                  Completed recordings will appear here with their movement
-                  summary.
+                  Completed recordings will appear here with when they were
+                  recorded, duration, frame rate, drops and events.
                 </p>
               </div>
             ) : (
@@ -1720,14 +1861,61 @@ export default function StudioApp() {
                   <article key={session.folder}>
                     <div className="session-head">
                       <b>{session.camera_id || "Camera"}</b>
-                      <span>{session.status}</span>
+                      <span>{session.status ?? "status unknown"}</span>
                     </div>
                     <small>
-                      Group {session.group_id} · {session.folder}
+                      {session.started_at
+                        ? new Date(session.started_at).toLocaleString()
+                        : "Time unknown"}
+                      {" · "}
+                      {session.folder}
                     </small>
-                    <p>
-                      {session.summary ?? "No report summary is available."}
-                    </p>
+                    <dl className="session-facts">
+                      <div>
+                        <dt>Cameras</dt>
+                        <dd>
+                          {session.group_id
+                            ? sessions
+                                .filter((s) => s.group_id === session.group_id)
+                                .map((s) => s.camera_id || "Camera")
+                                .join(", ")
+                            : session.camera_id || "Camera"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Duration</dt>
+                        <dd>{formatDuration(session.duration)}</dd>
+                      </div>
+                      <div>
+                        <dt>Frame rate</dt>
+                        <dd>
+                          {session.fps === null
+                            ? "unknown"
+                            : `${session.fps.toFixed(1)} fps`}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Dropped</dt>
+                        <dd>
+                          {session.dropped === null
+                            ? "unknown"
+                            : `${session.dropped} of ${session.captured}${
+                                session.drop_rate === null
+                                  ? ""
+                                  : ` (${session.drop_rate.toFixed(0)}%)`
+                              }`}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Events</dt>
+                        <dd>{formatEvents(session.events)}</dd>
+                      </div>
+                    </dl>
+                    {session.missing.length > 0 && (
+                      <p className="session-missing">
+                        Not available: {session.missing.join("; ")}
+                      </p>
+                    )}
                   </article>
                 ))}
               </div>

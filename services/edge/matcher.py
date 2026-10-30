@@ -1,4 +1,4 @@
-"""The cross-camera matcher (R2a 05, seam B, ADR 0007, D-057): maps each camera's local tracks to
+"""The cross-camera matcher (R2a 05, seam B, ADR 0007, D-058): maps each camera's local tracks to
 group track IDs by court-plane position and time.
 
 Pure: it receives data as arguments and reads no clock, camera or file, so it is tested on

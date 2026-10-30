@@ -1269,7 +1269,22 @@ stays (`group_command=None`) and its process tests use it. No preview window (`-
 each camera's preview. Not measured: memory and throughput of one process versus two, recorded in R2a-A5.
 **Status.** Accepted.
 
-## D-057 · 2026-10-29 · Cross-camera matcher by court position: parameters in run.json (contract 0.18.0)
+## D-057 · 2026-10-29 · A refused calibration offers retry or start uncalibrated (contract 0.18.0)
+**Context.** Phase 03 B13 (issue #20, D-048, spec CR-1). Studio refused a calibration at fit time with only a one-line
+message and no way forward; FR-003 says a failed startup check never blocks the session. `checks` and the
+`startup_check_failed` event exist since 0.11.0 but nothing wrote them.
+**Decision.** The refusal carries a structured `refusal` next to `detail` (too few points: how many are there and
+needed; check error over the limit: the per-point check errors, their mean and the limit). Studio keeps each camera's
+last refusal, cleared by a fit or save that succeeds. The operator then chooses, in Studio: retry (the UI keeps the
+placed points) or start that camera uncalibrated (`POST .../calibration/uncalibrated`). The reason is taken from
+Studio's stored refusal, not from the request, so a client cannot invent a failed check. The choice lives in the
+running Studio only; it is not a file. At each start while it holds that camera gets no calibration, even if an older one is saved,
+and its process writes `checks = [calibration, failed, <reason>]` into `run.json` and a `startup_check_failed`
+event whose detail is `calibration: <reason>`. Only the `calibration` check is written; the other four and the
+`passed` entries stay with Track R, so `checks` stays `null` for a camera that was not started this way.
+**Consequences.** Contract 0.18.0, additive (minor): API fields, two Studio audit actions, and the first writer of
+`checks`. No file format changes. Not done: the choice does not survive a Studio restart.
+## D-058 · 2026-10-29 · Cross-camera matcher by court position: parameters in run.json (contract 0.19.0)
 **Context.** R2a 05 (issue #11, ADR 0007, D-045). D-051 left the matcher's parameter names to this slice and asks for
 them to be listed in `DATA_CONTRACTS.md` with a minor bump before code.
 **Decision.** The matcher links a new or still-unlinked local track to a track of another camera when both have a court
@@ -1282,7 +1297,7 @@ measured). `group.params` holds `match_distance_m`, `max_offset_s`, `lost_s`, `m
 linked track's rows carry `link=position` from the frame where the link was made, earlier rows stay `unshared`.
 The defaults (0.5 m, 0.25 s, 1.0 s, 4.0 m/s) are starting values, not measured: R2a-A5 and the field recordings tune
 them. `lost_s` is set from the tracker's lost-track time by the group process.
-**Consequences.** Contract 0.18.0, additive: the schemas leave `group.params` a free object, so only the version and
+**Consequences.** Contract 0.19.0, additive: the schemas leave `group.params` a free object, so only the version and
 the doc change. Nothing here decides the appearance fallback (R2a 06). A link is never undone while both local tracks
 exist (BACKLOG).
 **Status.** Accepted.

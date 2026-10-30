@@ -11,7 +11,7 @@ import threading
 import time
 import uuid
 import webbrowser
-from collections import deque
+from collections import Counter, deque
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Literal
@@ -33,7 +33,7 @@ from services.edge.capture.sources import DEFAULT_CAPTURE_SIZE, SourceOpenError,
 from services.edge.capture.types import SourceEnded
 from services.edge.contract import CONTRACT_VERSION
 from services.edge.launcher import Camera, ConfigError, Launcher, Options, parse_config
-from services.edge.reports.build import build_report, format_summary, run_dirs
+from services.edge.reports.build import build_report, run_dirs
 from services.edge.session.writer import mask_credentials
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -67,6 +67,8 @@ class Studio:
         self.frame_cache = {}
         self.calibration_frames = {}
         self.calibration_warnings: dict[str, str] = {}
+        self.refusals: dict[str, str] = {}  # camera_id -> last calibration refusal (one line)
+        self.uncalibrated: dict[str, str] = {}  # camera_id -> refusal the operator chose to skip
         self.active_group_path = self.config.path.with_name("active_group.json")
         self.recover_interrupted_group()
 
@@ -223,8 +225,15 @@ class Studio:
             # so (a session event, and a warning in the status). One camera never blocks the rest.
             calibration_paths: dict[str, str | None] = {}
             warnings: dict[str, str] = {}
+            failed: dict[str, str] = dict(self.uncalibrated)  # the operator's choice (D-057)
             for camera in cameras:
                 calibration_paths[camera.camera_id] = None
+                if reason := failed.get(camera.camera_id):
+                    warnings[camera.camera_id] = (
+                        f"calibration refused: {reason}; recording without calibration "
+                        "(positions in pixels)"
+                    )
+                    continue
                 try:
                     saved = self.calibrations.load(camera.camera_id)
                 except Exception as exc:
@@ -266,10 +275,11 @@ class Studio:
                         camera.track_min_frames,
                         self.preview_ports[camera.camera_id],
                         calibration_paths[camera.camera_id],
-                        warnings.get(camera.camera_id),
+                        None if camera.camera_id in failed else warnings.get(camera.camera_id),
                         camera.name,
                         camera.fps_cap,
                         camera.enabled,
+                        calibration_failed=failed.get(camera.camera_id),
                     )
                 )
             cameras = configured
@@ -309,6 +319,7 @@ class Studio:
             launcher = self.launcher
             active = self.recording()
             finals = dict(self.final)
+            uncalibrated = dict(self.uncalibrated)
         cameras = []
         for child in getattr(launcher, "children", []):
             session_dir = child.session_dir
@@ -408,6 +419,7 @@ class Studio:
             "cameras": cameras,
             "idle_cameras": idle,
             "config_warning": self.config.warning,
+            "uncalibrated": uncalibrated,
             "final": finals,
         }
 
@@ -594,8 +606,13 @@ class Studio:
                 if court.kind == "fiba_half"
                 else None,
             )
-        except (KeyError, TypeError, ValueError, np.linalg.LinAlgError) as exc:
-            raise HTTPException(422, str(exc) or exc.__class__.__name__) from exc
+        except (KeyError, TypeError, ValueError, np.linalg.LinAlgError, cv2.error) as exc:
+            message = str(exc) or exc.__class__.__name__
+            with self.lock:
+                self.refusals[camera_id] = " ".join(message.split())[:300]  # fits a command line
+            raise CalibrationRefusal(message, getattr(exc, "refusal", {"kind": "invalid"})) from exc
+        with self.lock:
+            self.refusals.pop(camera_id, None)
         result["projected_court_lines"] = projected_court_lines(
             result["homography_image_to_court"], court
         )
@@ -651,7 +668,17 @@ class Studio:
                 raise HTTPException(422, str(exc)) from exc
             result["calibration"] = document
             result["path"] = str(path)
+            with self.lock:
+                self.uncalibrated.pop(camera_id, None)  # a saved calibration is the way forward
         return result
+
+
+class CalibrationRefusal(HTTPException):
+    """A 422 whose body also carries `refusal`: what the operator needs to retry (D-057)."""
+
+    def __init__(self, message, refusal):
+        super().__init__(422, message)
+        self.refusal = refusal
 
 
 def _camera_id(entry):
@@ -672,6 +699,13 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
         studio.stop()
 
     app = FastAPI(lifespan=lifespan)
+
+    @app.exception_handler(CalibrationRefusal)
+    async def calibration_refused(request, exc):
+        return JSONResponse(
+            {"detail": exc.detail, "refusal": exc.refusal}, status_code=exc.status_code
+        )
+
     app.state.studio = studio
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
 
@@ -751,6 +785,9 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
                 raise HTTPException(404, "camera not found")
             studio.save(kept)
         studio.logs.pop(camera_id, None)
+        with studio.lock:
+            studio.refusals.pop(camera_id, None)
+            studio.uncalibrated.pop(camera_id, None)
         return {"ok": True}
 
     @app.delete("/api/cameras/{camera_id}/error")
@@ -810,6 +847,26 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
         payload = await request.json()
         with studio.audited("calibration_save", camera_id):
             return studio.calibration_fit(camera_id, payload, save=True)
+
+    @app.post("/api/cameras/{camera_id}/calibration/uncalibrated")
+    def start_uncalibrated(camera_id: str):
+        """After a refusal: this camera's next start is uncalibrated, recorded as a failed
+        calibration check. The reason is Studio's own record of the refusal (D-057)."""
+        with studio.audited("calibration_uncalibrated", camera_id) as note:
+            with studio.lock:
+                reason = studio.refusals.get(camera_id)
+                if reason is None:
+                    raise HTTPException(409, "this camera has no refused calibration")
+                studio.uncalibrated[camera_id] = reason
+            note["detail"] = {"reason": reason}
+            return {"camera_id": camera_id, "reason": reason}
+
+    @app.delete("/api/cameras/{camera_id}/calibration/uncalibrated")
+    def clear_uncalibrated(camera_id: str):
+        with studio.audited("calibration_uncalibrated_clear", camera_id):
+            with studio.lock:
+                studio.uncalibrated.pop(camera_id, None)
+            return {"camera_id": camera_id}
 
     @app.get("/api/cameras/{camera_id}/calibration/compare")
     def compare_calibration(camera_id: str):
@@ -874,31 +931,10 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
         rows = []
         if base.exists():
             for path in base.iterdir():
-                session_file = path / "session.json"
-                if path.is_symlink() or not path.is_dir() or not session_file.is_file():
+                if path.is_symlink() or not path.is_dir() or not (path / "session.json").is_file():
                     continue
-                try:
-                    value = json.loads(session_file.read_text(encoding="utf-8"))
-                except (OSError, ValueError):
-                    continue
-                report_text = None
-                for run_dir in run_dirs(path) if (path / "session.json").is_file() else []:
-                    try:
-                        report_text = format_summary(build_report(run_dir))
-                    except (OSError, ValueError, KeyError):
-                        continue
-                    break
-                rows.append(
-                    {
-                        "camera_id": value.get("camera_id"),
-                        "group_id": value.get("group_id"),
-                        "status": value.get("status"),
-                        "started_at": value.get("started_at"),
-                        "duration": session_duration(value),
-                        "folder": path.name,
-                        "summary": report_text,
-                    }
-                )
+                rows.append(session_row(path))
+        rows.sort(key=lambda row: str(row["started_at"] or ""), reverse=True)
         return rows
 
     @app.get("/api/cameras/{camera_id}/preview/{kind}")
@@ -1009,3 +1045,78 @@ def session_duration(value):
     else:
         finish = dt.datetime.now(dt.UTC)
     return max(0.0, (finish - start).total_seconds())
+
+
+def _why(error):
+    """One readable reason for a file that could not be read (no full path, no traceback)."""
+    if isinstance(error, FileNotFoundError):
+        return f"{Path(str(error.filename)).name} missing"
+    if isinstance(error, OSError):
+        return f"{Path(str(error.filename)).name} unreadable ({error.strerror})"
+    return f"{type(error).__name__}: {str(error)[:80]}"
+
+
+def session_row(path: Path) -> dict:
+    """One sessions-page row, from the session folder's files only (B7). Whatever cannot be
+    read stays None and is named in `missing`: a damaged session is listed, never dropped."""
+    row = {
+        "folder": path.name,
+        "camera_id": None,
+        "group_id": None,
+        "status": None,
+        "started_at": None,
+        "duration": None,
+        "fps": None,
+        "captured": None,
+        "dropped": None,
+        "drop_rate": None,
+        "events": {},
+        "missing": [],
+    }
+    missing = row["missing"]
+    try:
+        value = json.loads((path / "session.json").read_text(encoding="utf-8"))
+        if not isinstance(value, dict):
+            raise ValueError("not a JSON object")
+    except (OSError, ValueError) as error:
+        missing.append(f"session.json: {_why(error)}")
+        return row
+    for key in ("camera_id", "group_id", "status", "started_at"):
+        row[key] = value.get(key)
+    try:
+        row["duration"] = session_duration(value)
+    except (TypeError, ValueError, AttributeError):
+        missing.append("started_at or ended_at in session.json is not a valid time")
+    if row["started_at"] is None:
+        missing.append("started_at not recorded")
+    events = value.get("events")
+    if isinstance(events, list):
+        row["events"] = dict(Counter(str(e.get("kind")) for e in events if isinstance(e, dict)))
+    else:
+        missing.append("events not readable in session.json")
+    try:
+        run_folders = run_dirs(path)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        missing.append(f"runs: {_why(error)}")
+        return row
+    if not run_folders:
+        missing.append("no run recorded in this session")
+        return row
+    reason = None
+    for run_dir in run_folders:
+        try:
+            stats = build_report(run_dir).session
+        except Exception as error:  # a damaged run must not hide the session
+            reason = f"report for run {run_dir.name[:8]}: {_why(error)}"
+            continue
+        row.update(
+            fps=stats.processed_fps.value,
+            captured=stats.n_captured,
+            dropped=stats.n_dropped,
+            drop_rate=stats.drop_rate.value,
+        )
+        if stats.n_dropped is None:
+            missing.append("counts not recorded (the run did not end)")
+        return row
+    missing.append(reason)
+    return row

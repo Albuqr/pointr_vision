@@ -91,6 +91,7 @@ class Camera:
     name: str | None = None
     fps_cap: float | None = None
     enabled: bool = True
+    calibration_failed: str | None = None  # why the operator started it uncalibrated (D-057)
 
 
 def source_key(source: str) -> str:
@@ -304,6 +305,8 @@ def camera_args(cam: Camera, opts: Options) -> list[str]:
         cmd.append(f"--calibration={cam.calibration_path}")
     if cam.calibration_problem:
         cmd.append(f"--calibration-problem={cam.calibration_problem}")
+    if cam.calibration_failed:
+        cmd.append(f"--calibration-failed={cam.calibration_failed}")
     if cam.preview if cam.preview is not None else opts.preview:
         cmd.append("--preview")
     if opts.device:

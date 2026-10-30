@@ -25,6 +25,7 @@ from services.edge.main import (
     EXIT_INTERRUPTED,
     EXIT_OPEN_FAILED,
     StopRequest,
+    calibration_failed_event,
     create_tracker,
     health_config,
     link_conflict,
@@ -71,7 +72,7 @@ def group_det_size(sizes: set[int | None]) -> int | None:
 
 
 def group_matcher(cams: list[argparse.Namespace]) -> CourtMatcher:
-    """The cross-camera matcher (D-057): a group ID is kept as long as the longest lost-track time
+    """The cross-camera matcher (D-058): a group ID is kept as long as the longest lost-track time
     of the cameras' trackers, so a track the tracker takes back is not forgotten first."""
     return CourtMatcher(MatcherParams(lost_s=max(a.track_lost_secs for a in cams)))
 
@@ -133,6 +134,8 @@ def run(cams: list[argparse.Namespace], stop: StopRequest) -> int:
         if a.calibration_problem:  # before any run, so no t0: t_mono is null
             detail = f"calibration not used: {a.calibration_problem}"
             pipeline.log_event(HealthEvent("error", utc_now(), None, detail))
+        if event := calibration_failed_event(a):
+            pipeline.log_event(event)
         if a.http_preview is not None:
             previews.append(start_http_preview(a.http_preview, pipeline))
             say(camera_id, f"preview_port: {previews[-1].port}")

@@ -878,6 +878,22 @@ td {
   color: #8a4d2e;
   background: #f3e8d8;
 }
+.refusal {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 15px;
+  margin-bottom: 12px;
+  background: #f3e8d8;
+  border-radius: 5px;
+  color: #8a4d2e;
+  font-size: 11px;
+}
+.refusal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
 .compare-panel {
   display: flex;
   flex-wrap: wrap;
@@ -1287,4 +1303,22 @@ button:focus-visible,
   padding: 10px 12px;
   font-size: 12px;
   line-height: 1.5;
+}
+.session-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px 16px;
+  margin: 10px 0 0;
+}
+.session-facts dt {
+  color: var(--muted);
+  font-size: 10px;
+}
+.session-facts dd {
+  margin: 2px 0 0;
+  font-size: 12px;
+}
+.session-list .session-missing {
+  margin: 8px 0 0;
+  color: var(--orange-dark);
 }
