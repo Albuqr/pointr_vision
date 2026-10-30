@@ -1318,7 +1318,8 @@ the matcher sees one frame at a time in group-time order. Calibration and matche
 (`run.json` `calibration` and `group.params`); detector and tracker settings come from the command line as for one
 session, and must be the live ones to reproduce it. `--calibration` and `--camera-id` are refused with a group. A
 group whose live runs name different `group_run_id`s is refused. A group recorded one process per camera (live
-`group` null) replays too, with the default matcher parameters, and so gets shared IDs.
+`group` null) replays too, with the default matcher parameters (`lost_s` from
+`--track-lost-secs`), and so gets shared IDs.
 **Limits.** Live, a frame reached the matcher when its processing thread got there, which is group-time order unless
 one camera's frame was processed after another camera's later frame (a slow detection); a replay can differ there.
 How often that happens is not measured. A frame the live run dropped is processed by the replay, so the IDs are

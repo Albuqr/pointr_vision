@@ -58,7 +58,8 @@ pointr/
       perception/            Detector, Tracker implementations
       session/               session lifecycle, writers
       recording/             raw video recorder
-      replay/                file replay runner
+      replay/                file replay runner; group replay (R2a 08, D-059): a group's
+                             videos through the group runner in the live run's group time
       reports/               post-session coverage and failure reports
       store/                 SQLite access (registrations, session index, outbox)
       ui/                    preview window (phase 1-5), local web UI (phase 6+)
@@ -201,6 +202,11 @@ capture thread ──▶ proc_queue (maxsize=1, drop oldest, count drops) ──
   `stop ui` line (Studio's stop button, D-049) takes the same path but ends the session `ended`
   with a `stopped` event instead of `interrupted`. A child's `session.json` carries `camera_id`
   and `group_id`.
+- **Group replay (D-059).** `--replay <group_id>` runs the group's recorded videos through the
+  group runner, one replay run per session. Each camera keeps its processing thread, but its
+  frames reach the tracker and the matcher one at a time in the live run's group time
+  (`services/edge/replay/order.py`), so the matcher, whose result depends on the order of its calls, sees what
+  it saw live.
 
 ## 6. Local storage
 
