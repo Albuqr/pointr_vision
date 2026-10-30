@@ -331,6 +331,7 @@ class Child:
         )
         self.failed_reads = "-"
         self.failure: str | None = None  # why it never recorded
+        self.run_errors: list[str] = []  # error lines after the session line, masked
         self.tail: deque[str] = deque(maxlen=TAIL_LINES)  # last output lines, credentials masked
         self.killed = False
         self.stop_sent = False
@@ -437,8 +438,12 @@ class Launcher:
                 child.preview_ready = True
             except ValueError:
                 child.failure = "invalid preview port reported"
-        elif line.startswith("error: ") and child.failure is None:
-            child.failure = mask_credentials(line.removeprefix("error: ").strip())
+        elif line.startswith("error: "):
+            error = mask_credentials(line.removeprefix("error: ").strip())
+            if child.session_dir is not None:
+                child.run_errors.append(error)
+            elif child.failure is None:
+                child.failure = error
 
     def start_one(self, cam: Camera) -> None:
         self.start([Child(cam)], self.command(cam, self.opts))

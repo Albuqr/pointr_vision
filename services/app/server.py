@@ -163,9 +163,19 @@ class Studio:
 
     def note_child(self, child, log, state, events):
         """Copy a child's news into its camera log: session events, and, once, why it ended
-        or never recorded (the error stays until dismissed or the camera next starts)."""
+        or never recorded, and run-time errors once each (the error stays until dismissed or
+        the camera next starts)."""
         if child.session_dir:
             log.ingest_session_events(str(child.session_dir), events)
+            key = f"{child.session_dir}#run_errors"
+            run_errors = list(getattr(child, "run_errors", ()))
+            with log.lock:  # two polls at once must not report the same error twice
+                start = log.seen.get(key, 0)
+                log.seen[key] = len(run_errors)
+            for error in run_errors[start:]:
+                detail = f"source: {mask_credentials(str(child.cam.source))}\nreason: {error}"
+                log.set_error("The camera reported an error while recording.", detail)
+                log.add_event("error", error)
         if log.reported_child is child:
             return
         failure = getattr(child, "failure", None)

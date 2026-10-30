@@ -4,6 +4,7 @@ side of the persistent error panel; the status payload is what a reloaded page r
 import json
 import time
 from collections import deque
+from types import SimpleNamespace
 
 import pytest
 from starlette.testclient import TestClient
@@ -11,6 +12,7 @@ from starlette.testclient import TestClient
 from services.app.camera_log import EVENT_LIMIT
 from services.app.config import CameraConfig
 from services.app.server import create_app
+from services.edge.launcher_impl import Child, Launcher
 from services.edge.session.writer import mask_credentials
 from tests.app.test_api import FakeLauncher
 
@@ -194,3 +196,84 @@ def test_a_camera_with_an_error_but_no_process_is_listed_in_idle_cameras(two_cam
     assert idle[0]["last_error"]["message"] == "Start refused."
     client.delete("/api/cameras/cam2/error")
     assert client.get("/api/status").json()["idle_cameras"] == []
+
+
+# -- B2: an error printed mid-run is not a start failure --------------------------------------
+
+
+def real_children(cameras, lines):
+    """Real launcher children fed through the real Launcher.read, process still alive."""
+    children = [Child(c) for c in cameras]
+    stdout = [line + "\n" for line in lines]
+    proc = SimpleNamespace(stdout=stdout, poll=lambda: None, returncode=None)
+    for child in children:
+        child.proc = proc
+    Launcher(cameras, SimpleNamespace()).read(*children)
+    return children
+
+
+class RealChildLauncher(FakeLauncher):
+    def run(self):  # real children's `running` follows their proc and cannot be assigned
+        self.event.wait()
+        return 0
+
+
+def make_session(root, camera_id):
+    folder = root / camera_id
+    (folder / "runs" / "r1").mkdir(parents=True)
+    (folder / "session.json").write_text(
+        json.dumps({"camera_id": camera_id, "status": "running", "events": [], "runs": ["r1"]}),
+        encoding="utf-8",
+    )
+    (folder / "runs" / "r1" / "run.json").write_text(
+        json.dumps({"ready": {"first_frame": "2026-10-30T00:00:00Z"}}), encoding="utf-8"
+    )
+    return folder
+
+
+def launcher_with(tmp_path, lines):
+    """A two-camera group whose process printed both session lines, then `lines`."""
+    folders = {c: make_session(tmp_path / "s", c) for c in ("cam1", "cam2")}
+
+    class GroupLauncher(RealChildLauncher):
+        def __init__(self, cameras, options):
+            super().__init__(cameras, options)
+            tagged = [f"[{c}] session: {folder}" for c, folder in folders.items()]
+            self.children = real_children(cameras, [*tagged, *lines])
+
+    return GroupLauncher
+
+
+def test_b2_a_run_error_keeps_the_camera_recording_and_is_logged_once(tmp_path):
+    line = "error: final session files could not be written"
+    factory = launcher_with(tmp_path, [line])
+    with make_client(tmp_path, factory, ("cam1", "cam2")) as client:
+        client.post("/api/recording/start")
+        for _ in range(3):  # polling again must not duplicate
+            cams = [camera(client, c) for c in ("cam1", "cam2")]
+        audit = (tmp_path / "audit.jsonl").read_text(encoding="utf-8")
+        for cam in cams:
+            assert cam["state"] == "recording"
+            assert "while recording" in cam["last_error"]["message"]
+            assert "final session files could not be written" in cam["last_error"]["detail"]
+            kinds = [e["kind"] for e in cam["recent_events"]]
+            assert kinds == ["error"]
+            assert "final session files could not be written" in cam["recent_events"][0]["detail"]
+        assert "could not start recording" not in audit
+        assert "while recording" in audit
+
+
+def test_b2_an_error_before_the_session_line_is_still_a_start_failure(tmp_path):
+    class StartFailLauncher(RealChildLauncher):
+        def __init__(self, cameras, options):
+            super().__init__(cameras, options)
+            folder = make_session(tmp_path / "s", "cam2")
+            lines = ["error: cannot open source", f"[cam2] session: {folder}"]
+            self.children = real_children(cameras, lines)
+            self.children[0].proc = SimpleNamespace(poll=lambda: 3, returncode=3)
+
+    with make_client(tmp_path, StartFailLauncher, ("cam1", "cam2")) as client:
+        client.post("/api/recording/start")
+        cam1 = camera(client, "cam1")
+        assert cam1["state"] == "error"
+        assert cam1["last_error"]["message"] == "The camera could not start recording."
