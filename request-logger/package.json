@@ -1,0 +1,13 @@
+{
+  "name": "request-logger",
+  "private": true,
+  "type": "module",
+  "description": "Local proxy that logs every request a coding agent sends to the model. Copied from ai-hero-dev/ai-coding-crash-course.",
+  "scripts": {
+    "request-logger": "tsx proxy.ts"
+  },
+  "dependencies": {
+    "@clack/prompts": "1.7.0",
+    "tsx": "4.23.12"
+  }
+}
