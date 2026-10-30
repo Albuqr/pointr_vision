@@ -118,6 +118,39 @@ failing test first, landing before the refactor tickets in their lane. Their tes
 tests the refactors must keep green. T1–T12 are the **R2a follow-up**: the PHASES.md entry and D-063
 come with T0.
 
+**GitHub issues (published 2026-10-30; GitHub's native blocked-by edges are the source of truth):**
+
+| Ticket | Issue | Lane | Blocked by |
+|---|---|---|---|
+| T0 | #52 | K | none |
+| B6 | #53 | K | #52 |
+| B1 | #54 | S | #52 |
+| B7 | #55 | S | #52 |
+| B8 | #56 | S | #52 |
+| B9 | #57 | S | #54 |
+| B2 | #58 | S | #56 |
+| B10 | #59 | S | #58 |
+| B3 | #60 | E | #52 |
+| B4 | #61 | E | #52 |
+| B5 | #62 | E | #52 |
+| T1 | #63 | K | #53 |
+| T2 | #64 | S | #54, #55, #56, #57, #59 |
+| T3 | #65 | E | #60, #61, #62 |
+| T4 | #66 | E (new test file) | #60, #61, #62 |
+| T5 | #67 | C | #63 |
+| T6 | #68 | S | #63, #64, #58, #59 |
+| T7 | #69 | E | #65, #66 |
+| T8 | #70 | E | #67, #69 |
+| T9 | #71 | E | #70 |
+| T10 | #72 | E | #68, #71 |
+| T11 | #73 | E | #72 |
+| T12 | #74 | E | #73 |
+
+The bugs were split into one ticket per bug (owner, 2026-10-30). The BK/BS/BE rows in the table below
+are now B6 / (B1, B7, B8, B9, B2, B10) / (B3, B4, B5). Bugs in the same lane that touch the same function
+are chained (B1 → B9; B8 → B2 → B10). The others in a lane run in parallel on different agents, each
+touching only its named functions.
+
 | Ticket | Lane | Candidate | Reserved | Blocked by | Size |
 |---|---|---|---|---|---|
 | **T0** LF normalisation (`.gitattributes`, one renormalise commit, `.git-blame-ignore-revs`) + the PHASES.md "R2a follow-up" entry and **D-063** (scope) | K | brief C3 | **D-063** | none | XS |
@@ -149,7 +182,7 @@ The owner assigns providers per wave. Suggested assignment below.
 | Wave | Claude | Codex | Antigravity |
 |---|---|---|---|
 | 0 | **T0** (minutes; merge before anything else is branched) | n/a | n/a |
-| 1a *(Phase 03 bugs)* | **BK** then start **T1** | **BS** | **BE** |
+| 1a *(Phase 03 bugs)* | **B6** #53, then **B3** #60 | **B1** #54 → **B9** #57; **B7** #55 | **B8** #56 → **B2** #58 → **B10** #59; **B4** #61, **B5** #62 |
 | 1b | **T1** contracts | **T2** session reader | **T3** then **T4** |
 | 2 | **T5** intake module | **T6** protocol (after T1, T2) | **T7** pipeline |
 | 3 | **T8** switch to intake | n/a (or review T8) | n/a (or review) |
