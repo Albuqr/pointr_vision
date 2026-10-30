@@ -189,18 +189,15 @@ def test_edge_refusal_is_a_failed_calibration_check(tmp_path, offer, camera_id, 
 def test_operator_refusal_matches_what_main_writes():
     from services.edge import main
 
-    class Args:
-        calibration_failed = "points too few"
-
     verdict = take_calibration(Refused("points too few"), "cam1", SIZE)
 
     assert verdict.calibration is None
     assert verdict.refused_at_edge is None  # the operator refused, the edge detected nothing
     assert len(verdict.checks) == 1
-    expected = main.failed_calibration_checks(Args())[0]
+    expected = main.failed_calibration_checks("points too few")[0]
     assert {**verdict.checks[0], "t_wall": None} == {**expected, "t_wall": None}
     (event,) = verdict.events
-    old = main.calibration_failed_event(Args())
+    old = main.calibration_failed_event("points too few")
     assert (event.kind, event.t_mono, event.detail) == (old.kind, old.t_mono, old.detail)
 
 

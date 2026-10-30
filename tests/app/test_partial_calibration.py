@@ -16,7 +16,8 @@ from services.edge.calibration.homography import CalibrationPositions
 from services.edge.perception.loop import NO_DETECTIONS
 from services.edge.perception.types import Detections
 from tests.app import test_api
-from tests.edge.test_session import EvenFrameDetector, load, run_main, session_files, validate
+from tests.edge.fakes import EvenFrameDetector
+from tests.edge.test_session import load, run_main, session_files, validate
 from tests.fixtures.make_clips import HEIGHT, WIDTH, make_clips
 
 ROOT = Path(__file__).resolve().parents[2]

@@ -25,6 +25,7 @@ from services.edge.main import (
     EXIT_CAPTURE_ERROR,
     EXIT_INTERRUPTED,
     EXIT_OPEN_FAILED,
+    RunSettings,
     create_tracker,
     health_config,
     load_perception,
@@ -155,6 +156,7 @@ def run_replay(args: argparse.Namespace, group: GroupReplay) -> int:
         if not cam.replay.target.verified:
             say(cam.camera_id, "warning: the session has no video hash, so the video is unchecked")
     config = health_config(args)
+    settings = RunSettings.from_args(args)
     detector = gpu = model_loaded = None
     if not args.no_detect:
         try:
@@ -169,8 +171,9 @@ def run_replay(args: argparse.Namespace, group: GroupReplay) -> int:
 
     def make_run(camera_id, info):
         tracker = None if detector is None else create_tracker(args)
-        meta = run_meta(args, info, config, detector, tracker, gpu, targets[camera_id])
-        return dataclasses.replace(meta, ready={"model_loaded": model_loaded})
+        return run_meta(
+            settings, info, config, detector, tracker, gpu, targets[camera_id], model_loaded
+        )
 
     pipelines = {}
 

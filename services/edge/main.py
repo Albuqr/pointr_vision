@@ -302,9 +302,30 @@ def normalise_device(device: str) -> str:
     return "cuda:0" if device == "cuda" else device
 
 
-def run_meta(args, info, config: HealthConfig, detector, tracker, gpu, replay=None) -> RunMeta:
+@dataclasses.dataclass(frozen=True)
+class RunSettings:
+    """What run.json takes from the command line, read once per entry point."""
+
+    requested_size: tuple[int, int] | None
+    calibration_refusal: str | None
+
+    @classmethod
+    def from_args(cls, args) -> "RunSettings":
+        return cls((args.width, args.height), args.calibration_failed)
+
+
+def run_meta(
+    settings: RunSettings,
+    info,
+    config: HealthConfig,
+    detector,
+    tracker,
+    gpu,
+    replay=None,
+    model_loaded=None,
+) -> RunMeta:
     """run.json fields known at start: input, detector, tracker, thresholds, versions."""
-    camera = info.kind == "camera"
+    size = settings.requested_size if info.kind == "camera" else None
     return RunMeta(
         run_id=str(uuid.uuid4()),
         mode="replay" if replay else "live",
@@ -312,8 +333,8 @@ def run_meta(args, info, config: HealthConfig, detector, tracker, gpu, replay=No
             "kind": info.kind,
             "ref": info.ref,
             "sha256": replay.sha256 if replay else None,
-            "requested_width": args.width if camera else None,
-            "requested_height": args.height if camera else None,
+            "requested_width": size[0] if size else None,
+            "requested_height": size[1] if size else None,
         },
         detector=None
         if detector is None
@@ -348,27 +369,25 @@ def run_meta(args, info, config: HealthConfig, detector, tracker, gpu, replay=No
         },
         started_at=utc_now(),
         power_start=read_power(),
-        checks=failed_calibration_checks(args),
+        checks=failed_calibration_checks(settings.calibration_refusal),
+        ready={"model_loaded": model_loaded},
     )
 
 
-def failed_calibration_checks(args) -> list | None:
+def failed_calibration_checks(refusal: str | None) -> list | None:
     """run.json `checks` of a camera the operator started uncalibrated after Studio refused its
     calibration (D-057); None otherwise: the other checks belong to Track R."""
-    if not args.calibration_failed:
+    if not refusal:
         return None
-    detail = args.calibration_failed
-    return [{"check": "calibration", "result": "failed", "detail": detail, "t_wall": utc_now()}]
+    return [{"check": "calibration", "result": "failed", "detail": refusal, "t_wall": utc_now()}]
 
 
-def calibration_failed_event(args) -> HealthEvent | None:
+def calibration_failed_event(refusal: str | None) -> HealthEvent | None:
     """The `startup_check_failed` event that goes with `failed_calibration_checks`. No t0 yet,
     so t_mono is null."""
-    if not args.calibration_failed:
+    if not refusal:
         return None
-    return HealthEvent(
-        "startup_check_failed", utc_now(), None, f"calibration: {args.calibration_failed}"
-    )
+    return HealthEvent("startup_check_failed", utc_now(), None, f"calibration: {refusal}")
 
 
 def ignore_ctrl_c():
@@ -531,6 +550,7 @@ def start_http_preview(port: int, pipeline: CameraPipeline):
 
 def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
     config = health_config(args)
+    settings = RunSettings.from_args(args)
     events: Counter[str] = Counter()
     events_lock = threading.Lock()  # called from the capture, processing and main threads
 
@@ -648,10 +668,7 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
             )
         )
         pipeline.open_session(
-            dataclasses.replace(
-                run_meta(args, info, config, detector, tracker, gpu, replay),
-                ready={"model_loaded": model_loaded},
-            ),
+            run_meta(settings, info, config, detector, tracker, gpu, replay, model_loaded),
             meta=meta,
             session_dir=replay.session_dir if session_replay else None,
         )
@@ -665,7 +682,7 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
     if args.calibration_problem:  # before any run, so no t0: t_mono is null
         problem = args.calibration_problem
         log_event(HealthEvent("error", utc_now(), None, f"calibration not used: {problem}"))
-    if event := calibration_failed_event(args):
+    if event := calibration_failed_event(settings.calibration_refusal):
         log_event(event)
 
     http_preview = None

@@ -11,7 +11,6 @@ load, a failure to start) have no prefix.
 """
 
 import argparse
-import dataclasses
 import json
 import sys
 import time
@@ -24,6 +23,7 @@ from services.edge.main import (
     EXIT_CAPTURE_ERROR,
     EXIT_INTERRUPTED,
     EXIT_OPEN_FAILED,
+    RunSettings,
     StopRequest,
     calibration_failed_event,
     create_tracker,
@@ -119,11 +119,14 @@ def run(cams: list[argparse.Namespace], stop: StopRequest) -> int:
             return EXIT_OPEN_FAILED
         cameras.append(GroupCamera(a.camera_id, source, a.link, a.calibration))
 
+    settings = {a.camera_id: RunSettings.from_args(a) for a in cams}
+
     def make_run(camera_id, info):
         a = by_id[camera_id]
         tracker = None if detector is None else create_tracker(a)
-        meta = run_meta(a, info, config, detector, tracker, gpu)
-        return dataclasses.replace(meta, ready={"model_loaded": model_loaded})
+        return run_meta(
+            settings[camera_id], info, config, detector, tracker, gpu, None, model_loaded
+        )
 
     pipelines, previews = {}, []
 
@@ -134,7 +137,7 @@ def run(cams: list[argparse.Namespace], stop: StopRequest) -> int:
         if a.calibration_problem:  # before any run, so no t0: t_mono is null
             detail = f"calibration not used: {a.calibration_problem}"
             pipeline.log_event(HealthEvent("error", utc_now(), None, detail))
-        if event := calibration_failed_event(a):
+        if event := calibration_failed_event(settings[camera_id].calibration_refusal):
             pipeline.log_event(event)
         if a.http_preview is not None:
             previews.append(start_http_preview(a.http_preview, pipeline))

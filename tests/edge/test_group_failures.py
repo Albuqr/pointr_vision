@@ -12,10 +12,11 @@ import pytest
 from services.edge.capture.health import HealthConfig
 from services.edge.capture.sources import FileSource
 from services.edge.group_runner import GroupCamera, SharedCodeError, run_group
-from services.edge.main import parse_args, run_meta
+from services.edge.main import RunSettings, run_meta
 from services.edge.matcher import CourtMatcher
 from services.edge.perception.types import TrackObs
 from services.edge.session import writer as writer_mod
+from tests.edge.fakes import EvenFrameDetector, OneTrackPerDetection
 from tests.edge.test_group_runner import (
     SAME_PLACE,
     TOLERANT,
@@ -23,7 +24,7 @@ from tests.edge.test_group_runner import (
     calibration_for,
     camera_files,
 )
-from tests.edge.test_session import EvenFrameDetector, OneTrackPerDetection, validate
+from tests.edge.test_session import validate
 
 FAILED_READS = 40  # more than HealthConfig().lost_reads: the camera is declared lost
 
@@ -67,7 +68,7 @@ class NewIdAfterGap(OneTrackPerDetection):
 
 
 def run_cameras(sources, out: Path, detector, make_tracker=None, **kw) -> dict[str, str]:
-    args = parse_args(["--source", "unused"])  # the CLI's defaults, as the launcher passes them
+    settings = RunSettings(None, None)
     config = HealthConfig()
     calibrations = kw.pop("calibrations", {})
     cameras = [
@@ -81,7 +82,7 @@ def run_cameras(sources, out: Path, detector, make_tracker=None, **kw) -> dict[s
         out,
         config,
         lambda camera_id, info: run_meta(
-            args, info, config, detector, OneTrackPerDetection(), None
+            settings, info, config, detector, OneTrackPerDetection(), None
         ),
         record=False,
         **kw,

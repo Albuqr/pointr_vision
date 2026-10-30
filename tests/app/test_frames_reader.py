@@ -6,12 +6,13 @@ from types import SimpleNamespace
 from services.app.server import Studio
 from services.edge.session.types import FrameRecord
 from services.edge.session.writer import FileSessionWriter
-from tests.edge.test_session import COUNTS, meta, run_meta
+from tests.edge.fakes import meta, sample_run_meta
+from tests.edge.test_session import COUNTS
 
 
 def test_recent_frames_survive_the_columns_added_in_0_11_0(tmp_path):
     w = FileSessionWriter(tmp_path)
-    run = run_meta()
+    run = sample_run_meta()
     w.start(meta(), run)
     w.set_t0(time.perf_counter(), "2026-10-13T12:00:01Z")
     for seq in range(3):

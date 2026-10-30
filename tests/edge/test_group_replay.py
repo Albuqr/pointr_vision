@@ -15,17 +15,19 @@ import pytest
 from services.edge.capture.health import HealthConfig
 from services.edge.capture.sources import FileSource
 from services.edge.group_runner import GroupCamera, run_group
-from services.edge.main import parse_args, run_meta
+from services.edge.main import RunSettings, parse_args, run_meta
 from services.edge.matcher import CourtMatcher, MatcherParams
 from services.edge.perception.loop import NO_DETECTIONS
 from services.edge.perception.types import Detections
 from services.edge.replay.group import live_matcher, resolve_group
 from services.edge.replay.resolve import ReplayError
+from tests.edge.fakes import OneTrackPerDetection
 from tests.edge.test_group_runner import calibration_for
-from tests.edge.test_session import OneTrackPerDetection, load, rows, validate
+from tests.edge.test_session import load, rows, validate
 
 ROOT = Path(__file__).resolve().parents[2]
 ARGS = parse_args(["--source", "unused"])  # the CLI's defaults
+SETTINGS = RunSettings(None, None)
 CONFIG = HealthConfig()
 # two people far apart: neither camera links, so which ID each gets depends on who came first
 FAR = {"cam1": [10.0, 20.0, 110.0, 220.0], "cam2": [400.0, 200.0, 500.0, 340.0]}
@@ -67,7 +69,7 @@ def record_group(clips, tmp_path, detector, params=STILL) -> Path:
     ]
     statuses = run_group(
         "g1", cameras, detector, lambda c: OneTrackPerDetection(), out, CONFIG,
-        lambda c, info: run_meta(ARGS, info, CONFIG, detector, OneTrackPerDetection(), None),
+        lambda c, info: run_meta(SETTINGS, info, CONFIG, detector, OneTrackPerDetection(), None),
         record=True, matcher=CourtMatcher(params),
     )  # fmt: skip
     assert statuses == {"cam1": "ended", "cam2": "ended"}
@@ -80,7 +82,7 @@ def replay_group(out: Path, detector, matcher=None) -> dict[str, str]:
     return run_group(
         group.group_id, group.cameras, detector, lambda c: OneTrackPerDetection(), out, CONFIG,
         lambda c, info: run_meta(
-            ARGS, info, CONFIG, detector, OneTrackPerDetection(), None, targets[c]
+            SETTINGS, info, CONFIG, detector, OneTrackPerDetection(), None, targets[c]
         ),
         record=False, matcher=matcher or live_matcher(group.params, ARGS.track_lost_secs),
     )  # fmt: skip
