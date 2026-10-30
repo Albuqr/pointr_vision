@@ -30,8 +30,8 @@ class FailedChild:
         self.preview_port = camera.http_preview_port
         self.running = False
         self.proc = Proc()
-        self.failure = f"cannot open {SECRET_URL}"
-        self.tail = deque([f"error: cannot open {SECRET_URL}"], maxlen=20)
+        self.failure = f"cannot open source {SECRET_URL}"
+        self.tail = deque([f"error: cannot open source {SECRET_URL}"], maxlen=20)
 
 
 class FailingLauncher(FakeLauncher):
@@ -277,3 +277,36 @@ def test_b2_an_error_before_the_session_line_is_still_a_start_failure(tmp_path):
         cam1 = camera(client, "cam1")
         assert cam1["state"] == "error"
         assert cam1["last_error"]["message"] == "The camera could not start recording."
+
+
+@pytest.mark.parametrize(
+    ("failure", "kind"),
+    [
+        ("opencv error: invalid frame", "start_failed"),
+        ("could not open weights 'missing.pth'", "start_failed"),
+        ("model load failed: could not open weights 'missing.pth'", "start_failed"),
+        ("source configuration is invalid", "start_failed"),
+        ("unexpected startup failure", "start_failed"),
+        ("cannot open sourceful weights", "start_failed"),
+        ("cannot open source 'fake': file not found", "source_open_failed"),
+        ("cannot open source: camera did not open", "source_open_failed"),
+        ("cannot open source", "source_open_failed"),
+    ],
+)
+def test_b10_start_failures_use_the_edges_wording_and_keep_the_reason(tmp_path, failure, kind):
+    class StartFailLauncher(RealChildLauncher):
+        def __init__(self, cameras, options):
+            super().__init__(cameras, options)
+            self.children = real_children(cameras, [f"error: {failure}"])
+            for child in self.children:
+                child.proc = SimpleNamespace(poll=lambda: 3, returncode=3)
+
+    with make_client(tmp_path, StartFailLauncher) as client:
+        assert client.post("/api/recording/start").status_code == 200
+        cam = camera(client)
+        assert cam["state"] == "error"
+        assert cam["last_error"]["message"] == "The camera could not start recording."
+        assert f"reason: {failure}" in cam["last_error"]["detail"]
+        assert [(event["kind"], event["detail"]) for event in cam["recent_events"]] == [
+            (kind, failure)
+        ]
