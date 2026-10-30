@@ -1344,3 +1344,28 @@ compared on the frames both processed (by `t_video`).
 **Consequences.** Contract 0.20.0, additive: no new field; the doc says what a group replay's runs hold and which time
 base they used. The calibration loader accepts files saved under 0.19.0.
 **Status.** Accepted.
+
+## D-061 · 2026-10-29 · Appearance fallback: clothing colour and box height (contract 0.21.0)
+**Context.** R2a 06 (issue #12, ADR 0007, D-045). A track without a court position (no valid calibration, a frame of
+another size, a point that cannot be projected) could not be linked to another camera (D-058), and a track broken by
+one person walking behind another got a new ID unless position re-linked it.
+**Decision.** Each local track carries an appearance descriptor computed from its box in the frame being processed,
+with OpenCV and numpy only (no learned model, no new dependency): an HSV histogram (8 x 4 x 4 bins, value included
+so black and white kits differ) of the upper and of the lower part of the box, taken from the middle of its width,
+plus the box height as a fraction of the frame height. Two tracks are close in appearance when the mean of the two
+Bhattacharyya distances (`cv2.compareHist`, `HISTCMP_BHATTACHARYYA`) is within `appearance_max_distance` and the
+relative height difference within `max_height_diff`. The matcher uses appearance only where position cannot decide:
+when one of the two tracks has no court position. Where both have one, position alone decides, so appearance never
+overrides a court-plane distance, and pixel position is never a cue. Position pairs are taken before appearance
+pairs, nearest first, one to one, with the same rules as D-058 (two present tracks of one camera never share a group;
+a lost group is kept for `lost_s` and a new local track close in appearance can take it over, which is the occlusion
+re-link). A lost group's court position older than `lost_s` no longer decides a takeover (a group kept alive by
+a camera without positions would otherwise get a speed slack covering the court); appearance may still. A group
+linked across cameras by appearance writes `link=appearance`; `link` stays per group, the cue of
+the latest cross-camera link. A camera of a group run of two or more cameras with no valid calibration gets one
+`appearance_only` session event when its session opens. `group.params` gains `appearance_max_distance` (0.3) and
+`max_height_diff` (0.4): starting values, not measured; R2a-A5 scores them on a recorded clip.
+**Consequences.** Contract 0.21.0, additive: a session event kind and two parameter names. Calibrations saved under
+0.19.0 and 0.20.0 stay loadable (the format is unchanged). Any merge by appearance is low confidence until R2a-A5 records its
+accuracy; teammates in the same kit and of similar height will be confused.
+**Status.** Accepted.

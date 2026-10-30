@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:pointr:contracts:0.20.0:report",
+  "$id": "urn:pointr:contracts:0.21.0:report",
   "title": "report.json",
   "description": "DATA_CONTRACTS.md section 8. Every measurement is {value, unit}; a null value carries a reason. Counts are plain integers named n_*.",
   "type": "object",
@@ -10,7 +10,7 @@
     "court", "positions", "params", "session", "tracks", "caveats"
   ],
   "properties": {
-    "contract_version": {"const": "0.20.0"},
+    "contract_version": {"const": "0.21.0"},
     "run_id": {"$ref": "#/$defs/uuid4"},
     "session_id": {"$ref": "#/$defs/uuid4"},
     "camera_id": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9_-]{1,32}$"},

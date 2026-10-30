@@ -71,7 +71,10 @@ pointr/
                              CameraPipeline per camera, one shared detector, track IDs unique
                              within the group run (D-055)
       matcher.py             the cross-camera matcher (R2a 05, D-058): local tracks with court
-                             positions in, group track IDs and links out; pure, no clock
+                             positions and appearance in, group track IDs and links out;
+                             pure, no clock
+      appearance.py          a track's appearance descriptor (R2a 06, D-061): clothing colour
+                             histograms and box height, OpenCV and numpy only
       group_main.py          a group's one process: main.py's job for every camera of the
                              group, through the group runner (R2a 04, D-056)
       main.py                CLI entry point

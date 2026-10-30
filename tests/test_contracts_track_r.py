@@ -247,7 +247,10 @@ def test_matcher_params_are_named_in_the_doc_and_a_group_run_with_them_validates
     group_text = DOC[DOC.index("The court-position matcher (0.19.0") :]
     for name in contract.MATCHER_PARAMS:
         assert f"`{name}`" in group_text.split("`ready`")[0], name
-    params = {"match_distance_m": 0.5, "max_offset_s": 0.25, "lost_s": 1.0, "max_speed_mps": 4.0}
+    params = {
+        "match_distance_m": 0.5, "max_offset_s": 0.25, "lost_s": 1.0, "max_speed_mps": 4.0,
+        "appearance_max_distance": 0.3, "max_height_diff": 0.4,
+    }  # fmt: skip
     run = example("run")
     run["group"] = {**GROUP, "params": {**params, "latency_s": {"cam1": 0.0, "cam2": 0.08}}}
     assert not list(validator("run").iter_errors(run))

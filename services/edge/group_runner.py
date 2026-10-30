@@ -5,7 +5,8 @@ Each camera keeps its own capture thread, processing thread, tracker, session wr
 with one process per camera. The detector is loaded once by the caller and shared: frames of every
 camera go through it in turn. Each camera keeps its own calibration. Track IDs are unique within
 the group run: the cross-camera matcher (R2a 05, `matcher.py`) gives the same ID to a person two
-calibrated cameras both see, and each tracks row says how its track was linked.
+calibrated cameras both see (or, without a court position, who looks alike: R2a 06), and each
+tracks row says how its track was linked.
 
 Failures (R2a 07): a camera's stream loss or outage is its own (its source_lost and
 source_recovered events); the other cameras keep recording, and a camera that comes back re-links
@@ -23,6 +24,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from services.edge.appearance import describe
 from services.edge.calibration.homography import CalibrationPositions
 from services.edge.camera_pipeline import (
     CameraPipeline,
@@ -39,6 +41,12 @@ from services.edge.replay.order import GroupTimeOrder
 from services.edge.replay.resolve import ReplayTarget
 from services.edge.session.types import RunMeta, SessionMeta
 from services.edge.session.writer import FileSessionWriter, device_id
+
+# the appearance_only event's detail (DATA_CONTRACTS section 2, D-061); a calibration that could
+# not be used has its own error event
+APPEARANCE_ONLY = (
+    "no valid calibration: tracks link to the other cameras by clothing colour and box height only"
+)
 
 OnGroupEvent = Callable[[str, HealthEvent, float | None], None]  # camera_id, event, run's t0
 
@@ -87,7 +95,8 @@ class CameraTracker:
     """A camera's own tracker, writing the matcher's group track IDs and links instead of its
     local ones. `positions` (a calibrated camera's PositionMap) gives each track's court position
     for the matcher; `image_size` is the size the calibration was made at, and a frame of another
-    size has no positions (the writer leaves them empty too)."""
+    size has no positions (the writer leaves them empty too). Each track also reports its
+    appearance, from its box in the frame."""
 
     def __init__(
         self,
@@ -118,12 +127,12 @@ class CameraTracker:
 
     def _update(self, dets: Detections, frame: Frame) -> list[TrackObs]:
         tracks = self._tracker.update(dets, frame)
-        try:
-            linked = self._matcher.update(  # also with no tracks: the camera reported
-                self._camera_id,
-                frame.t_recv,
-                [LocalTrack(t.track_id, self._court_xy(t.xyxy, frame)) for t in tracks],
-            )
+        local = [
+            LocalTrack(t.track_id, self._court_xy(t.xyxy, frame), describe(frame.image, t.xyxy))
+            for t in tracks
+        ]
+        try:  # also with no tracks: the camera reported
+            linked = self._matcher.update(self._camera_id, frame.t_recv, local)
         except Exception as e:
             raise SharedCodeError(f"matcher: {e!r}") from e
         return [
@@ -266,6 +275,8 @@ def run_group(
             opened.append(p)
             if problem := calibrations[i][2]:  # before any run, so no t0: t_mono is null
                 p.log_event(HealthEvent("error", utc_now(), None, problem))
+            if detector is not None and len(cameras) > 1 and calibrations[i][1] is None:
+                p.log_event(HealthEvent("appearance_only", utc_now(), None, APPEARANCE_ONLY))
             if on_session:
                 on_session(camera_ids[i], p)
     except BaseException as e:

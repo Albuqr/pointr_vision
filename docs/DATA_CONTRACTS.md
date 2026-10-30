@@ -1,6 +1,6 @@
 # Data contracts
 
-Contract version: **0.20.0**. Any change bumps the version (minor for additive fields, major
+Contract version: **0.21.0**. Any change bumps the version (minor for additive fields, major
 for removals or meaning changes) and needs a `DECISIONS.md` entry. JSON Schemas in
 `contracts/` are written from this file and tests check them against it (D-009).
 
@@ -63,7 +63,7 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
 
 ```json
 {
-  "contract_version": "0.20.0",
+  "contract_version": "0.21.0",
   "session_id": "uuid",
   "device_id": "uuid",
   "camera_id": "cam1 | null",
@@ -115,7 +115,11 @@ Event `t_mono` is `null` for events that precede the run's `t0`, such as
 Event kinds: `source_open_failed`, `source_lost`, `source_recovered`,
 `frozen_frames`, `dark_frames`, `writer_backlog`, `recorder_backlog`, `interrupted`, `error`,
 `camera_gap`, `sensor_outage`, `startup_check_failed`, `rim_drift` (those four are 0.11.0, Track R),
-`stopped` (0.12.0, D-049).
+`stopped` (0.12.0, D-049), `appearance_only` (0.21.0, D-061).
+`appearance_only` is written once, when the session opens (so `t_mono` is `null`), for a camera of a group run of
+two or more cameras that has no valid calibration and a matcher running: its tracks cannot be linked by court
+position, so they link to the other cameras by appearance only (section 5). `detail` says why
+(`no valid calibration: ...`).
 `stopped` means the session was asked to stop and ended normally: status `ended`, not `interrupted`. Its
 `detail` starts with the source of the request and a colon; the only source so far is `ui` (Studio's stop
 button, through the launcher's stop channel), e.g. `ui: stop requested in Studio`. A Ctrl+C, the launcher's own
@@ -133,7 +137,7 @@ calibration used by this session and records its mean held-out check residual in
 
 ```json
 {
-  "contract_version": "0.20.0",
+  "contract_version": "0.21.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "mode": "live | replay",
@@ -261,6 +265,12 @@ time between the two readings, and how old a camera's last update may be and sti
 were lost) and `latency_s` (an object, `camera_id` to the camera latency in s that was subtracted from that
 camera's frame receive time to get group time; `0.0` for a camera with no measured latency). They are starting
 values, not measured ones.
+The appearance fallback (0.21.0, D-061, R2a 06) adds `appearance_max_distance` (largest appearance distance between
+two tracks that are linked by appearance: the mean of the Bhattacharyya distances, 0 same to 1 disjoint, of the
+HSV colour histograms of the upper and of the lower part of the two boxes) and `max_height_diff` (largest
+relative difference `|a - b| / max(a, b)` of the two boxes' heights, each a fraction of its frame's height). They
+are starting values, not measured ones. Where both tracks have a court position, only position decides; appearance
+is used only when one of them has none.
 `ready` (0.15.0, D-052) says when this camera became ready, one entry per step, so a slow start can be
 placed from the files alone. Each entry is `{t_wall, t_pc}`: the UTC wall time and the raw `perf_counter`
 seconds of the PC clock (the base of `t0_mono`, so `t_pc - t0_mono` is seconds since t0, and negative for
@@ -321,8 +331,13 @@ One row per **processed** frame, including frames with zero detections.
 change from `unshared` to `position` once a second camera sees the person. A file written before
 0.14.0 has no `link` column; read it as `unshared`.
 Rows of a track the court-position matcher has linked to a track of another camera carry `position` from
-the frame where the link was made; a camera that cannot give a court position (no valid calibration) stays
-`unshared` until the appearance fallback (R2a 06) exists.
+the frame where the link was made. A track without a court position (its camera has no valid calibration, a frame
+of another size, a point that cannot be projected) is linked by appearance instead (0.21.0, D-061): clothing colour
+of the upper and lower box and box height, never pixel position, within `appearance_max_distance` and
+`max_height_diff` (section 3); its group's rows then carry `appearance`. `link` belongs to the track's group, so it
+names the cue of the latest link into that group. A track that is lost and replaced by a new local track of the
+same camera within `lost_s` keeps its `track_id` (by position, or by appearance when there is no position); that
+does not change `link`, which is only about other cameras.
 Out-of-court points are retained, with `in_court=false`; they are not clamped to court bounds.
 A point that cannot be projected (on or beyond the camera's horizon, or not finite) keeps its
 pixel box and its `calibration_id`, with `x_m`, `y_m` and `in_court` empty; the writer records
@@ -395,7 +410,7 @@ One report per run, one per camera: there is no fusion across cameras.
 
 ```json
 {
-  "contract_version": "0.20.0",
+  "contract_version": "0.21.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "camera_id": "cam1 | null",
@@ -738,7 +753,7 @@ recorded video and is compared with `frames.csv` `t_video`; shots and tracks joi
 
 ```json
 {
-  "contract_version": "0.20.0",
+  "contract_version": "0.21.0",
   "fusion_id": "uuid",
   "group_id": "token",
   "created_at": "2026-12-01T18:50:00Z",
