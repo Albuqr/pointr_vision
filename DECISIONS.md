@@ -1450,6 +1450,11 @@ Studio status, camera readiness, sessions page and recovery, launcher summaries,
 reports and scoring all use this boundary. The camera log ingests the same snapshot's validated events.
 Replay writer startup and read-merge-write updates also use it, so a BOM cannot break appending a run
 or make a stale writer discard another replay's run ID.
+Those updates use `read_session_for_update`, which preserves raw content and validates only the
+session ID and the two lists replay needs. Tolerant display snapshots must never be written back:
+they normalize malformed optional fields and filter events. A merge refuses unreadable mutation fields
+instead of overwriting them with an older copy; malformed unrelated evidence and missing historical
+optional fields survive unchanged.
 Interrupted marking now lives in `folder.py`, called by Studio recovery after the child has gone away;
 it preserves unknown fields, writes atomically, and reports problems instead of erasing malformed events.
 **Consequences.** Damaged sessions remain visible with their readable fields. Reports do not fall back to an

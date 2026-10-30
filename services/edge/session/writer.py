@@ -24,7 +24,7 @@ from urllib.parse import urlsplit, urlunsplit
 from services.edge.capture.types import utc_now
 from services.edge.contract import CONTRACT_VERSION, UNSHARED, VIDEO_FILE
 from services.edge.perception.types import TrackObs
-from services.edge.session.folder import read_session
+from services.edge.session.folder import read_session_for_update
 from services.edge.session.types import (
     CAMERA_ID_RE,
     GROUP_ID_RE,
@@ -229,7 +229,7 @@ class FileSessionWriter:
             raise ValueError("a calibrated run needs positions, and positions need a calibration")
         self._positions = positions
         self.dir = Path(session_dir)
-        self._session = read_session(self.dir).require("session_id", "runs", "events")
+        self._session = read_session_for_update(self.dir)
         self._session["runs"].append(run.run_id)
         self._replay = True
         self._begin_run(run)
@@ -544,10 +544,7 @@ class FileSessionWriter:
         collide within the same few milliseconds)."""
         if not self._replay:
             return self._session
-        try:
-            doc = read_session(self.dir).require("runs", "events")
-        except (OSError, ValueError):
-            doc = self._session
+        doc = read_session_for_update(self.dir)
         run_id = self._run_doc["run_id"]
         if run_id not in doc["runs"]:
             doc["runs"].append(run_id)
