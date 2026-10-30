@@ -160,6 +160,46 @@ def test_a_group_replay_adds_one_run_per_camera_and_leaves_the_originals_byte_id
     )  # fmt: skip
 
 
+def test_a_replay_with_a_saved_calibration_gives_the_live_runs_court_positions(clips, tmp_path):
+    detector = Scripted(NEAR)
+    out = record_group(clips, tmp_path, detector)
+    replay_group(out, detector)
+    for cid, ((_, live_dir), (_, replay_dir)) in runs(out).items():
+
+        def positions(run_dir):
+            return {
+                (r["seq"], r["track_id"]): (r["x_m"], r["y_m"])
+                for r in rows(run_dir / "tracks.csv")
+            }
+
+        live_pos = positions(live_dir)
+        assert live_pos and all(x and y for x, y in live_pos.values()), cid
+        assert positions(replay_dir) == live_pos, cid
+
+
+def test_a_singular_saved_calibration_replays_that_camera_uncalibrated_with_an_error_event(
+    clips, tmp_path
+):
+    detector = Scripted(NEAR)
+    out = record_group(clips, tmp_path, detector)
+    live_cam2 = runs(out)["cam2"][0][0]["calibration"]
+    (live, live_dir) = runs(out)["cam1"][0]
+    live["calibration"]["homography_image_to_court"] = [[1, 0, 0], [0, 0, 0], [0, 0, 1]]
+    (live_dir / "run.json").write_text(json.dumps(live), encoding="utf-8")
+
+    assert replay_group(out, detector) == {"cam1": "ended", "cam2": "ended"}
+
+    found = runs(out)
+    (_, _), (replay, replay_dir) = found["cam1"]
+    assert replay["mode"] == "replay" and not replay["calibration"]
+    assert not any(t["x_m"] for t in rows(replay_dir / "tracks.csv"))
+    folder = replay_dir.parent.parent
+    events = load(folder / "session.json")["events"]
+    [problem] = [e for e in events if (e.get("detail") or "").startswith("calibration not used")]
+    assert problem["kind"] == "error"
+    assert found["cam2"][1][0]["calibration"] == live_cam2
+
+
 @pytest.mark.parametrize(
     "boxes, start, gone",
     [
