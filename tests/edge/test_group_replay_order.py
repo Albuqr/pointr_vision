@@ -1,4 +1,4 @@
-"""The order of a group replay (R2a 08, D-059): the cameras' frames reach the matcher one at a time
+"""The order of a group replay (R2a 08, D-060): the cameras' frames reach the matcher one at a time
 in group time, whatever pace each camera's processing thread has."""
 
 import random

@@ -1,4 +1,4 @@
-"""Group replay (R2a 08, D-059): replaying a recorded group adds one run to every camera's session,
+"""Group replay (R2a 08, D-060): replaying a recorded group adds one run to every camera's session,
 processing the videos together in the live run's group time, and gives the live run's shared IDs on
 the same frames. In-process with synthetic calibrated clips and a scripted fake detector; the
 command line by subprocess with --no-detect. No camera, weights or network."""

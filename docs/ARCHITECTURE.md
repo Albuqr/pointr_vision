@@ -58,7 +58,7 @@ pointr/
       perception/            Detector, Tracker implementations
       session/               session lifecycle, writers
       recording/             raw video recorder
-      replay/                file replay runner; group replay (R2a 08, D-059): a group's
+      replay/                file replay runner; group replay (R2a 08, D-060): a group's
                              videos through the group runner in the live run's group time
       reports/               post-session coverage and failure reports
       store/                 SQLite access (registrations, session index, outbox)
@@ -201,8 +201,13 @@ capture thread ──▶ proc_queue (maxsize=1, drop oldest, count drops) ──
   launcher dies, becomes the Ctrl+C path of that process: the same shutdown as above). A
   `stop ui` line (Studio's stop button, D-049) takes the same path but ends the session `ended`
   with a `stopped` event instead of `interrupted`. A child's `session.json` carries `camera_id`
-  and `group_id`.
-- **Group replay (D-059).** `--replay <group_id>` runs the group's recorded videos through the
+  and `group_id`. In a group (R2a 07, D-059) a camera's stream loss or outage stays that camera's
+  own (`source_lost` / `source_recovered`), the others keep recording, and a camera that comes
+  back re-links through the matcher; a failure in shared code (detector, matcher) ends every
+  camera through the shutdown path above, each session with status `error` and the failure as
+  an `error` event. A failure of one camera's own code (its tracker, its writer) ends only that
+  camera, as with one process per camera.
+- **Group replay (D-060).** `--replay <group_id>` runs the group's recorded videos through the
   group runner, one replay run per session. Each camera keeps its processing thread, but its
   frames reach the tracker and the matcher one at a time in the live run's group time
   (`services/edge/replay/order.py`), so the matcher, whose result depends on the order of its calls, sees what

@@ -108,7 +108,7 @@ queue, a failed writer, a frame of another size) has an empty `t_video`. A repla
 `runs` grows, plus an `interrupted` or `error` event whose `detail` starts with `replay <run_id>:`
 when the replay did not end cleanly (D-042); the replay's other events are printed, not written.
 A replay of a bare video file starts a new session with `recording` disabled.
-A replay of a group (0.20.0, D-059: `--replay <group_id>`) adds one replay run, as above, to the session of
+A replay of a group (0.20.0, D-060: `--replay <group_id>`) adds one replay run, as above, to the session of
 every camera whose `session.json` has that `group_id`; section 3 `group` says what those runs share.
 Event `t_mono` is `null` for events that precede the run's `t0`, such as
 `source_open_failed` (D-014).
@@ -244,7 +244,7 @@ the rest) with its `camera_id`, `session_id` and `run_id`. A `track_id` is then 
 run: the same `track_id` in the `tracks.csv` of two runs with the same `group_run_id` is the same person.
 A live run and a replay of it are two group runs, so the contract does not make their IDs name the same
 person; a replay is expected to reproduce the live IDs on the same frames (R2a 08), and that is checked,
-not assumed. A group replay (0.20.0, D-059) is one group run over the recorded sessions of one group: every
+not assumed. A group replay (0.20.0, D-060) is one group run over the recorded sessions of one group: every
 camera's run has `mode: replay`, and `cameras` lists each session's own `session_id` with the replay's `run_id`. Its
 matcher and trackers work in the live run's group time, not the replay's: the group time of a replayed frame is the
 live run's `t0_mono + t_recv` of the frame at the same video position (`frames.csv` `t_video`), interpolated by

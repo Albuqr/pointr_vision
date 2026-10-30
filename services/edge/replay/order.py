@@ -1,4 +1,4 @@
-"""The order of a group replay (R2a 08, D-059): every camera keeps its own processing thread, but
+"""The order of a group replay (R2a 08, D-060): every camera keeps its own processing thread, but
 its frames reach the tracker and the matcher one at a time, in the live run's group time.
 
 The matcher's result depends on the order of its calls (D-055). Live, a frame reached it when its

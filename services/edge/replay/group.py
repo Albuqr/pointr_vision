@@ -1,4 +1,4 @@
-"""Group replay (R2a 08, D-059): a recorded group's videos processed again together, one new run
+"""Group replay (R2a 08, D-060): a recorded group's videos processed again together, one new run
 in every camera's session, in the live run's group time, so the matcher gives the live run's shared
 IDs on the same frames.
 

@@ -1302,7 +1302,24 @@ the doc change. Nothing here decides the appearance fallback (R2a 06). A link is
 exist (BACKLOG).
 **Status.** Accepted.
 
-## D-059 · 2026-10-29 · Group replay: one run per camera, in the live run's group time (contract 0.20.0)
+## D-059 · 2026-10-29 · Failures in a group: per camera, except shared code ends the group
+**Context.** R2a 07 (issue #13, ADR 0007, spec "Failure handling", R2a-A4). In the group runner each camera already
+had its own capture and processing threads, so a stream loss was that camera's own; what had to be decided is
+which failures end the whole group.
+**Decision.** A camera's stream loss or outage is handled per camera as before (FR-014): `source_lost` and
+`source_recovered` in its own session, its session stays open, the other cameras keep recording, and after the
+outage its tracker's new local tracks re-link through the matcher like any new track. A failure in shared code,
+the detector or the matcher, is raised as `SharedCodeError` on the camera thread that hit it; the group runner
+then ends every camera through the one shutdown path: every session gets status `error` and an `error` event
+`group: SharedCodeError(...)`, and `run_group` raises it. Also a camera that had already ended cleanly gets it,
+since its run is part of the failed group run. A failure in one camera's own code (its tracker, its session
+writer, a first frame of another size than its calibration) ends only that camera, as with one process per camera.
+**Consequences.** No contract change: the event kinds and statuses exist. The gap is the `source_lost` /
+`source_recovered` pair; the `camera_gap` event and `run.json` `gaps` (0.11.0, FR-014) are not written yet, in a group
+or alone, and come with the slice that builds the gap detector. The group process prints the failure as
+`error: the group did not run: ...` (the launcher and Studio parse that line), also for a failure mid-run.
+
+## D-060 · 2026-10-29 · Group replay: one run per camera, in the live run's group time (contract 0.20.0)
 **Context.** R2a 08 (issue #14, ADR 0007, spec story 14). A replay of a group adds a run to every camera's session and
 must give the live run's shared IDs on the same frames. The matcher's result depends on the times it is given and on
 the order of its calls (D-055), and a replay reads at file speed, so its own receive times are not the live ones.
