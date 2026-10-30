@@ -1301,3 +1301,28 @@ them. `lost_s` is set from the tracker's lost-track time by the group process.
 the doc change. Nothing here decides the appearance fallback (R2a 06). A link is never undone while both local tracks
 exist (BACKLOG).
 **Status.** Accepted.
+
+## D-059 · 2026-10-29 · Group replay: one run per camera, in the live run's group time (contract 0.20.0)
+**Context.** R2a 08 (issue #14, ADR 0007, spec story 14). A replay of a group adds a run to every camera's session and
+must give the live run's shared IDs on the same frames. The matcher's result depends on the times it is given and on
+the order of its calls (D-055), and a replay reads at file speed, so its own receive times are not the live ones.
+**Decision.** `python -m services.edge.main --replay <group_id>`: a target that is not a file, a folder or a session id,
+and is the `group_id` of sessions under `--out`, replays those sessions together through the group runner with one
+detector, adding one replay run to each. One session, or a bare file, replays as before. Each video is checked against
+its session as for one session. The group time of video frame k is the live run's `t0_mono + t_recv` of the row whose
+`t_video` is k / fps (fps: the session's `source.reported_fps`, else 30, as the recorder wrote it), interpolated
+linearly between rows for a frame the live run did not process and stepped by 1 / fps before the first and after the
+last. The trackers and the matcher get that time. Each camera keeps its processing thread, but its frame goes to the
+tracker and the matcher only when no other camera has an earlier frame still to come (ties: the cameras' order), so
+the matcher sees one frame at a time in group-time order. Calibration and matcher parameters are the live run's
+(`run.json` `calibration` and `group.params`); detector and tracker settings come from the command line as for one
+session, and must be the live ones to reproduce it. `--calibration` and `--camera-id` are refused with a group. A
+group whose live runs name different `group_run_id`s is refused. A group recorded one process per camera (live
+`group` null) replays too, with the default matcher parameters, and so gets shared IDs.
+**Limits.** Live, a frame reached the matcher when its processing thread got there, which is group-time order unless
+one camera's frame was processed after another camera's later frame (a slow detection); a replay can differ there.
+How often that happens is not measured. A frame the live run dropped is processed by the replay, so the IDs are
+compared on the frames both processed (by `t_video`).
+**Consequences.** Contract 0.20.0, additive: no new field; the doc says what a group replay's runs hold and which time
+base they used. The calibration loader accepts files saved under 0.19.0.
+**Status.** Accepted.
