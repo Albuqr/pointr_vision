@@ -10,13 +10,14 @@ import numpy as np
 import pytest
 
 from services.edge import contract
+from services.edge.appearance import colour_distance, describe
 from services.edge.capture.health import HealthConfig
 from services.edge.capture.sources import FileSource, SourceOpenError
 from services.edge.capture.types import Frame
 from services.edge.contract import VIDEO_FILE
 from services.edge.group_runner import CameraTracker, GroupCamera, run_group
 from services.edge.main import parse_args, run_meta
-from services.edge.matcher import CourtMatcher, GroupTrack, LocalTrack, MatcherParams
+from services.edge.matcher import CourtMatcher, GroupTrack, MatcherParams
 from services.edge.perception.loop import NO_DETECTIONS
 from services.edge.perception.types import Detections
 from services.edge.session import writer as writer_mod
@@ -121,8 +122,9 @@ def test_the_runs_name_one_group_run_with_every_camera(clips, tmp_path):
 
 
 def test_track_ids_never_collide_between_the_cameras_of_a_group(clips, tmp_path):
-    # the fake tracker gives local ID 1 to the one person in each camera: both would write 1
-    run_two(clips, tmp_path, EvenFrameDetector())
+    # the fake tracker gives local ID 1 to the one person in each camera: both would write 1. The
+    # second camera sees a black frame, so the two boxes do not look alike either (R2a 06)
+    run_two(clips, tmp_path, EvenFrameDetector(), second=clips["black"])
     files = camera_files(tmp_path)
     ids = {cid: {t["track_id"] for t in tracks} for cid, (_, _, _, tracks) in files.items()}
     assert ids["cam1"] and ids["cam2"]
@@ -390,8 +392,21 @@ BOX_DETECTION = Detections(
 def test_a_camera_reports_the_court_position_of_the_box_bottom_centre_and_gets_group_ids_back():
     tracker, matcher = camera_tracker(lambda x, y: (x / 10, y / 10))
     [obs] = tracker.update(BOX_DETECTION, frame_of())
-    assert matcher.calls == [("cam1", 12.5, [LocalTrack(1, (6.0, 22.0))])]
+    [(camera_id, t_recv, [track])] = matcher.calls
+    assert (camera_id, t_recv, track.local_id, track.xy) == ("cam1", 12.5, 1, (6.0, 22.0))
     assert (obs.track_id, obs.link) == (101, "unshared")
+
+
+def test_a_camera_reports_the_appearance_of_each_box_with_or_without_a_position():
+    frame = frame_of()
+    frame.image[:, :60] = (0, 0, 255)  # red on the left of the frame, black elsewhere
+    for positions in (lambda x, y: (1.0, 1.0), None):
+        tracker, matcher = camera_tracker(positions)
+        tracker.update(BOX_DETECTION, frame)
+        [track] = matcher.calls[0][2]
+        expected = describe(frame.image, (10.0, 20.0, 110.0, 220.0))
+        assert track.appearance.height == pytest.approx(200 / 360)
+        assert colour_distance(track.appearance, expected) == pytest.approx(0.0, abs=1e-9)
 
 
 def test_a_camera_with_no_position_for_a_track_still_reports_it_and_a_silent_frame_too():
@@ -406,7 +421,64 @@ def test_a_camera_with_no_position_for_a_track_still_reports_it_and_a_silent_fra
     ):
         tracker, matcher = camera_tracker(positions)
         tracker.update(BOX_DETECTION, frame)
-        assert matcher.calls[0][2] == [LocalTrack(1, None)]
+        [track] = matcher.calls[0][2]
+        assert (track.local_id, track.xy) == (1, None)
     tracker, matcher = camera_tracker(lambda x, y: (1.0, 1.0))
     assert tracker.update(NO_DETECTIONS, frame_of()) == []
     assert matcher.calls == [("cam1", 12.5, [])]  # the camera reported: nothing in view
+
+
+# -- the appearance fallback (R2a 06) -------------------------------------------------------
+
+# rows 150 to 350, columns 200 to 300 are background grey in every frame of the moving and the
+# frozen clip, so a box there looks the same in both cameras whenever each is processed
+GREY_BOX = [200.0, 150.0, 300.0, 350.0]
+
+
+def appearance_events(session):
+    return [e for e in session["events"] if e["kind"] == "appearance_only"]
+
+
+def test_an_uncalibrated_camera_links_by_appearance_and_says_so(clips, tmp_path):
+    """R2a-A3."""
+    out = tmp_path / "out"
+    run_two(
+        clips, out, ScriptedBoxes({"moving.mp4": GREY_BOX, "frozen.mp4": GREY_BOX}),
+        matcher=CourtMatcher(TOLERANT), calibrations={"cam1": calibration_for(tmp_path, "cam1")},
+    )  # fmt: skip
+    files = camera_files(out)
+    tracks = {cid: t for cid, (_, _, _, t) in files.items()}
+    assert all(t["x_m"] for t in tracks["cam1"]) and not any(t["x_m"] for t in tracks["cam2"])
+    ids = {cid: {int(t["track_id"]) for t in rows_} for cid, rows_ in tracks.items()}
+    assert ids["cam1"] == ids["cam2"] and len(ids["cam1"]) == 1
+    links = {t["link"] for rows_ in tracks.values() for t in rows_}
+    assert links == {"unshared", "appearance"} or links == {"appearance"}
+    for session, run, _, _ in files.values():
+        validate("session", session)
+        validate("run", run)
+    [event] = appearance_events(files["cam2"][0])
+    assert event["t_mono"] is None and event["detail"].startswith("no valid calibration")
+    assert not appearance_events(files["cam1"][0])  # calibrated: it links by position too
+
+
+def test_two_uncalibrated_cameras_with_the_same_pixel_box_but_other_clothes_stay_apart(
+    clips, tmp_path
+):
+    """No link from pixel position alone: the same box, over grey in one camera and black in the
+    other."""
+    run_two(
+        clips, tmp_path, ScriptedBoxes({"moving.mp4": GREY_BOX, "black.mp4": GREY_BOX}),
+        second=clips["black"], matcher=CourtMatcher(TOLERANT),
+    )  # fmt: skip
+    files = camera_files(tmp_path)
+    ids = {cid: {t["track_id"] for t in tracks} for cid, (_, _, _, tracks) in files.items()}
+    assert ids["cam1"] and ids["cam2"] and not ids["cam1"] & ids["cam2"]
+    assert {t["link"] for _, _, _, tracks in files.values() for t in tracks} == {"unshared"}
+    assert all(len(appearance_events(s)) == 1 for s, _, _, _ in files.values())
+
+
+def test_no_appearance_event_without_a_matcher_or_with_calibrated_cameras(clips, tmp_path):
+    run_two(clips, tmp_path / "a", None)  # no detector: nothing is linked at all
+    files = run_calibrated(clips, tmp_path, SAME_PLACE)
+    for out_files in (camera_files(tmp_path / "a"), files):
+        assert not any(appearance_events(s) for s, _, _, _ in out_files.values())
