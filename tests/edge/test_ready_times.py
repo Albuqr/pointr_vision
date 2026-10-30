@@ -6,7 +6,7 @@ import uuid
 from dataclasses import asdict, replace
 from datetime import datetime
 
-from services.edge.camera_pipeline import CameraPipeline
+from services.edge.camera_pipeline import CameraPipeline, LiveInput
 from services.edge.capture.health import HealthConfig
 from services.edge.capture.types import SourceInfo, utc_now
 from services.edge.session.types import SessionMeta
@@ -85,9 +85,11 @@ class SilentSource:
 def test_a_run_stopped_before_its_first_frame_keeps_the_times_it_reached(tmp_path):
     source = SilentSource()
     info = source.open()
-    pipeline = CameraPipeline(source, info, FileSessionWriter(tmp_path), HealthConfig())
     loaded = {"t_wall": utc_now(), "t_pc": time.perf_counter()}
     meta = SessionMeta(str(uuid.uuid4()), device_id(tmp_path), utc_now(), info, False, "cam1")
+    pipeline = CameraPipeline(
+        LiveInput(source, info, meta), FileSessionWriter(tmp_path), HealthConfig()
+    )
     run = replace(
         sample_run_meta("clip"),
         health=asdict(HealthConfig()),
@@ -95,7 +97,7 @@ def test_a_run_stopped_before_its_first_frame_keeps_the_times_it_reached(tmp_pat
                  "packages": {"opencv": None, "numpy": None, "torch": None, "supervision": None}},
         ready={"model_loaded": loaded},
     )  # fmt: skip
-    pipeline.open_session(run, meta=meta)
+    pipeline.open_session(run)
     pipeline.start()
     time.sleep(0.1)
     pipeline.stop("interrupted")

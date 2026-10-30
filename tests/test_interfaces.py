@@ -3,6 +3,7 @@
 import dataclasses
 import inspect
 import re
+import threading
 import typing
 from pathlib import Path
 
@@ -79,7 +80,24 @@ RETURNS = {
 
 def dummy(methods) -> type:
     """A plain class (no Protocol inheritance) with the given methods."""
-    return type("Dummy", (), {m: lambda self, *a: None for m in methods})
+    return type(
+        "Dummy",
+        (),
+        {
+            **{m: lambda self, *a: None for m in methods},
+            "dir": Path("session"),
+            "run_dir": Path("run"),
+            "status": "running",
+            "done": threading.Event(),
+        },
+    )
+
+
+@pytest.mark.parametrize("missing", ["dir", "run_dir", "status", "done"])
+def test_writer_requires_its_lifecycle_views(missing):
+    cls = dummy(EXPECTED[SessionWriter])
+    delattr(cls, missing)
+    assert not isinstance(cls(), SessionWriter)
 
 
 def protocol_methods(proto) -> set[str]:

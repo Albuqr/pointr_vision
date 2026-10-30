@@ -28,6 +28,8 @@ from services.edge.appearance import describe
 from services.edge.calibration.homography import CalibrationPositions, check_homography
 from services.edge.camera_pipeline import (
     CameraPipeline,
+    LiveInput,
+    ReplayInput,
     load_camera_calibration,
     session_calibration,
 )
@@ -153,8 +155,8 @@ def _saved_positions(doc: dict) -> CalibrationPositions:
 
 def _raise_shared_failure(pipelines: list[CameraPipeline]) -> None:
     for p in pipelines:
-        if isinstance(p.processor.error, SharedCodeError):
-            raise p.processor.error
+        if isinstance(p.error, SharedCodeError):
+            raise p.error
 
 
 def run_group(
@@ -228,10 +230,33 @@ def run_group(
             if replaying and detector is not None
             else None
         )
-        pipelines = [
-            CameraPipeline(
+        session_ids = [c.replay.session_id if replaying else str(uuid.uuid4()) for c in cameras]
+        device = device_id(out)
+        inputs = [
+            ReplayInput(cam.source, info, cam.replay.target.session_dir)
+            if replaying
+            else LiveInput(
                 cam.source,
                 info,
+                SessionMeta(
+                    session_id,
+                    device,
+                    utc_now(),
+                    info,
+                    record,
+                    cam.camera_id,
+                    group_id,
+                    session_calibration(calibration),
+                ),
+                FileRecorder() if record else None,
+            )
+            for cam, info, session_id, (calibration, _, _) in zip(
+                cameras, infos, session_ids, calibrations, strict=True
+            )
+        ]
+        pipelines = [
+            CameraPipeline(
+                input,
                 FileSessionWriter(out),
                 config,
                 detector=shared_detector,
@@ -246,17 +271,14 @@ def run_group(
                     and (calibration["image_size"]["width"], calibration["image_size"]["height"]),
                     order,
                 ),
-                recorder=FileRecorder() if record and not replaying else None,
                 calibration=calibration,
                 positions=positions,
-                replay=replaying,
                 on_event=functools.partial(report, cam.camera_id),
             )
-            for cam, info, (calibration, positions, _) in zip(
-                cameras, infos, calibrations, strict=True
+            for cam, input, (calibration, positions, _) in zip(
+                cameras, inputs, calibrations, strict=True
             )
         ]
-        session_ids = [c.replay.session_id if replaying else str(uuid.uuid4()) for c in cameras]
         runs = [make_run(c, info) for c, info in zip(camera_ids, infos, strict=True)]
         group = {
             "group_id": group_id,
@@ -269,25 +291,11 @@ def run_group(
             if detector is None
             else matcher.record_params(),  # no detector, no matching
         }
-        device = device_id(out)
         # a stop from here on waits until every session is open, so it ends them all, not half
         held = hold_ctrl_c(stop_early)
         for i, p in enumerate(pipelines):
             run = dataclasses.replace(runs[i], group=group)
-            if replaying:
-                p.open_session(run, session_dir=cameras[i].replay.target.session_dir)
-            else:
-                meta = SessionMeta(
-                    session_id=session_ids[i],
-                    device_id=device,
-                    started_at=utc_now(),
-                    source=infos[i],
-                    recording_enabled=record,
-                    camera_id=camera_ids[i],
-                    group_id=group_id,
-                    calibration=session_calibration(p.calibration),
-                )
-                p.open_session(run, meta=meta)
+            p.open_session(run)
             opened.append(p)
             if problem := calibrations[i][2]:  # before any run, so no t0: t_mono is null
                 p.log_event(HealthEvent("error", utc_now(), None, problem))

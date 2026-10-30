@@ -143,6 +143,11 @@ class PositionMap(Protocol):  # injected into the writer for a calibrated run (D
 
 
 class SessionWriter(Protocol):  # run metadata, t0 and counts added by D-020
+    dir: Path | None  # None before start
+    status: str | None  # None before close
+    done: threading.Event
+    @property
+    def run_dir(self) -> Path: ...
     def start(
         self, meta: SessionMeta, run: RunMeta, positions: PositionMap | None = None
     ) -> None: ...
@@ -168,6 +173,17 @@ class Recorder(Protocol):
 
 `Detections` and `TrackObs` are plain dataclasses defined in `services/edge/perception/types.py`. The
 `supervision` and `rfdetr` objects never leave the perception layer.
+
+`CameraPipeline` composes these Protocols; it is not a Protocol itself (D-067).
+Construction takes `LiveInput(source, info, meta, recorder)` or
+`ReplayInput(source, info, session_dir, meta)` (meta only for a bare file creating a session).
+Its interface is `open_session(run)`, `start()`, `done`, `stop(status) -> str`, `error`,
+`log_event(event)`, `session_dir`, `run_dir`, `status`, `stats() -> CameraStats`,
+`health_state()`, `hud()`, `latest()`, `raw_snapshot()`, `calibration`,
+`on_preview(callback)` and `mark_preview_ready()`. Preview registration raises after start.
+Stats are detached immutable values containing every capture, processing and recording counter,
+run timing, frame size and app-delay samples. Final counters match run.json after shutdown;
+live snapshots may observe the capture and processing threads at different instants.
 
 ## 5. Edge concurrency
 

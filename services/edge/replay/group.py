@@ -179,7 +179,7 @@ def run_replay(args: argparse.Namespace, group: GroupReplay) -> int:
 
     def on_session(camera_id, pipeline):
         pipelines[camera_id] = pipeline
-        say(camera_id, f"session: {pipeline.writer.dir}")
+        say(camera_id, f"session: {pipeline.session_dir}")
 
     code = 0
     try:
@@ -205,7 +205,7 @@ def run_replay(args: argparse.Namespace, group: GroupReplay) -> int:
         code = EXIT_CAPTURE_ERROR
     for camera_id, p in pipelines.items():
         try:  # a failure is a warning: the run is saved (D-023)
-            say(camera_id, format_summary(write_report(p.writer.run_dir)))
+            say(camera_id, format_summary(write_report(p.run_dir)))
         except Exception as e:
             print(f"warning: {camera_id}: report not written: {e!r}", file=sys.stderr)
     return code

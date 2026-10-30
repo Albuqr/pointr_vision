@@ -12,7 +12,7 @@ from importlib.resources import files
 
 from jsonschema import Draft202012Validator, ValidationError
 
-CONTRACT_VERSION = "0.23.0"
+CONTRACT_VERSION = "0.24.0"
 
 # Calibration file format -> (lowest contract version that wrote it, inclusive; highest, inclusive,
 # None = up to CONTRACT_VERSION). A bump that leaves the calibration format unchanged needs no

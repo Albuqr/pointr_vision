@@ -1,6 +1,6 @@
 # Data contracts
 
-Contract version: **0.23.0**. Any change bumps the version (minor for additive fields, major
+Contract version: **0.24.0**. Any change bumps the version (minor for additive fields, major
 for removals or meaning changes) and needs a `DECISIONS.md` entry. JSON Schemas in
 `services/edge/contracts/` are written from this file and tests check them against it (D-009).
 The schemas hold a semver pattern, not the number: `contract.validate` in `services/edge/contract.py`
@@ -65,7 +65,7 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
 
 ```json
 {
-  "contract_version": "0.23.0",
+  "contract_version": "0.24.0",
   "session_id": "uuid",
   "device_id": "uuid",
   "camera_id": "cam1 | null",
@@ -139,7 +139,7 @@ calibration used by this session and records its mean held-out check residual in
 
 ```json
 {
-  "contract_version": "0.23.0",
+  "contract_version": "0.24.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "mode": "live | replay",
@@ -156,7 +156,7 @@ calibration used by this session and records its mean held-out check residual in
               "packages": {"opencv": "x.y.z", "numpy": "x.y.z", "torch": "x.y.z",
                            "supervision": "x.y.z"}},
   "started_at": "...", "t0_wall": "...", "t0_mono": 1234.5678, "ended_at": "...",
-  "counts": {"captured": 0, "processed": 0, "dropped": 0, "unprocessed": 0, "rec_dropped": 0},
+  "counts": {"captured": 0, "processed": 0, "dropped": 0, "unprocessed": 0, "rec_dropped": 0, "failed_reads": 0},
   "checks": [{"check": "cameras | calibration | identity | id_persistence | sensor",
               "result": "passed | failed", "detail": "...", "t_wall": "..."}],
   "clock": {"domain": "perf_counter",
@@ -183,6 +183,9 @@ calibration used by this session and records its mean held-out check residual in
 ```
 
 `counts.rec_dropped` is `null` when recording is disabled and for a replay run, which records nothing.
+`counts.failed_reads` (0.24.0, D-067) counts source reads returning no frame. These are attempts,
+not captured frames, so they do not enter the captured-frame accounting identity. A finite
+source's normal end is not a failed read. Existing source-health events remain unchanged.
 `input.sha256` is the sha256 of the replayed video in a replay run and `null` in a live run. `ended_at` is `null` while the
 run is in progress; `counts` is `null` until the run ends, so a crashed run never shows
 counts that were not measured. `t0_wall` is the UTC wall clock taken with the run's `t0`
@@ -412,7 +415,7 @@ One report per run, one per camera: there is no fusion across cameras.
 
 ```json
 {
-  "contract_version": "0.23.0",
+  "contract_version": "0.24.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "camera_id": "cam1 | null",
@@ -755,7 +758,7 @@ recorded video and is compared with `frames.csv` `t_video`; shots and tracks joi
 
 ```json
 {
-  "contract_version": "0.23.0",
+  "contract_version": "0.24.0",
   "fusion_id": "uuid",
   "group_id": "token",
   "created_at": "2026-12-01T18:50:00Z",
