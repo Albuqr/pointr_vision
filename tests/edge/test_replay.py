@@ -76,12 +76,21 @@ def test_A3_replay_adds_a_run_and_leaves_the_original_untouched(clips, tmp_path)
     assert session == session_before, "replay changed more of session.json than its runs"
 
 
-def test_replay_by_session_id(clips, tmp_path):
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-8-sig"])
+def test_replay_by_session_id(clips, tmp_path, encoding):
     folder = record(clips, tmp_path)
-    session_id = json.loads((folder / "session.json").read_text())["session_id"]
+    session_file = folder / "session.json"
+    before = json.loads(session_file.read_text())
+    session_id = before["session_id"]
+    session_file.write_text(json.dumps(before), encoding=encoding)
     result = run_cli(tmp_path, "--replay", session_id)
     assert result.returncode == 0, result.stderr
     assert len(list((folder / "runs").iterdir())) == 2
+    after = json.loads(session_file.read_text(encoding="utf-8-sig"))
+    assert after["runs"][:1] == before["runs"]
+    assert len(after["runs"]) == 2
+    after["runs"] = before["runs"]
+    assert after == before
 
 
 def test_replay_processes_every_frame_with_container_times(clips, tmp_path):
@@ -228,7 +237,8 @@ def test_replay_that_ends_badly_without_an_event_gets_one(clips, tmp_path):
     assert event["kind"] == "error" and event["detail"].startswith(f"replay {run_id}:")
 
 
-def test_two_replays_of_one_session_keep_both_run_ids(clips, tmp_path):
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-8-sig"])
+def test_two_replays_of_one_session_keep_both_run_ids(clips, tmp_path, encoding):
     from services.edge.session.writer import FileSessionWriter
 
     folder = record(clips, tmp_path)
@@ -237,10 +247,82 @@ def test_two_replays_of_one_session_keep_both_run_ids(clips, tmp_path):
     a.start_run(folder, replay_meta(ids[0]))
     b.start_run(folder, replay_meta(ids[1]))  # started while a is still open
     b.close("ended", counts())
+    session_file = folder / "session.json"
+    session_file.write_text(session_file.read_text(), encoding=encoding)
     a.close("ended", counts())  # a's stale copy must not drop b's run
     runs = json.loads((folder / "session.json").read_text())["runs"]
     assert set(ids) <= set(runs) and len(runs) == len(set(runs)) == 3
     assert {p.name for p in (folder / "runs").iterdir()} == set(runs)
+
+
+@pytest.mark.parametrize("when", ["startup", "merge"])
+@pytest.mark.parametrize("damaged", [False, True], ids=["historical", "damaged-evidence"])
+def test_T2_replay_preserves_original_session_metadata(tmp_path, when, damaged):
+    from services.edge.session.writer import FileSessionWriter
+
+    path = tmp_path / "session.json"
+    original = {
+        "session_id": "11111111-1111-4111-8111-111111111111",
+        "runs": [],
+        "events": [],
+    }  # historical documents may omit optional metadata
+    evidence = {
+        "events": [None, {"kind": "error", "detail": "original evidence"}],
+        "source": ["malformed but must survive"],
+        "status": 123,
+        "camera_id": {"unexpected": "object"},
+        "future": {"nested": [None, "preserve"]},
+    }
+    if damaged and when == "startup":
+        original.update(evidence)
+    path.write_text(json.dumps(original), encoding="utf-8-sig")
+    writer = FileSessionWriter(tmp_path)
+    run_id = "22222222-2222-4222-8222-222222222222"
+    writer.start_run(tmp_path, replay_meta(run_id))
+    try:
+        if when == "merge":
+            current = {**original, "runs": [run_id]}
+            if damaged:
+                current.update(evidence)
+            path.write_text(json.dumps(current), encoding="utf-8-sig")
+            original = current
+    finally:
+        writer.close("ended", counts())
+    expected = {**original, "runs": [run_id]}
+    assert json.loads(path.read_text(encoding="utf-8-sig")) == expected
+
+
+@pytest.mark.parametrize("when", ["startup", "merge"])
+@pytest.mark.parametrize("key,value", [("session_id", []), ("runs", {}), ("events", None)])
+def test_T2_replay_refuses_unreadable_mutation_fields_without_overwriting(
+    tmp_path, when, key, value
+):
+    from services.edge.session.folder import SessionDamaged
+    from services.edge.session.writer import FileSessionWriter
+
+    path = tmp_path / "session.json"
+    original = {
+        "session_id": "11111111-1111-4111-8111-111111111111",
+        "runs": [],
+        "events": [],
+    }
+    run_id = "22222222-2222-4222-8222-222222222222"
+    writer = FileSessionWriter(tmp_path)
+    if when == "merge":
+        path.write_text(json.dumps(original), encoding="utf-8")
+        writer.start_run(tmp_path, replay_meta(run_id))
+        original["runs"] = [run_id]
+    original[key] = value
+    path.write_text(json.dumps(original), encoding="utf-8-sig")
+    before = path.read_bytes()
+    with pytest.raises(SessionDamaged, match=f"session damaged:.*{key}"):
+        if when == "startup":
+            writer.start_run(tmp_path, replay_meta(run_id))
+        else:
+            writer.close("ended", counts())
+    assert path.read_bytes() == before
+    if when == "startup":
+        assert not (tmp_path / "runs").exists()
 
 
 class SlowDetector:
