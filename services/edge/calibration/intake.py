@@ -99,14 +99,14 @@ class Calibration:
             raise ValueError("run calibration block must be an object")
         try:
             court, size = block["court"], block["image_size"]
+            if not isinstance(court, dict) or not isinstance(size, dict):
+                raise ValueError("run calibration court and image_size must be objects")
             calibration_id, matrix = block["calibration_id"], block["homography_image_to_court"]
             check_error, court_type = block["check_error_m"], court["type"]
             length_m, width_m = court["length_m"], court["width_m"]
             width_px, height_px = size["width"], size["height"]
         except KeyError as exc:
             raise ValueError(f"run calibration block lacks {exc.args[0]!r}") from exc
-        if not isinstance(court, dict) or not isinstance(size, dict):
-            raise ValueError("run calibration court and image_size must be objects")
         if not isinstance(calibration_id, str):
             raise ValueError("run calibration_id must be a string")
         if _number(check_error, "check_error_m") < 0:

@@ -134,6 +134,20 @@ REFUSALS = [
         "court kind",
     ),
     (
+        "run block court not an object",
+        lambda p: FromRun({**run_block(), "court": ["fiba_full"]}),
+        "cam1",
+        SIZE,
+        "must be objects",
+    ),
+    (
+        "run block image_size not an object",
+        lambda p: FromRun({**run_block(), "image_size": "1920x1080"}),
+        "cam1",
+        SIZE,
+        "must be objects",
+    ),
+    (
         "run block bad matrix shape",
         lambda p: FromRun({**run_block(), "homography_image_to_court": [[1, 0], [0, 1]]}),
         "cam1",
