@@ -79,7 +79,7 @@ calibration blocks is copied in several places.
   - `Reporter`: plain or tagged.
   - `Waiter`: plain, benchmark deadline, or the cv2 window on the main thread.
   - `load_perception`: a fake detector in tests.
-- **What the entry points shrink to:** about 15 lines in main and about 20 in group_main. `replay/group.py` keeps only `resolve_group`.
+- **What the entry points shrink to:** about 15 lines in main and about 20 in group_main. `services/edge/replay/group.py` keeps only `resolve_group`.
 - **ADR 0007** is strengthened by this. Keep the per-camera capture threads (FR-014). There is no contract bump if a group of one writes `group: null`.
 - **Risks:**
   - The cost of an uncontended `SharedDetector` lock with one camera is unmeasured, so record `--benchmark` before and after (rule 5).
@@ -88,8 +88,8 @@ calibration blocks is copied in several places.
 
 **Migration, one PR per step:**
 1. A characterisation table test that pins today's lines, exit codes and files, with the known drift marked expected-fail.
-2. Extract `run/perception.py` (device and model load). It emits both the event line and an `error:` line, and keeps a re-export so the `cli.load_perception` monkeypatches still work.
-3. Extract `run/stop.py` (`StopRequest`, the hold/ignore helpers, `end_of(exc, stop)`) and use it at all 4 sites.
+2. Extract `services/edge/run/perception.py` (device and model load). It emits both the event line and an `error:` line, and keeps a re-export so the `cli.load_perception` monkeypatches still work.
+3. Extract `services/edge/run/stop.py` (`StopRequest`, the hold/ignore helpers, `end_of(exc, stop)`) and use it at all 4 sites.
 4. Hold Ctrl+C during `run_group` setup (closes BACKLOG line 79).
 5. Add the group-of-one mode to `run_group` (no matcher, `group` null), the `ReplayNewSession` kind, and the `Waiter`/`Reporter` adapters.
 6. `execute(plan)`, with `run_replay` and then `group_main` routed through it.
@@ -166,7 +166,7 @@ They also disagree on which run is the latest: `next(iterdir())`, the only one i
   - stdout: `session: `, `device: `, `preview_port: `, `error: ` (stderr merged in), the `[cam] ` prefix, `failed_reads=N`, and `session <status>: `.
   - stdin: `stop` and `stop ui`.
 - **Where it's written down:** only in prose (D-056, ARCHITECTURE §5), not in DATA_CONTRACTS.
-- **Emitters** are spread over `main.py`, `group_main.py`, `replay/group.py`, `camera_pipeline.py:182,311` and `group_runner.py:326`.
+- **Emitters** are spread over `main.py`, `group_main.py`, `services/edge/replay/group.py`, `camera_pipeline.py:182,311` and `group_runner.py:326`.
 - **Parsing** is at `launcher_impl.py:67-69, 424-441`.
 - **Studio** guesses the failure kind from substrings (`server.py:176-196`: `"open" in failure.lower()` also matches "opencv").
 

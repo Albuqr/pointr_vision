@@ -96,9 +96,9 @@ Tickets in different lanes can run in parallel.
 
 Overlaps that are allowed, each in named functions only:
 
-- **`replay/group.py`.** S's BS and T2 touch only the discovery loop in `resolve_group` (lines 104-107, B1). E owns the rest of the file, including BE's B5 fix.
+- **`services/edge/replay/group.py`.** S's BS and T2 touch only the discovery loop in `resolve_group` (lines 104-107, B1). E owns the rest of the file, including BE's B5 fix.
 - **`server.py`.** C owns only `calibration_fit`. S owns everything else.
-- **`calibration/document.py`.**
+- **`services/edge/calibration/document.py`.**
   - K owns `ACCEPTED_VERSIONS` and the schema loading.
   - C removes `run_calibration` (T8, after T1 has merged).
 
@@ -161,11 +161,11 @@ touching only its named functions.
 | **T2** Session-folder reader; the BS readers switch to it | S | C4a | D-065 | BS | M |
 | **T3** `RunSettings`, `run_meta(model_loaded)`, test fakes moved to `fakes.py` | E | C6 | none | BE | S |
 | **T4** Run characterisation table test (new test file only; drift marked xfail) | E* | C2 step 1 | none | BE | S |
-| **T5** `calibration/intake.py`: `take_calibration`, `Calibration`, `build_document` + tests (new files; no callers switched yet) | C | C1 | none | T1 | M |
+| **T5** `services/edge/calibration/intake.py`: `take_calibration`, `Calibration`, `build_document` + tests (new files; no callers switched yet) | C | C1 | none | T1 | M |
 | **T6** `child_protocol.py` + launcher parser + `server.py` typed failure kinds; DATA_CONTRACTS §16 (decisions 14+15); GLOSSARY terms | S | C4b | D-066, next version | T1, T2 | M |
 | **T7** Narrow camera pipeline interface, `LiveInput`/`ReplayInput`, explicit writer Protocol | E | C5 | D-067 | T3, T4 | M |
 | **T8** Switch callers to intake (main, group_runner, replay/group, pipeline, Studio `calibration_fit`); single-camera refusal non-fatal (decision 6); refusal recorded as a failed check (decision 8); single replay uses the live run's calibration (decision 9); delete the converters | E | C1 | D-068, next version | T5, T7 | M |
-| **T9** `run/perception.py` + `run/stop.py` (moves the BE fixes into one place) | E | C2 steps 2–4 | D-069 | T8 | M |
+| **T9** `services/edge/run/perception.py` + `services/edge/run/stop.py` (moves the BE fixes into one place) | E | C2 steps 2–4 | D-069 | T8 | M |
 | **T10** Emitters switched to `child_protocol.emit` (main, group_main, replay, pipeline, group_runner) | E | C4b | none | T6, T9 | S |
 | **T11** Group-of-one mode, `ReplayNewSession`, `execute(plan)`; route replay and group_main through it; benchmark before and after | E | C2 steps 5–6 | D-070 | T10 | L |
 | **T12** Route `main` through `execute`; delete `main.run` and the re-exports | E | C2 step 7 | none | T11 | M |
