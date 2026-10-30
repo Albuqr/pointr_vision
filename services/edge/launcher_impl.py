@@ -23,7 +23,6 @@ import ipaddress
 import json
 import math
 import os
-import re
 import signal
 import subprocess
 import sys
@@ -39,6 +38,18 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))  # run as a script, `services` must import without an install
 
+from services.edge.child_protocol import (  # noqa: E402
+    DeviceChosen,
+    FailureKind,
+    Message,
+    PreviewListening,
+    SessionOpened,
+    StartFailed,
+    Stop,
+    Summary,
+    emit,
+    parse,
+)
 from services.edge.perception.detector import DET_SIZE_MULTIPLE  # noqa: E402
 from services.edge.reports.build import (  # noqa: E402
     TABLE_HEADER,
@@ -64,9 +75,6 @@ KEYS = {
     "track_min_frames",
 }
 DEFAULT_PORTS = {"http": 80, "https": 443, "rtsp": 554}
-SESSION_PREFIX = "session: "  # printed by services.edge.main once the source has opened
-FAILED_READS = re.compile(r"\bfailed_reads=(\d+)")
-CAMERA_LINE = re.compile(r"\[([^\]\s]+)\] (.*)")  # a group process's line about one camera
 TAIL_LINES = 20  # last output lines of a child kept for the Studio error panel
 OK_STATUSES = ("ended", "interrupted")
 
@@ -331,6 +339,7 @@ class Child:
         )
         self.failed_reads = "-"
         self.failure: str | None = None  # why it never recorded
+        self.failure_kind: FailureKind | None = None
         self.run_errors: list[str] = []  # error lines after the session line, masked
         self.tail: deque[str] = deque(maxlen=TAIL_LINES)  # last output lines, credentials masked
         self.killed = False
@@ -406,44 +415,51 @@ class Launcher:
 
     def read(self, *children: Child) -> None:
         """Drain the process of these cameras. A group's line about one camera ("[cam1] ...")
-        goes to that camera; any other line to every camera of the process."""
+        goes to that camera; untagged and [group] lines concern every camera of the process.
+        Unknown camera tags remain visible but never update another camera's state."""
         by_id = {c.cam.camera_id: c for c in children}
         for raw in children[0].proc.stdout:
             line = raw.rstrip("\r\n")
-            m = CAMERA_LINE.fullmatch(line) if len(children) > 1 else None
-            if m and m.group(1) in by_id:
-                targets, line, tag = [by_id[m.group(1)]], m.group(2), m.group(1)
-            else:
+            camera, message = parse(line)
+            if camera in by_id:
+                targets, tag = [by_id[camera]], camera
+            elif camera is None or camera == "group":
                 targets = children
                 tag = "group" if len(children) > 1 else children[0].cam.camera_id
+            else:
+                targets, tag = (), camera  # unknown camera text is visible, never misattributed
+            if camera is not None:
+                line = line[len(camera) + 3 :]
             for child in targets:
-                self.note(child, line)
+                self._note_message(child, line, message)
             # never raises: the pipe must be drained
             self.say(f"[{tag}] {mask_credentials(line)}")
 
     @staticmethod
     def note(child: Child, line: str) -> None:
-        """What one output line says about a camera."""
+        """What one parsed output line says about a camera."""
+        _, message = parse(line)
+        Launcher._note_message(child, line, message)
+
+    @staticmethod
+    def _note_message(child: Child, line: str, message: Message | None) -> None:
         child.tail.append(mask_credentials(line))
-        if line.startswith(SESSION_PREFIX):
-            child.session_dir = Path(line[len(SESSION_PREFIX) :])
+        if isinstance(message, SessionOpened):
+            child.session_dir = Path(message.path)
             child.opened.set()
-        elif line.startswith("device: "):
+        elif isinstance(message, DeviceChosen):
             child.loading_model = True
-        elif m := FAILED_READS.search(line):
-            child.failed_reads = m.group(1)
-        elif line.startswith("preview_port: "):
-            try:
-                child.preview_port = int(line.split(":", 1)[1].strip())
-                child.preview_ready = True
-            except ValueError:
-                child.failure = "invalid preview port reported"
-        elif line.startswith("error: "):
-            error = mask_credentials(line.removeprefix("error: ").strip())
+        elif isinstance(message, Summary):
+            child.failed_reads = message.failed_reads
+        elif isinstance(message, PreviewListening):
+            child.preview_port = message.port
+            child.preview_ready = True
+        elif isinstance(message, StartFailed):
             if child.session_dir is not None:
-                child.run_errors.append(error)
-            elif child.failure is None:
-                child.failure = error
+                child.run_errors.append(message.detail)
+            elif child.failure is None or child.failure == "":
+                child.failure = message.detail
+                child.failure_kind = message.kind
 
     def start_one(self, cam: Camera) -> None:
         self.start([Child(cam)], self.command(cam, self.opts))
@@ -461,6 +477,7 @@ class Launcher:
         except OSError as e:
             for child in children:
                 child.failure = mask_credentials(f"failed to start: {e}")
+                child.failure_kind = "spawn_failed"
             self.say(f"[launcher] {names}: {children[0].failure}")
             return
         sources = ", ".join(
@@ -476,6 +493,7 @@ class Launcher:
             if time.monotonic() > deadline:
                 for child in waiting:
                     child.failure = f"failed: no session after {self.start_timeout:g} s"
+                    child.failure_kind = "start_timeout"
                 self.say(f"[launcher] {names}: {waiting[0].failure}; stopping it")
                 self.stop(children)
                 return
@@ -484,6 +502,7 @@ class Launcher:
             if not child.opened.is_set():
                 if child.failure is None:
                     child.failure = f"failed to start (exit {child.proc.returncode})"
+                    child.failure_kind = "exited"
                 others = ", the others go on" if len(children) == 1 else ""
                 self.say(f"[launcher] {child.cam.camera_id}: {child.failure}{others}")
 
@@ -493,9 +512,7 @@ class Launcher:
         """Ask each running child to stop like Ctrl+C and wait for it; kill only after
         stop_timeout. Safe to call again after a Ctrl+C. `source` "ui" sends `stop ui`, which the
         child ends as a normal stop (D-049); without it the child ends `interrupted`."""
-        if source not in (None, "ui"):  # the child knows no other: it would end interrupted
-            raise ValueError(f"unknown stop source {source!r}")
-        line = f"stop {source}\n" if source else "stop\n"
+        request = Stop(source)
         sent = set()  # the cameras of a group share one process: one line for it
         for child in children:
             if child.running and not child.stop_sent:
@@ -504,8 +521,7 @@ class Launcher:
                     continue
                 sent.add(child.proc)
                 try:
-                    child.proc.stdin.write(line)
-                    child.proc.stdin.flush()
+                    emit(request, stream=child.proc.stdin)
                 except OSError:  # it exited meanwhile
                     pass
         deadline = time.monotonic() + self.stop_timeout

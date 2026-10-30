@@ -317,7 +317,7 @@ def test_a_child_that_fails_to_start_does_not_stop_the_others(tmp_path, capsys):
     assert status_of(tmp_path, "cam1") == "interrupted"
     assert status_of(tmp_path, "cam3") == "interrupted"
     out = capsys.readouterr().out
-    assert "[bad] error: cannot open source" in out  # its own message, prefixed
+    assert "[bad] error: source_open_failed: cannot open source" in out  # its own message, prefixed
     rows = {r[0]: r for r in (lau.summary(c) for c in lau.children)}
     assert rows["bad"][1:3] == ("-", "cannot open source 'fake'")
     assert rows["cam1"][2] == rows["cam3"][2] == "interrupted"
@@ -335,6 +335,7 @@ def test_a_start_that_never_gets_a_session_is_stopped_and_marked_failed(tmp_path
     assert (tmp_path / "stopped_slow").exists()  # asked to stop, not left behind
     rows = {r[0]: r for r in (lau.summary(c) for c in lau.children)}
     assert rows["slow"][2].startswith("failed: no session after")
+    assert lau.children[0].failure_kind == "start_timeout"
     assert rows["cam2"][2] == "interrupted"
 
 
@@ -884,6 +885,7 @@ def test_a_camera_without_a_group_runs_in_its_own_process(tmp_path):
     two.run()  # the stand-in exits at once, with no session
     assert len({c.proc for c in two.children}) == 1
     assert [c.failure for c in two.children] == ["failed to start (exit 0)"] * 2
+    assert [c.failure_kind for c in two.children] == ["exited"] * 2
     assert calls == [("camera", "cam1"), ("group", ("cam1", "cam2"))]
 
 
@@ -897,3 +899,57 @@ def test_the_group_process_gets_each_cameras_own_arguments():
     assert cmd[:4] == [sys.executable, "-u", "-m", "services.edge.group_main"]
     assert [json.loads(a) for a in cmd[4:]] == [rc.camera_args(c, opts) for c in cams]
     assert rc.child_command(cams[0], opts)[4:] == rc.camera_args(cams[0], opts)
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "source_open_failed",
+        "model_load_failed",
+        "calibration_refused",
+        "config_conflict",
+        "start_timeout",
+        "spawn_failed",
+        "exited",
+    ],
+)
+def test_t6_typed_failure_keeps_kind_and_detail_before_session(tmp_path, kind):
+    one, two = group_children(tmp_path, f"[cam2] error: {kind}: a: [reason]")
+    assert one.failure is None
+    assert two.failure == "a: [reason]"
+    assert two.failure_kind == kind
+
+
+def test_t6_typed_failure_after_session_is_only_a_run_error(tmp_path):
+    one, two = group_children(
+        tmp_path, "[cam2] session: x", "[cam2] error: model_load_failed: cannot open weights"
+    )
+    assert one.failure is None and one.run_errors == []
+    assert two.failure is None and two.failure_kind is None
+    assert two.run_errors == ["cannot open weights"]
+
+
+def test_t6_single_camera_tag_is_parsed_and_unknown_tag_is_not_broadcast(tmp_path):
+    cam = rc.Camera("cam1", "0", "usb")
+    child = rc.Child(cam)
+    child.proc = fake_proc("[other] session: wrong", "[cam1] session: right")
+    rc.Launcher([cam], rc.Options(str(tmp_path), GROUP)).read(child)
+    assert child.session_dir == Path("right")
+
+
+def test_t6_spawn_failure_is_typed_without_a_child_process(tmp_path):
+    cam = rc.Camera("cam1", "0", "usb")
+    lau = rc.Launcher(
+        [cam],
+        rc.Options(str(tmp_path), GROUP),
+        command=lambda cam, opts: [str(tmp_path / "missing-executable")],
+    )
+    assert lau.run() == 1
+    assert lau.children[0].failure_kind == "spawn_failed"
+    assert lau.children[0].session_dir is None
+
+
+def test_t6_nested_tag_is_free_text_not_another_status_envelope(tmp_path):
+    one, two = group_children(tmp_path, "[cam1] [other] session: wrong")
+    assert one.session_dir is None and two.session_dir is None
+    assert list(one.tail) == ["[other] session: wrong"]
