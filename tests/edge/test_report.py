@@ -296,11 +296,18 @@ def test_hand_built_calibration_reports_metres_and_provenance(tmp_path, court_al
         "court": {"length_m": 28, "width_m": 15},
         "image_size": {"width": 1920, "height": 1080},
     }
-    if court_alias:
-        calibration["court"][court_alias] = "fiba_full"
+    if court_alias == "type":
+        calibration["court"]["type"] = "fiba_full"
     run_dir = make_run(
         tmp_path, dense(8), [(i, 12, i * 100, 500) for i in range(6)], calibration=calibration
     )
+    if court_alias == "kind":
+        # Write a historical alias only after the fixture's current-schema validation.
+        run_path = run_dir / "run.json"
+        saved = json.loads(run_path.read_text(encoding="utf-8"))
+        saved["calibration"]["court"].pop("type")
+        saved["calibration"]["court"]["kind"] = "fiba_full"
+        run_path.write_text(json.dumps(saved), encoding="utf-8")
     report = build_report(run_dir)
     data = report.to_dict()
     assert data["positions"]["unit"] == "m"
