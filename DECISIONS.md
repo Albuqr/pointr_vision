@@ -1318,9 +1318,34 @@ writer, a first frame of another size than its calibration) ends only that camer
 `source_recovered` pair; the `camera_gap` event and `run.json` `gaps` (0.11.0, FR-014) are not written yet, in a group
 or alone, and come with the slice that builds the gap detector. The group process prints the failure as
 `error: the group did not run: ...` (the launcher and Studio parse that line), also for a failure mid-run.
+
+## D-060 · 2026-10-29 · Group replay: one run per camera, in the live run's group time (contract 0.20.0)
+**Context.** R2a 08 (issue #14, ADR 0007, spec story 14). A replay of a group adds a run to every camera's session and
+must give the live run's shared IDs on the same frames. The matcher's result depends on the times it is given and on
+the order of its calls (D-055), and a replay reads at file speed, so its own receive times are not the live ones.
+**Decision.** `python -m services.edge.main --replay <group_id>`: a target that is not a file, a folder or a session id,
+and is the `group_id` of sessions under `--out`, replays those sessions together through the group runner with one
+detector, adding one replay run to each. One session, or a bare file, replays as before. Each video is checked against
+its session as for one session. The group time of video frame k is the live run's `t0_mono + t_recv` of the row whose
+`t_video` is k / fps (fps: the session's `source.reported_fps`, else 30, as the recorder wrote it), interpolated
+linearly between rows for a frame the live run did not process and stepped by 1 / fps before the first and after the
+last. The trackers and the matcher get that time. Each camera keeps its processing thread, but its frame goes to the
+tracker and the matcher only when no other camera has an earlier frame still to come (ties: the cameras' order), so
+the matcher sees one frame at a time in group-time order. Calibration and matcher parameters are the live run's
+(`run.json` `calibration` and `group.params`); detector and tracker settings come from the command line as for one
+session, and must be the live ones to reproduce it. `--calibration` and `--camera-id` are refused with a group. A
+group whose live runs name different `group_run_id`s is refused. A group recorded one process per camera (live
+`group` null) replays too, with the default matcher parameters (`lost_s` from
+`--track-lost-secs`), and so gets shared IDs.
+**Limits.** Live, a frame reached the matcher when its processing thread got there, which is group-time order unless
+one camera's frame was processed after another camera's later frame (a slow detection); a replay can differ there.
+How often that happens is not measured. A frame the live run dropped is processed by the replay, so the IDs are
+compared on the frames both processed (by `t_video`).
+**Consequences.** Contract 0.20.0, additive: no new field; the doc says what a group replay's runs hold and which time
+base they used. The calibration loader accepts files saved under 0.19.0.
 **Status.** Accepted.
 
-## D-060 · 2026-10-29 · Appearance fallback: clothing colour and box height (contract 0.20.0)
+## D-061 · 2026-10-29 · Appearance fallback: clothing colour and box height (contract 0.21.0)
 **Context.** R2a 06 (issue #12, ADR 0007, D-045). A track without a court position (no valid calibration, a frame of
 another size, a point that cannot be projected) could not be linked to another camera (D-058), and a track broken by
 one person walking behind another got a new ID unless position re-linked it.
@@ -1340,7 +1365,7 @@ linked across cameras by appearance writes `link=appearance`; `link` stays per g
 the latest cross-camera link. A camera of a group run of two or more cameras with no valid calibration gets one
 `appearance_only` session event when its session opens. `group.params` gains `appearance_max_distance` (0.3) and
 `max_height_diff` (0.4): starting values, not measured; R2a-A5 scores them on a recorded clip.
-**Consequences.** Contract 0.20.0, additive: a session event kind and two parameter names. Calibrations saved under
-0.19.0 stay loadable (the format is unchanged). Any merge by appearance is low confidence until R2a-A5 records its
+**Consequences.** Contract 0.21.0, additive: a session event kind and two parameter names. Calibrations saved under
+0.19.0 and 0.20.0 stay loadable (the format is unchanged). Any merge by appearance is low confidence until R2a-A5 records its
 accuracy; teammates in the same kit and of similar height will be confused.
 **Status.** Accepted.

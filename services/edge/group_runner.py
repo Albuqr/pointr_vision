@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from services.edge.appearance import describe
+from services.edge.calibration.homography import CalibrationPositions
 from services.edge.camera_pipeline import (
     CameraPipeline,
     load_camera_calibration,
@@ -36,10 +37,12 @@ from services.edge.contract import UI_STOP_DETAIL
 from services.edge.matcher import CourtMatcher, CrossCameraMatcher, LocalTrack
 from services.edge.perception.types import Detections, Detector, Tracker, TrackObs
 from services.edge.recording.recorder import FileRecorder
+from services.edge.replay.order import GroupTimeOrder
+from services.edge.replay.resolve import ReplayTarget
 from services.edge.session.types import RunMeta, SessionMeta
 from services.edge.session.writer import FileSessionWriter, device_id
 
-# the appearance_only event's detail (DATA_CONTRACTS section 2, D-060); a calibration that could
+# the appearance_only event's detail (DATA_CONTRACTS section 2, D-061); a calibration that could
 # not be used has its own error event
 APPEARANCE_ONLY = (
     "no valid calibration: tracks link to the other cameras by clothing colour and box height only"
@@ -53,11 +56,22 @@ class SharedCodeError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class RecordedCamera:
+    """A camera of a group replay (R2a 08, D-060): its recorded session gets a new run."""
+
+    target: ReplayTarget  # the video and session folder, checked against session.json
+    session_id: str
+    calibration: dict | None  # the live run's, as a document (calibration.document)
+    group_time: Callable[[int], float]  # video frame seq -> the live run's group time (PC clock)
+
+
+@dataclass(frozen=True)
 class GroupCamera:
     camera_id: str
     source: FrameSource  # not opened yet
     link: str | None = None  # how the source reaches the PC (D-012); None: the source's own
     calibration_path: str | None = None  # checked against the opened source's size
+    replay: RecordedCamera | None = None  # a group replay; calibration_path is then unused
 
 
 class SharedDetector:
@@ -91,9 +105,11 @@ class CameraTracker:
         matcher: CrossCameraMatcher,
         positions=None,
         image_size: tuple[int, int] | None = None,
+        order: GroupTimeOrder | None = None,
     ):
         self._tracker, self._camera_id, self._matcher = tracker, camera_id, matcher
         self._positions, self._image_size = positions, image_size
+        self._order = order  # a group replay: the live run's group time, in its order
 
     def _court_xy(self, box, frame: Frame):
         if self._positions is None or frame.image.shape[1::-1] != self._image_size:
@@ -104,6 +120,12 @@ class CameraTracker:
             return None
 
     def update(self, dets: Detections, frame: Frame) -> list[TrackObs]:
+        if self._order is None:
+            return self._update(dets, frame)
+        with self._order.turn(self._camera_id, frame.seq) as t:
+            return self._update(dets, dataclasses.replace(frame, t_recv=t))
+
+    def _update(self, dets: Detections, frame: Frame) -> list[TrackObs]:
         tracks = self._tracker.update(dets, frame)
         local = [
             LocalTrack(t.track_id, self._court_xy(t.xyxy, frame), describe(frame.image, t.xyxy))
@@ -153,10 +175,16 @@ def run_group(
     cameras' tracks (default: a CourtMatcher with its default parameters); its parameters go into
     every run's group block. A camera whose source is lost keeps its session open and the others
     run on; a SharedCodeError in any camera ends every session with status error and the failure as
-    an event, and is raised."""
+    an event, and is raised.
+    Cameras with `replay` are a group replay (D-060): each adds a run to its recorded
+    session, records nothing and uses the live run's calibration, and their frames reach
+    the trackers and the matcher in the live run's group time, one at a time."""
     camera_ids = [c.camera_id for c in cameras]
     if len(set(camera_ids)) != len(camera_ids):
         raise ValueError(f"a camera_id is given twice: {camera_ids}")
+    replaying = any(c.replay for c in cameras)
+    if replaying and not all(c.replay for c in cameras):
+        raise ValueError("a group replay replays every camera of the group")
     if detector is not None and make_tracker is None:
         raise ValueError("a detector needs make_tracker")
     report = on_event or (lambda camera_id, ev, t0: None)
@@ -170,7 +198,9 @@ def run_group(
         for cam, info in zip(cameras, infos, strict=True):
             try:
                 calibrations.append(
-                    (*load_camera_calibration(cam.calibration_path, cam.camera_id, info), None)
+                    (doc := cam.replay.calibration, doc and CalibrationPositions(doc), None)
+                    if replaying
+                    else (*load_camera_calibration(cam.calibration_path, cam.camera_id, info), None)
                     if cam.calibration_path
                     else (None, None, None)
                 )
@@ -179,6 +209,11 @@ def run_group(
         shared_detector = None if detector is None else SharedDetector(detector)
         if detector is not None and matcher is None:
             matcher = CourtMatcher()
+        order = (
+            GroupTimeOrder({c.camera_id: c.replay.group_time for c in cameras})
+            if replaying and detector is not None
+            else None
+        )
         pipelines = [
             CameraPipeline(
                 cam.source,
@@ -195,17 +230,19 @@ def run_group(
                     positions,
                     calibration
                     and (calibration["image_size"]["width"], calibration["image_size"]["height"]),
+                    order,
                 ),
-                recorder=FileRecorder() if record else None,
+                recorder=FileRecorder() if record and not replaying else None,
                 calibration=calibration,
                 positions=positions,
+                replay=replaying,
                 on_event=functools.partial(report, cam.camera_id),
             )
             for cam, info, (calibration, positions, _) in zip(
                 cameras, infos, calibrations, strict=True
             )
         ]
-        session_ids = [str(uuid.uuid4()) for _ in cameras]
+        session_ids = [c.replay.session_id if replaying else str(uuid.uuid4()) for c in cameras]
         runs = [make_run(c, info) for c, info in zip(camera_ids, infos, strict=True)]
         group = {
             "group_id": group_id,
@@ -220,17 +257,21 @@ def run_group(
         }
         device = device_id(out)
         for i, p in enumerate(pipelines):
-            meta = SessionMeta(
-                session_id=session_ids[i],
-                device_id=device,
-                started_at=utc_now(),
-                source=infos[i],
-                recording_enabled=record,
-                camera_id=camera_ids[i],
-                group_id=group_id,
-                calibration=session_calibration(p.calibration),
-            )
-            p.open_session(dataclasses.replace(runs[i], group=group), meta=meta)
+            run = dataclasses.replace(runs[i], group=group)
+            if replaying:
+                p.open_session(run, session_dir=cameras[i].replay.target.session_dir)
+            else:
+                meta = SessionMeta(
+                    session_id=session_ids[i],
+                    device_id=device,
+                    started_at=utc_now(),
+                    source=infos[i],
+                    recording_enabled=record,
+                    camera_id=camera_ids[i],
+                    group_id=group_id,
+                    calibration=session_calibration(p.calibration),
+                )
+                p.open_session(run, meta=meta)
             opened.append(p)
             if problem := calibrations[i][2]:  # before any run, so no t0: t_mono is null
                 p.log_event(HealthEvent("error", utc_now(), None, problem))
@@ -254,6 +295,9 @@ def run_group(
         for p in pipelines:
             p.start()
         while not all(p.done.is_set() for p in pipelines) and not stop.wait(0.1):
+            for camera_id, p in zip(camera_ids, pipelines, strict=True):
+                if order and p.done.is_set():  # its frames are over: nobody waits for them
+                    order.finish(camera_id)
             _raise_shared_failure(pipelines)
         _raise_shared_failure(pipelines)  # also when the failing camera was the last one running
     except KeyboardInterrupt:
@@ -271,6 +315,8 @@ def run_group(
             p.log_event(HealthEvent("error", utc_now(), time.perf_counter(), f"group: {e!r}"))
         raise
     finally:
+        if order:  # a stop: the frames still waiting go through and the cameras drain
+            order.close()
         statuses = {}
         for camera_id, p in zip(camera_ids, pipelines, strict=True):
             try:

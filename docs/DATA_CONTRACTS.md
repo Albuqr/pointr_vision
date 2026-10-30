@@ -1,6 +1,6 @@
 # Data contracts
 
-Contract version: **0.20.0**. Any change bumps the version (minor for additive fields, major
+Contract version: **0.21.0**. Any change bumps the version (minor for additive fields, major
 for removals or meaning changes) and needs a `DECISIONS.md` entry. JSON Schemas in
 `contracts/` are written from this file and tests check them against it (D-009).
 
@@ -63,7 +63,7 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
 
 ```json
 {
-  "contract_version": "0.20.0",
+  "contract_version": "0.21.0",
   "session_id": "uuid",
   "device_id": "uuid",
   "camera_id": "cam1 | null",
@@ -108,12 +108,14 @@ queue, a failed writer, a frame of another size) has an empty `t_video`. A repla
 `runs` grows, plus an `interrupted` or `error` event whose `detail` starts with `replay <run_id>:`
 when the replay did not end cleanly (D-042); the replay's other events are printed, not written.
 A replay of a bare video file starts a new session with `recording` disabled.
+A replay of a group (0.20.0, D-060: `--replay <group_id>`) adds one replay run, as above, to the session of
+every camera whose `session.json` has that `group_id`; section 3 `group` says what those runs share.
 Event `t_mono` is `null` for events that precede the run's `t0`, such as
 `source_open_failed` (D-014).
 Event kinds: `source_open_failed`, `source_lost`, `source_recovered`,
 `frozen_frames`, `dark_frames`, `writer_backlog`, `recorder_backlog`, `interrupted`, `error`,
 `camera_gap`, `sensor_outage`, `startup_check_failed`, `rim_drift` (those four are 0.11.0, Track R),
-`stopped` (0.12.0, D-049), `appearance_only` (0.20.0, D-060).
+`stopped` (0.12.0, D-049), `appearance_only` (0.21.0, D-061).
 `appearance_only` is written once, when the session opens (so `t_mono` is `null`), for a camera of a group run of
 two or more cameras that has no valid calibration and a matcher running: its tracks cannot be linked by court
 position, so they link to the other cameras by appearance only (section 5). `detail` says why
@@ -135,7 +137,7 @@ calibration used by this session and records its mean held-out check residual in
 
 ```json
 {
-  "contract_version": "0.20.0",
+  "contract_version": "0.21.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "mode": "live | replay",
@@ -246,7 +248,14 @@ the rest) with its `camera_id`, `session_id` and `run_id`. A `track_id` is then 
 run: the same `track_id` in the `tracks.csv` of two runs with the same `group_run_id` is the same person.
 A live run and a replay of it are two group runs, so the contract does not make their IDs name the same
 person; a replay is expected to reproduce the live IDs on the same frames (R2a 08), and that is checked,
-not assumed. `params` records the effective parameters of the cross-camera matcher by name, like
+not assumed. A group replay (0.20.0, D-060) is one group run over the recorded sessions of one group: every
+camera's run has `mode: replay`, and `cameras` lists each session's own `session_id` with the replay's `run_id`. Its
+matcher and trackers work in the live run's group time, not the replay's: the group time of a replayed frame is the
+live run's `t0_mono + t_recv` of the frame at the same video position (`frames.csv` `t_video`), interpolated by
+video position for a frame the live run did not process, and the cameras' frames reach the matcher one at a time in
+that order. Its `params` are the live run's `group.params` (the defaults, with the replay's `--track-lost-secs` as
+`lost_s`, when the live run has none), and its calibration is the live run's `calibration`. The replay's own
+`frames.csv` times stay the times of the replay. `params` records the effective parameters of the cross-camera matcher by name, like
 `tracker.params` (`{}` when no matcher ran); the matcher slices list the names here, with a minor bump.
 The court-position matcher (0.19.0, D-058, R2a 05) records `match_distance_m` (largest court-plane distance, m,
 between the positions of two cameras' tracks that are linked), `max_offset_s` (largest time difference, s, in group
@@ -256,7 +265,7 @@ time between the two readings, and how old a camera's last update may be and sti
 were lost) and `latency_s` (an object, `camera_id` to the camera latency in s that was subtracted from that
 camera's frame receive time to get group time; `0.0` for a camera with no measured latency). They are starting
 values, not measured ones.
-The appearance fallback (0.20.0, D-060, R2a 06) adds `appearance_max_distance` (largest appearance distance between
+The appearance fallback (0.21.0, D-061, R2a 06) adds `appearance_max_distance` (largest appearance distance between
 two tracks that are linked by appearance: the mean of the Bhattacharyya distances, 0 same to 1 disjoint, of the
 HSV colour histograms of the upper and of the lower part of the two boxes) and `max_height_diff` (largest
 relative difference `|a - b| / max(a, b)` of the two boxes' heights, each a fraction of its frame's height). They
@@ -323,7 +332,7 @@ change from `unshared` to `position` once a second camera sees the person. A fil
 0.14.0 has no `link` column; read it as `unshared`.
 Rows of a track the court-position matcher has linked to a track of another camera carry `position` from
 the frame where the link was made. A track without a court position (its camera has no valid calibration, a frame
-of another size, a point that cannot be projected) is linked by appearance instead (0.20.0, D-060): clothing colour
+of another size, a point that cannot be projected) is linked by appearance instead (0.21.0, D-061): clothing colour
 of the upper and lower box and box height, never pixel position, within `appearance_max_distance` and
 `max_height_diff` (section 3); its group's rows then carry `appearance`. `link` belongs to the track's group, so it
 names the cue of the latest link into that group. A track that is lost and replaced by a new local track of the
@@ -401,7 +410,7 @@ One report per run, one per camera: there is no fusion across cameras.
 
 ```json
 {
-  "contract_version": "0.20.0",
+  "contract_version": "0.21.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "camera_id": "cam1 | null",
@@ -744,7 +753,7 @@ recorded video and is compared with `frames.csv` `t_video`; shots and tracks joi
 
 ```json
 {
-  "contract_version": "0.20.0",
+  "contract_version": "0.21.0",
   "fusion_id": "uuid",
   "group_id": "token",
   "created_at": "2026-12-01T18:50:00Z",

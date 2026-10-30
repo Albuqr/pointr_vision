@@ -15,7 +15,7 @@ tracks and compares the new frame with them. Rules:
   group over: a return, or an occlusion, re-links instead of creating a new ID.
 * A track with no court position (camera not calibrated, point not projectable) is never linked by
   position. Where one of two tracks has no court position, their appearance (clothing colour and box
-  height, `appearance.py`, R2a 06, D-060) decides instead, within `appearance_max_distance` and
+  height, `appearance.py`, R2a 06, D-061) decides instead, within `appearance_max_distance` and
   `max_height_diff`; the group's rows then say `link=appearance`. Where both have one, position
   alone decides. Pixel position is never a cue. Position pairs are taken before appearance pairs,
   and the takeover of a lost group follows the same rule: how an occluded track re-links.

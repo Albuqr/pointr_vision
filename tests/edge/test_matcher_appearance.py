@@ -1,4 +1,4 @@
-"""The appearance fallback (R2a 06, seam B, ADR 0007, D-060): clothing colour and box height, on
+"""The appearance fallback (R2a 06, seam B, ADR 0007, D-061): clothing colour and box height, on
 synthetic people drawn as two coloured blocks. No detector, no clock, no camera."""
 
 import dataclasses

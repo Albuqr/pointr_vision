@@ -1,4 +1,4 @@
-"""A track's appearance descriptor (R2a 06, ADR 0007, D-060): clothing colour and box height.
+"""A track's appearance descriptor (R2a 06, ADR 0007, D-061): clothing colour and box height.
 
 Hand-built with OpenCV and numpy, no learned model. The cross-camera matcher uses it where court
 position cannot decide (`matcher.py`); it holds no pixel position, so it never links by where a
