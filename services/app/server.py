@@ -1009,7 +1009,9 @@ def camera_state(child, alive, session, run_dir) -> str:
     ready = {}
     if run_dir:
         try:
-            ready = json.loads((run_dir / "run.json").read_text(encoding="utf-8")).get("ready", {})
+            loaded = json.loads((run_dir / "run.json").read_text(encoding="utf-8")).get("ready")
+            if isinstance(loaded, dict):
+                ready = loaded
         except (OSError, ValueError):
             pass
     if not ready.get("first_frame"):
