@@ -30,7 +30,7 @@ dev = ["pytest==9.2.0", "ruff==0.17.3"]
 include = ["services*"]
 
 [tool.setuptools.package-data]
-"services.edge.calibration" = ["calibration.schema.json"]
+"services.edge" = ["contracts/*.schema.json"]
 
 [tool.ruff]
 line-length = 100

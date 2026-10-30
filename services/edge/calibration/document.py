@@ -5,6 +5,7 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
+from services.edge import contract
 from services.edge.calibration.court import court_model
 from services.edge.calibration.homography import (
     check_homography,
@@ -12,20 +13,11 @@ from services.edge.calibration.homography import (
     normalize_homography_sign,
     point_residuals,
 )
-from services.edge.contract import CONTRACT_VERSION
-
-# Versions of this file format the loader accepts. A later contract bump that leaves the
-# calibration format unchanged adds the previous version here, so saved calibrations stay usable;
-# a bump that changes it does not, and the old files are refused with a clear message.
-ACCEPTED_VERSIONS = (
-    CONTRACT_VERSION, "0.20.0", "0.19.0", "0.18.0", "0.17.0", "0.16.0", "0.15.0", "0.14.0",
-    "0.13.0", "0.12.0", "0.11.0", "0.10.0", "0.9.0", "0.8.0",
-)  # fmt: skip
-_SCHEMA = Path(__file__).with_name("calibration.schema.json")
+from services.edge.contract import CONTRACT_VERSION, accepts_calibration
 
 
 def _schema_errors(document):
-    schema = json.loads(_SCHEMA.read_text(encoding="utf-8"))
+    schema = contract.schema("calibration")
     # as it will be written: tuples become arrays, and NaN or infinity are not JSON (ValueError)
     as_json = json.loads(json.dumps(document, allow_nan=False))
     errors = sorted(Draft202012Validator(schema).iter_errors(as_json), key=lambda e: list(e.path))
@@ -37,10 +29,12 @@ def validate_calibration(document):
     schema cannot make: the homography is usable, the points hold out, and the stored errors
     match the points. A document that passes can be loaded by every consumer (recording,
     report, preview); a file that does not pass is refused here, not later inside one of them."""
-    if not isinstance(document, dict) or document.get("contract_version") not in ACCEPTED_VERSIONS:
+    version = document.get("contract_version") if isinstance(document, dict) else None
+    if not accepts_calibration(version):
+        low, high = contract.CALIBRATION_FORMATS[contract.CALIBRATION_FORMAT]
         raise ValueError(
-            f"calibration must use contract version {' or '.join(ACCEPTED_VERSIONS)}, "
-            f"not {document.get('contract_version') if isinstance(document, dict) else None!r}"
+            f"calibration contract version {version} is not accepted "
+            f"(format {contract.CALIBRATION_FORMAT} covers {low} to {high or CONTRACT_VERSION})"
         )
     # Older files named the selected court `kind`; normalize that alias for current consumers.
     # The saved file itself is never rewritten when loaded.
