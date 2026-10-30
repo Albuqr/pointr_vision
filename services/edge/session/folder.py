@@ -132,6 +132,25 @@ def _field(value, key, kind, problems, filename):
         problems.append(f"{filename}: {key} not readable")
 
 
+def read_session_for_update(path: Path | str) -> dict:
+    """Read an unchanged session document for replay's read-merge-write operation.
+
+    Tolerant snapshots normalize damage for display and must never be written back.
+    Validate only the fields replay needs to mutate; preserve all other content,
+    including non-object event entries and absent optional historical fields.
+    Refuse unreadable mutation fields rather than overwrite evidence with a stale copy.
+    """
+    path = Path(path)
+    value, problems = _read(path, "session.json")
+    if value is not None:
+        for key, kind in (("session_id", str), ("runs", list), ("events", list)):
+            if not isinstance(value.get(key), kind):
+                problems.append(f"session.json: {key} not readable")
+    if problems:
+        raise SessionDamaged(f"session damaged: {'; '.join(problems)} ({path})")
+    return value
+
+
 def read_run(path: Path | str) -> RunSnapshot:
     path = Path(path)
     value, problems = _read(path, "run.json")
