@@ -31,6 +31,7 @@ class FailedChild:
         self.running = False
         self.proc = Proc()
         self.failure = f"cannot open source {SECRET_URL}"
+        self.failure_kind = "source_open_failed"
         self.tail = deque([f"error: cannot open source {SECRET_URL}"], maxlen=20)
 
 
@@ -282,15 +283,15 @@ def test_b2_an_error_before_the_session_line_is_still_a_start_failure(tmp_path):
 @pytest.mark.parametrize(
     ("failure", "kind"),
     [
-        ("opencv error: invalid frame", "start_failed"),
-        ("could not open weights 'missing.pth'", "start_failed"),
-        ("model load failed: could not open weights 'missing.pth'", "start_failed"),
-        ("source configuration is invalid", "start_failed"),
-        ("unexpected startup failure", "start_failed"),
-        ("cannot open sourceful weights", "start_failed"),
-        ("cannot open source 'fake': file not found", "source_open_failed"),
-        ("cannot open source: camera did not open", "source_open_failed"),
-        ("cannot open source", "source_open_failed"),
+        ("opencv error: invalid frame", "exited"),
+        ("could not open weights 'missing.pth'", "exited"),
+        ("model load failed: could not open weights 'missing.pth'", "exited"),
+        ("source configuration is invalid", "exited"),
+        ("unexpected startup failure", "exited"),
+        ("cannot open sourceful weights", "exited"),
+        ("cannot open source 'fake': file not found", "exited"),
+        ("cannot open source: camera did not open", "exited"),
+        ("cannot open source", "exited"),
     ],
 )
 def test_b10_start_failures_use_the_edges_wording_and_keep_the_reason(tmp_path, failure, kind):
@@ -310,3 +311,51 @@ def test_b10_start_failures_use_the_edges_wording_and_keep_the_reason(tmp_path, 
         assert [(event["kind"], event["detail"]) for event in cam["recent_events"]] == [
             (kind, failure)
         ]
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "source_open_failed",
+        "model_load_failed",
+        "calibration_refused",
+        "config_conflict",
+        "start_timeout",
+        "spawn_failed",
+        "exited",
+    ],
+)
+def test_t6_studio_shows_typed_failure_kind_without_guessing_from_detail(tmp_path, kind):
+    class TypedLauncher(RealChildLauncher):
+        def __init__(self, cameras, options):
+            super().__init__(cameras, options)
+            self.children = real_children(cameras, [f"error: {kind}: cannot open source weights"])
+            for child in self.children:
+                child.proc = SimpleNamespace(poll=lambda: 3, returncode=3)
+
+    with make_client(tmp_path, TypedLauncher) as client:
+        assert client.post("/api/recording/start").status_code == 200
+        shown = camera(client)
+        assert f"failure kind: {kind}" in shown["last_error"]["detail"]
+        assert shown["recent_events"][0]["kind"] == kind
+        assert shown["recent_events"][0]["detail"] == "cannot open source weights"
+
+
+@pytest.mark.parametrize(
+    "details, expected", [([""], ""), (["", "useful reason"], "useful reason")]
+)
+def test_t6_empty_failure_detail_keeps_kind_and_later_useful_detail(tmp_path, details, expected):
+    class EmptyLauncher(RealChildLauncher):
+        def __init__(self, cameras, options):
+            super().__init__(cameras, options)
+            self.children = real_children(
+                cameras, [f"error: model_load_failed: {d}" for d in details]
+            )
+
+    with make_client(tmp_path, EmptyLauncher) as client:
+        assert client.post("/api/recording/start").status_code == 200
+        shown = camera(client)
+        assert shown["state"] == "error"
+        assert "failure kind: model_load_failed" in shown["last_error"]["detail"]
+        assert f"reason: {expected}" in shown["last_error"]["detail"]
+        assert shown["recent_events"][0]["kind"] == "model_load_failed"

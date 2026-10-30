@@ -1462,3 +1462,15 @@ older run, and scoring does not infer order from directory names when session.js
 reports skipped non-object events; the launcher displays that count and reports include reader problems as
 caveats. The writer's live-session lifecycle remains unchanged. No format change or contract-version bump.
 **Status.** Accepted.
+
+
+## D-066: Version the edge–Studio text protocol (2026-10-30)
+
+Owner decisions 14 and 15 establish DATA_CONTRACTS §16 at contract 0.23.0. Typed messages
+share one emit/parse implementation: session opened, device chosen, preview listening,
+failure, summary and stdin stop. Failures carry one explicit kind; old error lines parse as
+`exited`, without guessing from words such as “open” or “source”. An error after a session
+opens stays a run-time error. Emit centralizes camera tags, physical-line splitting, masking
+and stream selection. The launcher and Studio migrate now; real edge emitters follow in T10.
+This additive protocol section changes no stored session/run fields. The calibration format
+and its acceptance range remain unchanged.

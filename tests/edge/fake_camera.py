@@ -28,13 +28,21 @@ import time
 import uuid
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from services.edge.child_protocol import (  # noqa: E402
+    SessionOpened,
+    StartFailed,
+    Summary,
+    emit,
+)
+
 mode, camera_id, out = sys.argv[1], sys.argv[2], Path(sys.argv[3])
 out.mkdir(parents=True, exist_ok=True)
 (out / f"start_{camera_id}").write_text(str(time.time()))  # when this process began
 (out / f"pid_{camera_id}").write_text(str(os.getpid()))
 
 if mode == "fail":
-    print("error: cannot open source 'fake'", file=sys.stderr, flush=True)
+    emit(StartFailed("source_open_failed", "cannot open source 'fake'"))
     sys.exit(2)
 
 stop = threading.Event()
@@ -70,7 +78,7 @@ if mode == "noisy":
     for _ in range(120):
         print("█" + "x" * 1000, flush=True)
 if mode != "silent":
-    print(f"session: {session}", flush=True)
+    emit(SessionOpened(str(session)))
     (out / f"session_{camera_id}").write_text(str(time.time()))  # when the line was printed
 
 n = 0
@@ -95,5 +103,5 @@ if mode == "damaged-events":
 (session / "session.json").write_text(json.dumps(doc))
 (out / f"stopped_{camera_id}").write_text(str(time.time()))
 print(f"session interrupted: {session}", flush=True)
-print("t0_wall=x captured=11 dropped=0 failed_reads=0 processed=11", flush=True)
+emit(Summary("t0_wall=x captured=11 dropped=0 failed_reads=0 processed=11"))
 sys.exit(130)

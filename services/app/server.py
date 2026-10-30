@@ -162,19 +162,21 @@ class Studio:
             return
         failure = getattr(child, "failure", None)
         running = child.running
-        if not failure and (running or state != "error"):
+        if failure is None and (running or state != "error"):
             return
         log.reported_child = child
         proc = getattr(child, "proc", None)
         code = getattr(proc, "returncode", None)
-        if failure and "no session after" in failure:
+        failure_kind = getattr(child, "failure_kind", None) or "exited"
+        if failure is not None and failure_kind == "start_timeout":
             message = "The camera took too long to open, so it was stopped."
-        elif failure:
+        elif failure is not None:
             message = "The camera could not start recording."
         else:
             message = "The camera stopped recording because of an error."
         lines = [f"source: {mask_credentials(str(child.cam.source))}"]
-        if failure:
+        if failure is not None:
+            lines.append(f"failure kind: {failure_kind}")
             lines.append(f"reason: {failure}")
         if code is not None:
             lines.append(f"exit code: {code}")
@@ -183,16 +185,10 @@ class Studio:
             lines.append(f"output (last {len(tail)} lines):")
             lines.extend(tail)
         log.set_error(message, "\n".join(lines))
-        failure_kind = (
-            "source_open_failed"
-            if failure
-            and (
-                failure == "cannot open source"
-                or failure.startswith(("cannot open source ", "cannot open source:"))
-            )
-            else "start_failed"
+        log.add_event(
+            failure_kind if failure is not None else "error",
+            failure if failure is not None else message,
         )
-        log.add_event(failure_kind if failure else "error", failure or message)
 
     def start(self):
         with self.lock:
@@ -981,7 +977,7 @@ def camera_state(child, alive, session, run_dir) -> str:
     status = session.get("status")
     if status in ("ended", "interrupted"):
         return status
-    if getattr(child, "failure", None) or status == "error":
+    if getattr(child, "failure", None) is not None or status == "error":
         return "error"
     if not alive:  # gone with no end written: it died, or it never recorded
         return "error"
