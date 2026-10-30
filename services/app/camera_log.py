@@ -56,6 +56,10 @@ class CameraLog:
 
     def ingest_session(self, session: SessionSnapshot) -> None:
         """Ingest the reader's validated events from the same snapshot as status."""
+        if session.data is None:
+            self.ingest_session_events(
+                f"{session.path}#reader", [{"kind": "error", "detail": "; ".join(session.problems)}]
+            )
         self.ingest_session_events(str(session.path), session.events or ())
 
     def ingest_session_events(self, session_key: str, events: list) -> None:

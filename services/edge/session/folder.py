@@ -65,13 +65,19 @@ class Snapshot:
         """An independent mutable copy for existing report/UI consumers."""
         return _thaw(self.data) if self.data is not None else {}
 
-    def require(self, *fields: str) -> dict:
+    def require(self, *fields: str, expected: type | None = None) -> dict:
         """Require a readable object and the named fields, raising one damage error.
 
         Unrelated optional fields may be absent or damaged. With no field names,
         only the top-level JSON object is required.
         """
-        missing = [field for field in fields if self.get(field) is None]
+        missing = []
+        for field in fields:
+            value = self.data
+            for part in field.split("."):
+                value = value.get(part) if isinstance(value, Mapping) else None
+            if value is None or (expected is not None and not isinstance(value, expected)):
+                missing.append(field)
         if self.data is None or missing:
             reasons = list(self.problems) + [f"{field} not recorded" for field in missing]
             raise SessionDamaged(f"session damaged: {'; '.join(reasons)} ({self.path})")
@@ -147,6 +153,12 @@ def read_session(path: Path | str) -> SessionSnapshot:
         for key in ("recording", "source"):
             if value.get(key) is not None:
                 _field(value, key, dict, problems, "session.json")
+        recording = value.get("recording")
+        if recording is not None:
+            for key in ("path", "sha256"):
+                if key in recording and recording[key] is not None:
+                    if not isinstance(recording[key], str):
+                        problems.append(f"session.json: recording.{key} not readable")
         _field(value, "events", list, problems, "session.json")
         if value["events"] is not None:
             events = value["events"]

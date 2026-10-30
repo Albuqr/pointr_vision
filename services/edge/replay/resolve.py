@@ -48,7 +48,18 @@ def resolve_replay(target: str, out_dir: Path | str) -> ReplayTarget:
     if folder is None:
         raise ReplayError(f"no video file, session folder or session id {target!r}")
     try:
-        session = read_session(folder).require()
+        snapshot = read_session(folder)
+        session = snapshot.require()
+        recording = snapshot.get("recording")
+        if recording is not None:
+            snapshot.require(
+                *(
+                    f"recording.{key}"
+                    for key in ("path", "sha256")
+                    if recording.get(key) is not None
+                ),
+                expected=str,
+            )
     except SessionDamaged as e:
         raise ReplayError(str(e)) from e
     # the file the session says it recorded (an older session may be a video.mp4), inside its folder
