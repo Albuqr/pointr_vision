@@ -632,14 +632,18 @@ def error_events(session_dir: Path) -> str:
     writer): a session can end `interrupted` and still have lost data."""
     try:
         doc = json.loads((session_dir / "session.json").read_text(encoding="utf-8"))
-        return str(sum(e["kind"] == "error" for e in doc["events"]))
+        events = doc["events"]
+        skipped = sum(not isinstance(e, dict) for e in events)
+        errors = str(sum(e["kind"] == "error" for e in events if isinstance(e, dict)))
+        return f"{errors} (skipped {skipped} non-object events)" if skipped else errors
     except (OSError, ValueError, KeyError):
         return "-"
 
 
 def session_status(session_dir: Path) -> str:
     try:
-        return json.loads((session_dir / "session.json").read_text(encoding="utf-8"))["status"]
+        status = json.loads((session_dir / "session.json").read_text(encoding="utf-8"))["status"]
+        return status if isinstance(status, str) else "unknown"
     except (OSError, ValueError, KeyError):
         return "unknown"
 
