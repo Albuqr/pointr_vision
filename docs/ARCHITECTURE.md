@@ -200,7 +200,12 @@ capture thread ──▶ proc_queue (maxsize=1, drop oldest, count drops) ──
   launcher dies, becomes the Ctrl+C path of that process: the same shutdown as above). A
   `stop ui` line (Studio's stop button, D-049) takes the same path but ends the session `ended`
   with a `stopped` event instead of `interrupted`. A child's `session.json` carries `camera_id`
-  and `group_id`.
+  and `group_id`. In a group (R2a 07, D-059) a camera's stream loss or outage stays that camera's
+  own (`source_lost` / `source_recovered`), the others keep recording, and a camera that comes
+  back re-links through the matcher; a failure in shared code (detector, matcher) ends every
+  camera through the shutdown path above, each session with status `error` and the failure as
+  an `error` event. A failure of one camera's own code (its tracker, its writer) ends only that
+  camera, as with one process per camera.
 
 ## 6. Local storage
 
