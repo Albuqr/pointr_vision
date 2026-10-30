@@ -587,6 +587,7 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
         except Exception as e:  # e.g. no network for the first weights download
             # before any run, so no t0: t_mono is null (D-014)
             on_event(HealthEvent("error", utc_now(), None, f"model load failed: {e!r}"), None)
+            print(f"error: model load failed: {e!r}", file=sys.stderr)
             return EXIT_CAPTURE_ERROR
 
     try:
