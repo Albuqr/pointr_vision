@@ -195,7 +195,7 @@ def test_a_singular_saved_calibration_replays_that_camera_uncalibrated_with_an_e
     assert not any(t["x_m"] for t in rows(replay_dir / "tracks.csv"))
     folder = replay_dir.parent.parent
     events = load(folder / "session.json")["events"]
-    [problem] = [e for e in events if (e.get("detail") or "").startswith("calibration not used")]
+    [problem] = [e for e in events if "calibration not used" in (e.get("detail") or "")]
     assert problem["kind"] == "error"
     assert found["cam2"][1][0]["calibration"] == live_cam2
 
