@@ -106,7 +106,7 @@ def group_sessions(out: Path, group_id: str) -> list[Path]:
             doc = json.loads(f.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue  # not a readable session: not ours
-        if doc.get("group_id") == group_id:
+        if isinstance(doc, dict) and doc.get("group_id") == group_id:
             found.append((doc.get("camera_id") or "", f.parent))
     return [folder for _, folder in sorted(found)]
 

@@ -104,7 +104,7 @@ def resolve_group(target: str, out_dir: Path | str) -> GroupReplay | None:
             session = json.loads((folder / "session.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        if session.get("group_id") == target:
+        if isinstance(session, dict) and session.get("group_id") == target:
             found.append((folder, session))
     if not found:
         return None
