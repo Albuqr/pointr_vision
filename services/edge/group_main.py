@@ -159,6 +159,8 @@ def run(cams: list[argparse.Namespace], stop: StopRequest) -> int:
         if any(s != "ended" for s in statuses.values()):
             code = EXIT_CAPTURE_ERROR
     except KeyboardInterrupt:  # every session already ended `interrupted`
+        if not pipelines:  # a stop before any session: main's pre-session path (D-049)
+            raise
         code = EXIT_INTERRUPTED
     except Exception as e:  # every session already ended `error`, with the failure as an event
         print(f"error: the group did not run: {e}", file=sys.stderr)
