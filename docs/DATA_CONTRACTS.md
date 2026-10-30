@@ -1,10 +1,10 @@
 # Data contracts
 
-Contract version: **0.22.0**. Any change bumps the version (minor for additive fields, major
+Contract version: **0.23.0**. Any change bumps the version (minor for additive fields, major
 for removals or meaning changes) and needs a `DECISIONS.md` entry. JSON Schemas in
 `services/edge/contracts/` are written from this file and tests check them against it (D-009).
 The schemas hold a semver pattern, not the number: `contract.validate` in `services/edge/contract.py`
-checks that a document carries the current version (0.22.0, D-064: a refactor, no format change).
+checks that a document carries the current version (centralized at 0.22.0, D-064).
 
 Conventions: UUIDv4 for every ID generated on the device. Wall times are UTC ISO-8601.
 Durations and offsets in seconds as floats. Monotonic times are seconds relative to the
@@ -65,7 +65,7 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
 
 ```json
 {
-  "contract_version": "0.22.0",
+  "contract_version": "0.23.0",
   "session_id": "uuid",
   "device_id": "uuid",
   "camera_id": "cam1 | null",
@@ -139,7 +139,7 @@ calibration used by this session and records its mean held-out check residual in
 
 ```json
 {
-  "contract_version": "0.22.0",
+  "contract_version": "0.23.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "mode": "live | replay",
@@ -412,7 +412,7 @@ One report per run, one per camera: there is no fusion across cameras.
 
 ```json
 {
-  "contract_version": "0.22.0",
+  "contract_version": "0.23.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "camera_id": "cam1 | null",
@@ -755,7 +755,7 @@ recorded video and is compared with `frames.csv` `t_video`; shots and tracks joi
 
 ```json
 {
-  "contract_version": "0.22.0",
+  "contract_version": "0.23.0",
   "fusion_id": "uuid",
   "group_id": "token",
   "created_at": "2026-12-01T18:50:00Z",
@@ -806,3 +806,46 @@ one; `differences` is the number of rows in `fusion_diff.csv`.
 | camera_a, camera_b | str | the two camera_ids |
 | value_a, value_b | str | each camera's reading as text: `x_m;y_m` for position, `true` or `false` for presence, the number for player_number; empty when that camera has none |
 | delta | float/empty | the difference in metres for `position`; empty for the other fields |
+
+
+## 16. Edge–Studio child protocol (0.23.0, D-066)
+
+The launcher starts an edge child and reads its UTF-8 stdout with stderr merged in. The stop
+channel is the child's stdin. These are readable text lines, not JSON. A camera-specific
+output line may start with `[camera_id] `; untagged lines and `[group] ` concern every camera in that child. Tags naming an unknown
+camera remain visible as text but never update another camera's state.
+Camera tags use the camera ID format from section 2; `group` is the reserved process-wide tag.
+The single-camera edge output stays untagged. Unknown lines remain free text.
+
+| Message | Literal wire form | Meaning |
+|---|---|---|
+| SessionOpened(path) | `session: <path>` | Source opened and session folder created |
+| DeviceChosen(device) | `device: <device>` | Device selected, model loading begins |
+| PreviewListening(port) | `preview_port: <port>` | Preview server listening; port 1–65535 |
+| StartFailed(kind, detail) | `error: <kind>: <detail>` | Failure; a startup failure only before SessionOpened |
+| Summary(detail) | `t0_wall=<...> ... failed_reads=<N> ...` | Existing summary text, with nonnegative failed-read count |
+| Stop(source) | `stop` or `stop ui` | stdin request: ordinary interruption or normal Studio stop |
+
+Failure kinds are `source_open_failed`, `model_load_failed`, `calibration_refused`,
+`config_conflict`, `start_timeout`, `spawn_failed` and `exited`. An old `error: <detail>` line,
+including an unrecognized kind prefix, parses as `exited` with its whole detail preserved.
+The launcher itself uses `spawn_failed`, `start_timeout` or `exited` when starting a child
+fails, times out, or exits without opening a session. Studio shows the typed kind and reason.
+An error after SessionOpened is retained as a run-time error and never changes startup state.
+An empty failure detail still carries a failure kind; a later nonempty failure detail may
+replace that empty startup reason. A nested bracket tag is free text, not a second envelope.
+
+`child_protocol.emit` owns the optional camera prefix, credential masking, flushing and stream
+selection: failures go to stderr, other status messages to stdout, and Stop requires the stdin
+stream supplied by the launcher. Each physical line of a multiline session/device/failure
+payload is emitted as a
+complete message of the same type; parsing each line returns its corresponding masked payload
+line. Colons and brackets inside payloads remain literal. Blank payload lines are preserved.
+Summary is a single physical line in the existing summary format.
+Stop is untagged and accepts only no source or `ui`. Credentials are masked when emitting and
+parsing, including unknown text retained in the launcher's output tail. The parser returns the
+camera (if present) and a typed message, or None for malformed/unknown status text. Malformed
+preview ports are free text and do not announce a listening server.
+
+The protocol is introduced before migrating real edge emitters (T10); legacy error parsing
+keeps that intermediate state compatible. Session/run JSON and CSV formats are unchanged.

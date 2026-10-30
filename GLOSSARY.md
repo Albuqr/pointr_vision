@@ -188,3 +188,18 @@ The bets the December test checks, defined in `.scratch/pointr-vision/decision-r
 **Phase R**:
 The December test rig's own phase, with its own phase file and gate, run beside the numbered phases.
 _Avoid_: Track R (collides with Track)
+
+
+## Local processes
+
+**Launcher**:
+The process that starts edge children, reads their status lines and requests their stop.
+Studio uses the launcher to control recording.
+
+**Child**:
+An edge process started by the launcher. It records one camera or a group of cameras and
+reports its progress over the child protocol.
+
+**Stop channel**:
+A child's stdin pipe, through which its launcher requests shutdown. `stop ui` marks a normal
+Studio stop; `stop` or a closed pipe means interruption.
