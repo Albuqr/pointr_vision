@@ -342,7 +342,9 @@ class Studio:
             status = session.get("status", "starting" if child.running else "error")
             run_dir = None
             try:
-                run_dir = next((session_dir / "runs").iterdir()) if session_dir else None
+                runs = session.get("runs", [])
+                if session_dir and isinstance(runs, list) and runs:
+                    run_dir = session_dir / "runs" / runs[-1]
                 frames = self.read_recent_frames(run_dir / "frames.csv") if run_dir else []
                 frame = frames[-1] if frames else {}
                 elapsed = (
@@ -354,7 +356,7 @@ class Studio:
                 people = int(frame.get("n_detections") or 0)
                 track_count = int(frame.get("n_tracks") or 0)
                 drops = int(frame.get("dropped_total") or 0)
-            except (OSError, ValueError, StopIteration, KeyError):
+            except (OSError, ValueError, KeyError):
                 fps, people, track_count, drops = None, 0, 0, 0
             events = session.get("events", [])
             state = camera_state(child, alive, session, run_dir)

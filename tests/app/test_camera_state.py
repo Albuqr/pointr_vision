@@ -1,6 +1,7 @@
 """B4: GET /api/status reports each camera's state as it steps through start, record and stop."""
 
 import json
+from pathlib import Path
 
 import pytest
 from starlette.testclient import TestClient
@@ -39,10 +40,57 @@ def open_session(child, tmp_path, status="running", ready=None):
     folder = tmp_path / child.cam.camera_id
     run = folder / "runs" / "run1"
     run.mkdir(parents=True, exist_ok=True)
-    (folder / "session.json").write_text(json.dumps({"status": status, "events": []}), "utf-8")
+    (folder / "session.json").write_text(
+        json.dumps({"status": status, "events": [], "runs": ["run1"]}), "utf-8"
+    )
     ready = {"model_loaded": "t", "first_frame": None, "first_preview": None, **(ready or {})}
     (run / "run.json").write_text(json.dumps({"ready": ready}), "utf-8")
     child.session_dir = folder
+
+
+@pytest.mark.parametrize("folder_order", [("live", "replay"), ("replay", "live")])
+@pytest.mark.parametrize("listed_order", [("live", "replay"), ("replay", "live")])
+def test_B9_status_uses_last_listed_run(client, tmp_path, monkeypatch, folder_order, listed_order):
+    child, _ = start_two(client)
+    folder = tmp_path / "cam1"
+    runs = folder / "runs"
+    for mode, people, tracks, drops, elapsed, preview in (
+        ("live", 2, 3, 4, 1, None),
+        ("replay", 5, 6, 7, 0.5, "t"),
+    ):
+        run = runs / mode
+        run.mkdir(parents=True)
+        (run / "run.json").write_text(
+            json.dumps({"mode": mode, "ready": {"first_frame": "t", "first_preview": preview}}),
+            encoding="utf-8",
+        )
+        (run / "frames.csv").write_text(
+            "seq,t_recv,t_proc_start,t_proc_end,app_delay_ms,n_detections,n_tracks,dropped_total\n"
+            f"0,0,0,{elapsed},0,{people},{tracks},{drops}\n",
+            encoding="utf-8",
+        )
+    (folder / "session.json").write_text(
+        json.dumps({"status": "running", "events": [], "runs": listed_order}), encoding="utf-8"
+    )
+    child.session_dir = folder
+    original_iterdir = Path.iterdir
+
+    def ordered_iterdir(path):
+        if path == runs:
+            return iter(runs / mode for mode in folder_order)
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", ordered_iterdir)
+    response = client.get("/api/status")
+    assert response.status_code == 200
+    camera = next(c for c in response.json()["cameras"] if c["camera_id"] == "cam1")
+    expected = (
+        ("preview_ready", 2.0, 5, 6, 7)
+        if listed_order[-1] == "replay"
+        else ("recording", 1.0, 2, 3, 4)
+    )
+    shown = tuple(camera[key] for key in ("state", "processed_fps", "people", "tracks", "drops"))
+    assert shown == expected
 
 
 def test_each_camera_steps_through_every_state(client, tmp_path):
