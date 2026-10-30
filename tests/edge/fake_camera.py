@@ -55,7 +55,7 @@ if mode not in ("deaf", "null-status-deaf"):
 session = out / f"{camera_id}_{uuid.uuid4()}"
 run_dir = session / "runs" / str(uuid.uuid4())
 run_dir.mkdir(parents=True)
-doc = {"camera_id": camera_id, "status": "running", "events": []}
+doc = {"camera_id": camera_id, "status": "running", "events": [], "runs": [run_dir.name]}
 if mode == "null-status-deaf":
     doc["status"] = None
 (session / "session.json").write_text(json.dumps(doc))

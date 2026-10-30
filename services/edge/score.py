@@ -11,12 +11,12 @@ printed as not scorable, never as a pass or a zero.
 
 import argparse
 import csv
-import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from services.edge.contract import LABEL_EVENTS, LABELS_COLUMNS, VIDEO_FILE
+from services.edge.session.folder import SessionDamaged, read_session, run_paths
 
 # Placeholders: no source gives a matching tolerance (spec FR-013 points to the research note, which
 # has none), so these are chosen, not measured. D-043.
@@ -138,18 +138,19 @@ def load_labels(path: Path) -> list[Label]:
 
 
 def run_dir(folder: Path, run_id: str | None) -> Path:
-    if run_id:
-        path = folder / "runs" / run_id
-        if not path.is_dir():
-            raise ScoreError(f"{folder} has no run {run_id}")
-        return path
     try:
-        runs = json.loads((folder / "session.json").read_text(encoding="utf-8"))["runs"]
-    except (OSError, ValueError, KeyError):
-        runs = sorted(p.name for p in (folder / "runs").glob("*") if p.is_dir())
-    if not runs:
-        raise ScoreError(f"{folder} has no runs")
-    return folder / "runs" / runs[-1]  # the latest: a replay is added after the live run
+        paths = run_paths(folder)
+        if run_id:
+            matches = [path for path in paths if path.name == run_id]
+            if not matches or not matches[0].is_dir():
+                raise ScoreError(f"{folder} has no run {run_id}")
+            return matches[0]
+        latest = read_session(folder).latest_run
+        if latest is None:
+            raise ScoreError(f"{folder} has no runs")
+        return latest.path
+    except SessionDamaged as error:
+        raise ScoreError(str(error)) from error
 
 
 def _rows(path: Path) -> list[dict] | None:

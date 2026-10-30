@@ -7,8 +7,9 @@ Every string goes through mask_credentials on the way in: nothing here can leak 
 import datetime as dt
 import threading
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
+from services.edge.session.folder import SessionSnapshot
 from services.edge.session.writer import mask_credentials
 
 EVENT_LIMIT = 50
@@ -53,6 +54,10 @@ class CameraLog:
                 }
             )
 
+    def ingest_session(self, session: SessionSnapshot) -> None:
+        """Ingest the reader's validated events from the same snapshot as status."""
+        self.ingest_session_events(str(session.path), session.events or ())
+
     def ingest_session_events(self, session_key: str, events: list) -> None:
         """Copy the events a session.json gained since the last poll."""
         with self.lock:
@@ -60,7 +65,7 @@ class CameraLog:
             fresh = events[start:]
             self.seen[session_key] = start + len(fresh)
         for event in fresh:
-            if isinstance(event, dict):
+            if isinstance(event, Mapping):
                 kind = str(event.get("kind"))
                 detail = event.get("detail")
                 if kind == "error" and "frame size" in str(detail).lower():

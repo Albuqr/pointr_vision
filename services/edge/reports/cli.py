@@ -9,12 +9,12 @@ own, nothing is fused across cameras.
 """
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
 from services.edge.reports.build import format_summary, run_dirs, write_report
 from services.edge.reports.movement import Params
+from services.edge.session.folder import SessionDamaged, find_sessions, read_session
 
 
 def positive(text: str) -> float:
@@ -100,15 +100,8 @@ def params_of(args: argparse.Namespace) -> Params:
 
 def group_sessions(out: Path, group_id: str) -> list[Path]:
     """Session folders under `out` whose session.json has this group_id, by camera_id."""
-    found = []
-    for f in sorted(Path(out).glob("*/session.json")):
-        try:
-            doc = json.loads(f.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue  # not a readable session: not ours
-        if isinstance(doc, dict) and doc.get("group_id") == group_id:
-            found.append((doc.get("camera_id") or "", f.parent))
-    return [folder for _, folder in sorted(found)]
+    sessions = find_sessions(out, group_id=group_id)
+    return [s.path for s in sorted(sessions, key=lambda s: (s.get("camera_id") or "", s.path))]
 
 
 def report_session(session_dir: Path, run_id: str | None, params: Params) -> str:
@@ -116,7 +109,10 @@ def report_session(session_dir: Path, run_id: str | None, params: Params) -> str
     runs = run_dirs(session_dir)
     if run_id and run_id not in [r.name for r in runs]:  # also keeps --run inside this session
         raise ValueError(f"run {run_id!r} is not in {session_dir.name}")
-    run_dir = session_dir / "runs" / run_id if run_id else runs[-1]
+    latest = read_session(session_dir).latest_run
+    if not run_id and latest is None:
+        raise SessionDamaged(f"session damaged: {session_dir}: no run recorded")
+    run_dir = session_dir / "runs" / run_id if run_id else latest.path
     return format_summary(write_report(run_dir, params=params))
 
 
