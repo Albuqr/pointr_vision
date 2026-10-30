@@ -76,12 +76,21 @@ def test_A3_replay_adds_a_run_and_leaves_the_original_untouched(clips, tmp_path)
     assert session == session_before, "replay changed more of session.json than its runs"
 
 
-def test_replay_by_session_id(clips, tmp_path):
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-8-sig"])
+def test_replay_by_session_id(clips, tmp_path, encoding):
     folder = record(clips, tmp_path)
-    session_id = json.loads((folder / "session.json").read_text())["session_id"]
+    session_file = folder / "session.json"
+    before = json.loads(session_file.read_text())
+    session_id = before["session_id"]
+    session_file.write_text(json.dumps(before), encoding=encoding)
     result = run_cli(tmp_path, "--replay", session_id)
     assert result.returncode == 0, result.stderr
     assert len(list((folder / "runs").iterdir())) == 2
+    after = json.loads(session_file.read_text(encoding="utf-8-sig"))
+    assert after["runs"][:1] == before["runs"]
+    assert len(after["runs"]) == 2
+    after["runs"] = before["runs"]
+    assert after == before
 
 
 def test_replay_processes_every_frame_with_container_times(clips, tmp_path):
@@ -228,7 +237,8 @@ def test_replay_that_ends_badly_without_an_event_gets_one(clips, tmp_path):
     assert event["kind"] == "error" and event["detail"].startswith(f"replay {run_id}:")
 
 
-def test_two_replays_of_one_session_keep_both_run_ids(clips, tmp_path):
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-8-sig"])
+def test_two_replays_of_one_session_keep_both_run_ids(clips, tmp_path, encoding):
     from services.edge.session.writer import FileSessionWriter
 
     folder = record(clips, tmp_path)
@@ -237,6 +247,8 @@ def test_two_replays_of_one_session_keep_both_run_ids(clips, tmp_path):
     a.start_run(folder, replay_meta(ids[0]))
     b.start_run(folder, replay_meta(ids[1]))  # started while a is still open
     b.close("ended", counts())
+    session_file = folder / "session.json"
+    session_file.write_text(session_file.read_text(), encoding=encoding)
     a.close("ended", counts())  # a's stale copy must not drop b's run
     runs = json.loads((folder / "session.json").read_text())["runs"]
     assert set(ids) <= set(runs) and len(runs) == len(set(runs)) == 3

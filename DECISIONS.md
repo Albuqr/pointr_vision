@@ -1448,6 +1448,8 @@ optional damage does not prevent a read. The latest run is always the final entr
 list, including when its files are damaged. Group replay deliberately selects the first (live) run.
 Studio status, camera readiness, sessions page and recovery, launcher summaries, replay lookup and discovery,
 reports and scoring all use this boundary. The camera log ingests the same snapshot's validated events.
+Replay writer startup and read-merge-write updates also use it, so a BOM cannot break appending a run
+or make a stale writer discard another replay's run ID.
 Interrupted marking now lives in `folder.py`, called by Studio recovery after the child has gone away;
 it preserves unknown fields, writes atomically, and reports problems instead of erasing malformed events.
 **Consequences.** Damaged sessions remain visible with their readable fields. Reports do not fall back to an
