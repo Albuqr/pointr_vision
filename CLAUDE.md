@@ -56,9 +56,12 @@ synced to a server when one is reachable. Basketball first. This is a TCC projec
   records it on every run.
 - If Git Bash loses PATH: `export PATH="/usr/bin:/bin:/mingw64/bin:/cmd:$PATH"`.
 - Docker Desktop must be running before any `docker build` (server phases).
-- Tooling: `ruff` (lint + format), `pytest`. Run both before declaring anything done.
-- Pre-commit hook: enable once per clone with `git config core.hooksPath .githooks`. It runs ruff
-  and the tests minus the recording and replay files; CI runs the full suite.
+- Tooling: `ruff` (lint + format), `pytest`. Run ruff before declaring anything done.
+- Testing is targeted (D-062): run only the test files for what changed and for the modules that
+  import it (find them with grep), and name each file and why. No Python changed, no tests. The
+  full suite runs only when the developer asks for it, once at the end of a run, sprint or session.
+- Pre-commit hook: enable once per clone with `git config core.hooksPath .githooks`. It refuses
+  `.env` files and runs ruff on the staged `.py` files; CI runs the full suite on push.
 - Setup: `source .venv/Scripts/activate`, then the two install commands above.
 - `pytest` skips tests marked `slow` (real model weights, downloaded once). Run them with
   `pytest -m slow`.
