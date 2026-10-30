@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:pointr:contracts:0.19.0:calibration",
+  "$id": "urn:pointr:contracts:0.20.0:calibration",
   "title": "camera calibration",
   "type": "object",
   "additionalProperties": false,
@@ -9,7 +9,7 @@
     "homography_image_to_court", "points", "errors", "max_check_error_m", "forced", "audit_frame"
   ],
   "properties": {
-    "contract_version": {"const": "0.19.0"},
+    "contract_version": {"const": "0.20.0"},
     "calibration_id": {"$ref": "#/$defs/uuid4"},
     "camera_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,32}$"},
     "created_at": {"$ref": "#/$defs/utc"},
