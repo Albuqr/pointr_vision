@@ -185,7 +185,10 @@ def build_report(
     params = params or Params()
     run_snapshot = read_run(run_dir)
     run = run_snapshot.require("run_id", "session_id")
+    from services.edge.calibration.intake import normalize_document
+
     calibration = run.get("calibration")
+    calibration = normalize_document(calibration) if calibration else None
     positions = positions or (
         CalibrationPositions(calibration) if calibration else PixelPositions()
     )
@@ -270,9 +273,7 @@ def build_report(
         utc_now(),
         (
             {
-                "type": calibration.get("court", {}).get(
-                    "type", calibration.get("court", {}).get("kind")
-                ),
+                "type": calibration["court"].get("type"),
                 "length_m": calibration["court"]["length_m"],
                 "width_m": calibration["court"]["width_m"],
             }

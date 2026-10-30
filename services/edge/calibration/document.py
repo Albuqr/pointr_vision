@@ -36,17 +36,9 @@ def validate_calibration(document):
             f"calibration contract version {version} is not accepted "
             f"(format {contract.CALIBRATION_FORMAT} covers {low} to {high or CONTRACT_VERSION})"
         )
-    # Older files named the selected court `kind`; normalize that alias for current consumers.
-    # The saved file itself is never rewritten when loaded.
-    document = dict(document)
-    court = dict(document.get("court", {}))
-    if "type" not in court and "kind" in court:
-        court["type"] = court["kind"]
-    if "kind" not in court and "type" in court:
-        court["kind"] = court["type"]
-    if court.get("type") != court.get("kind"):
-        raise ValueError("calibration court kind and type must agree")
-    document["court"] = court
+    from services.edge.calibration.intake import normalize_document
+
+    document = normalize_document(document)
     # An older accepted version is checked against the current schema as if current.
     problems = _schema_errors({**document, "contract_version": CONTRACT_VERSION})
     if problems:
@@ -96,20 +88,3 @@ def load_calibration(path: str | Path):
     except (OSError, ValueError) as exc:
         raise ValueError(f"cannot read calibration file: {exc}") from exc
     return validate_calibration(document)
-
-
-def run_calibration(document):
-    """Persist the projection and provenance needed for offline report regeneration."""
-    if document is None:
-        return None
-    return {
-        "calibration_id": document["calibration_id"],
-        "check_error_m": document["errors"]["check_mean_m"],
-        "homography_image_to_court": document["homography_image_to_court"],
-        "court": {
-            "type": document["court"].get("type", document["court"]["kind"]),
-            "length_m": document["court"]["length_m"],
-            "width_m": document["court"]["width_m"],
-        },
-        "image_size": document["image_size"],
-    }

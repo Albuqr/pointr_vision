@@ -179,14 +179,18 @@ def test_a_replay_with_a_saved_calibration_gives_the_live_runs_court_positions(c
         assert positions(replay_dir) == live_pos, cid
 
 
+@pytest.mark.parametrize("malformed", [False, True], ids=["singular", "malformed-block"])
 def test_a_singular_saved_calibration_replays_that_camera_uncalibrated_with_an_error_event(
-    clips, tmp_path
+    clips, tmp_path, malformed
 ):
     detector = Scripted(NEAR)
     out = record_group(clips, tmp_path, detector)
     live_cam2 = runs(out)["cam2"][0][0]["calibration"]
     (live, live_dir) = runs(out)["cam1"][0]
-    live["calibration"]["homography_image_to_court"] = [[1, 0, 0], [0, 0, 0], [0, 0, 1]]
+    if malformed:
+        live["calibration"] = []
+    else:
+        live["calibration"]["homography_image_to_court"] = [[1, 0, 0], [0, 0, 0], [0, 0, 1]]
     (live_dir / "run.json").write_text(json.dumps(live), encoding="utf-8")
 
     assert replay_group(out, detector) == {"cam1": "ended", "cam2": "ended"}
@@ -199,6 +203,8 @@ def test_a_singular_saved_calibration_replays_that_camera_uncalibrated_with_an_e
     events = load(folder / "session.json")["events"]
     [problem] = [e for e in events if "calibration not used" in (e.get("detail") or "")]
     assert problem["kind"] == "error"
+    assert replay["checks"][0]["result"] == "failed"
+    assert any(e["kind"] == "startup_check_failed" for e in events)
     assert found["cam2"][1][0]["calibration"] == live_cam2
 
 

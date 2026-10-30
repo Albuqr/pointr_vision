@@ -1,6 +1,6 @@
 # Data contracts
 
-Contract version: **0.24.0**. Any change bumps the version (minor for additive fields, major
+Contract version: **0.25.0**. Any change bumps the version (minor for additive fields, major
 for removals or meaning changes) and needs a `DECISIONS.md` entry. JSON Schemas in
 `services/edge/contracts/` are written from this file and tests check them against it (D-009).
 The schemas hold a semver pattern, not the number: `contract.validate` in `services/edge/contract.py`
@@ -65,7 +65,7 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
 
 ```json
 {
-  "contract_version": "0.24.0",
+  "contract_version": "0.25.0",
   "session_id": "uuid",
   "device_id": "uuid",
   "camera_id": "cam1 | null",
@@ -107,8 +107,9 @@ session). The video is raw (no annotations) at a constant frame rate, the source
 frame k is at k / fps, which is `frames.csv` `t_video`. A frame the recorder did not write (a full
 queue, a failed writer, a frame of another size) has an empty `t_video`. A replay run
 (`mode: replay`) adds a run to the session and leaves `recording` alone: in `session.json` only
-`runs` grows, plus an `interrupted` or `error` event whose `detail` starts with `replay <run_id>:`
-when the replay did not end cleanly (D-042); the replay's other events are printed, not written.
+`runs` grows, plus `interrupted`, `error` or `startup_check_failed` events whose `detail` starts
+with `replay <run_id>:` when the replay did not end cleanly or calibration intake failed
+(D-042, D-068); the replay's other events are printed, not written.
 A replay of a bare video file starts a new session with `recording` disabled.
 A replay of a group (0.20.0, D-060: `--replay <group_id>`) adds one replay run, as above, to the session of
 every camera whose `session.json` has that `group_id`; section 3 `group` says what those runs share.
@@ -139,7 +140,7 @@ calibration used by this session and records its mean held-out check residual in
 
 ```json
 {
-  "contract_version": "0.24.0",
+  "contract_version": "0.25.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "mode": "live | replay",
@@ -203,11 +204,16 @@ as its timestamp (D-016). `tracker.params` records the effective installed track
 `calibration` is `null` when uncalibrated. Otherwise it records the calibration ID, mean held-out
 check residual, court type and bounds, projection matrix and image size used by this run. Keeping the
 projection in `run.json` permits offline report regeneration after later recalibration. The
-loaded calibration is rejected before processing if saved image dimensions differ from the opened
-capture dimensions. If a later frame has another size, the run logs an `error` event and writes
+calibration is refused at source open if it is unreadable, belongs to another camera, or its saved
+image dimensions differ from the opened capture dimensions. The camera records uncalibrated and
+continues normally, with a failed calibration check and a startup_check_failed event (0.25.0, D-068).
+If the first processed frame instead differs from an accepted calibration, that camera ends in error
+(D-059): the source changed size after its open-time check. If a later frame has another size, the run logs an `error` event and writes
 empty calibrated positions for its tracks; the homography is used again only when frames return to
 the saved dimensions. The HTTP preview also suppresses the court overlay on a differently sized
 frame.
+A single-session replay uses the first (live) run's calibration unless `--calibration` explicitly
+replaces it. A refused replacement records a failed check and replays uncalibrated.
 `t0_mono` (0.11.0, D-041) is `time.perf_counter()` taken together with `t0_wall`: the run's `t0` on
 the PC clock, `null` until capture starts. A time `t` in this run's CSV files is `t0_mono + t` on the PC
 clock; sensor events (section 12) and the fusion (section 15) use that.
@@ -217,8 +223,10 @@ clock; sensor events (section 12) and the fusion (section 15) use that.
 also written as a `startup_check_failed` session event. Of the checks only `calibration` is written so far
 (0.18.0, D-057): when the operator starts a camera uncalibrated after Studio refused its calibration, that
 camera's `checks` is `[{"check": "calibration", "result": "failed", "detail": <the refusal's message>, "t_wall": ...}]`
-and its session has a `startup_check_failed` event with `detail` `calibration: <the refusal's message>`; the
-camera's `tracks.csv` is then written as for any uncalibrated camera (section 5). `clock` (0.11.0, D-035) is `null` when no sensor
+and its session has a `startup_check_failed` event with `detail` `calibration: <the refusal's message>`;
+from 0.25.0 the same check and event record refusals detected by the edge at open or replay intake.
+An edge refusal additionally keeps an `error` event with `detail` `calibration not used: <reason>`.
+The uncalibrated camera's `tracks.csv` is then written as for any uncalibrated camera (section 5). `clock` (0.11.0, D-035) is `null` when no sensor
 and no latency test were used. `clock.domain` is always `perf_counter`: every process on the PC shares it.
 `clock.sensors` has one entry per rim sensor (up to two, one per rim) and is empty without a sensor. Their offsets are `t_pc - t_sensor` in seconds (add the offset to a
 sensor time to get PC time): `offset_start_s` is the first estimate of the run and `offset_end_s` the last;
@@ -415,7 +423,7 @@ One report per run, one per camera: there is no fusion across cameras.
 
 ```json
 {
-  "contract_version": "0.24.0",
+  "contract_version": "0.25.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "camera_id": "cam1 | null",
@@ -758,7 +766,7 @@ recorded video and is compared with `frames.csv` `t_video`; shots and tracks joi
 
 ```json
 {
-  "contract_version": "0.24.0",
+  "contract_version": "0.25.0",
   "fusion_id": "uuid",
   "group_id": "token",
   "created_at": "2026-12-01T18:50:00Z",

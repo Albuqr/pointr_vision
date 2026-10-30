@@ -1490,3 +1490,15 @@ this supersedes T7's original no-bump instruction. Counts remain null before fin
 Captured-frame accounting and calibration format are unchanged.
 
 \n
+## D-068: One calibration intake for every run and Studio (2026-10-30)
+
+Contract 0.25.0 records every edge-detected calibration refusal as a failed calibration
+startup check and startup_check_failed event, alongside the existing diagnostic error event.
+A source-open refusal (unreadable file, wrong camera, wrong dimensions) records uncalibrated
+and continues, including one camera; failed startup checks never block recording. A first
+processed frame with different dimensions still ends that camera (D-059): it contradicts
+the accepted open-time dimensions after setup, so retaining its calibrated run would hide
+a source change. Later resolution changes retain their existing per-frame suppression.
+Single-session replay defaults to the first live run's calibration, with an explicit
+--calibration taking precedence. Intake owns validation, alias normalization, runtime
+calibration and metadata conversion; Studio fit uses its document builder.

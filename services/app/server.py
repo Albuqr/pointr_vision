@@ -31,7 +31,6 @@ from services.edge.calibration.homography import fit_calibration
 from services.edge.calibration.render import projected_court_lines
 from services.edge.capture.sources import DEFAULT_CAPTURE_SIZE, SourceOpenError, open_source
 from services.edge.capture.types import SourceEnded
-from services.edge.contract import CONTRACT_VERSION
 from services.edge.launcher import Camera, ConfigError, Launcher, Options, parse_config
 from services.edge.reports.build import build_report
 from services.edge.session.folder import find_sessions, mark_interrupted, read_run, read_session
@@ -610,13 +609,9 @@ class Studio:
         result["projected_court_lines"] = projected_court_lines(
             result["homography_image_to_court"], court
         )
-        result["court"] = {
-            "kind": court.kind,
-            "type": court.kind,
-            "length_m": court.length_m,
-            "width_m": court.width_m,
-            "landmarks": court.landmarks,
-        }
+        from services.edge.calibration.intake import court_document
+
+        result["court"] = court_document(court)
         result["point_errors_m"] = []
         calibration_index = check_index = 0
         for point in points:
@@ -627,35 +622,18 @@ class Studio:
                 result["point_errors_m"].append(result["check_errors_m"][check_index])
                 check_index += 1
         if save:
-            residual_iter = iter(result["point_errors_m"])
-            document = {
-                "contract_version": CONTRACT_VERSION,
-                "calibration_id": str(uuid.uuid4()),
-                "camera_id": camera_id,
-                "created_at": dt.datetime.now(dt.UTC).isoformat().replace("+00:00", "Z"),
-                "court": result["court"],
-                "image_size": {
-                    "width": cached["image"].shape[1],
-                    "height": cached["image"].shape[0],
-                },
-                "homography_image_to_court": result["homography_image_to_court"],
-                "points": [
-                    {
-                        "image_px": [float(v) for v in p["image_px"]],
-                        "court_m": [float(v) for v in p["court_m"]],
-                        "role": p["role"],
-                        "residual_m": next(residual_iter),
-                    }
-                    for p in points
-                ],
-                "errors": {
-                    key: result[key]
-                    for key in ("calibration_mean_m", "check_mean_m", "check_max_m")
-                },
-                "max_check_error_m": float(payload.get("max_check_error_m", 0.5)),
-                "forced": result["forced"],
-                "audit_frame": "frame.jpg",
-            }
+            from services.edge.calibration.intake import build_document
+
+            document = build_document(
+                camera_id=camera_id,
+                court=court,
+                image_size=cached["image"].shape[1::-1],
+                points=points,
+                fit=result,
+                max_check_error_m=float(payload.get("max_check_error_m", 0.5)),
+                calibration_id=str(uuid.uuid4()),
+                created_at=dt.datetime.now(dt.UTC).isoformat().replace("+00:00", "Z"),
+            )
             try:
                 path = self.calibrations.save(document, cached["jpeg"])
             except (OSError, ValueError) as exc:

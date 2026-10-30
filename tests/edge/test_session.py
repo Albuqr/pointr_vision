@@ -175,9 +175,7 @@ def test_calibrated_run_writes_metre_positions_and_provenance(monkeypatch, tmp_p
     assert tracks[1]["in_court"] == "true"
 
 
-def test_calibration_image_size_mismatch_is_refused_before_session(
-    monkeypatch, tmp_path, clips, capsys
-):
+def test_calibration_image_size_mismatch_records_uncalibrated(monkeypatch, tmp_path, clips, capsys):
     calibration = load(ROOT / "tests/fixtures/contracts/calibration.example.json")
     calibration["camera_id"] = "cam1"
     path = tmp_path / "calibration.json"
@@ -196,12 +194,16 @@ def test_calibration_image_size_mismatch_is_refused_before_session(
         str(path),
         "--no-detect",
     )
-    assert result == EXIT_CAPTURE_ERROR
+    assert result == 0
     assert (
         "calibration image size 640x480 differs from capture size 640x360"
-        in capsys.readouterr().err
+        in capsys.readouterr().out
     )
-    assert not out.exists()
+    session, run, _, _ = session_files(out)
+    assert session["status"] == "ended" and run["calibration"] is None
+    assert run["checks"][0]["check"] == "calibration"
+    assert run["checks"][0]["result"] == "failed"
+    assert any(e["kind"] == "startup_check_failed" for e in session["events"])
 
 
 def test_calibration_requires_matching_camera_id(monkeypatch, tmp_path, clips, capsys):
@@ -228,9 +230,12 @@ def test_calibration_requires_matching_camera_id(monkeypatch, tmp_path, clips, c
             str(path),
             "--no-detect",
         )
-        assert result == EXIT_CAPTURE_ERROR
-        assert message in capsys.readouterr().err
-        assert not out.exists()
+        assert result == 0
+        assert message in capsys.readouterr().out
+        session, run, _, _ = session_files(out)
+        assert session["status"] == "ended" and run["calibration"] is None
+        assert run["checks"][0]["detail"].startswith(message)
+        assert run["checks"][0]["result"] == "failed"
 
 
 def test_run_metadata_records_effective_tracker_parameters():

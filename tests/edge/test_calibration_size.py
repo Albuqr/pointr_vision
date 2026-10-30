@@ -144,3 +144,138 @@ def test_idle_calibration_frame_is_captured_at_the_recorders_size(monkeypatch, t
 def test_recorder_default_size_is_the_shared_constant():
     args = cli.parse_args(["--source", "0"])
     assert (args.width, args.height) == DEFAULT_CAPTURE_SIZE
+
+
+def test_t8_unreadable_calibration_has_identical_single_and_group_checks(tmp_path, clips):
+    from services.edge import group_main
+
+    missing = tmp_path / "missing.json"
+    outputs = []
+    for grouped in (False, True):
+        out = tmp_path / ("group" if grouped else "single")
+        args = [
+            "--source",
+            str(clips["moving"]),
+            "--link",
+            "file",
+            "--camera-id",
+            "cam1",
+            "--calibration",
+            str(missing),
+            "--no-detect",
+            "--no-record",
+            "--out",
+            str(out),
+        ]
+        code = (
+            group_main.main([json.dumps(args + ["--group-id", "g1"])])
+            if grouped
+            else cli.main(args)
+        )
+        assert code == 0
+        session, run, _, _ = session_files(out)
+        assert session["status"] == "ended" and run["calibration"] is None
+        checks = [{k: v for k, v in check.items() if k != "t_wall"} for check in run["checks"]]
+        events = [(event["kind"], event["detail"]) for event in session["events"]]
+        assert checks[0]["result"] == "failed"
+        assert [kind for kind, _ in events] == ["error", "startup_check_failed"]
+        outputs.append((checks, events))
+    assert outputs[0] == outputs[1]
+
+
+def test_t8_session_replay_uses_live_calibration_and_explicit_override(tmp_path, clips):
+    import uuid
+
+    out = tmp_path / "sessions"
+    path = calibration_file(tmp_path)
+    original = json.loads(path.read_text(encoding="utf-8"))
+    assert (
+        cli.main(
+            [
+                "--source",
+                str(clips["moving"]),
+                "--link",
+                "file",
+                "--camera-id",
+                "cam1",
+                "--calibration",
+                str(path),
+                "--no-detect",
+                "--out",
+                str(out),
+            ]
+        )
+        == 0
+    )
+    [folder] = [p for p in out.iterdir() if p.is_dir()]
+    override_id = str(uuid.uuid4())
+    path.write_text(json.dumps({**original, "calibration_id": override_id}), encoding="utf-8")
+    for explicit, expected in (
+        (False, original["calibration_id"]),
+        (True, override_id),
+        (False, original["calibration_id"]),
+    ):
+        args = ["--replay", str(folder), "--no-detect", "--out", str(out)]
+        assert cli.main(args + (["--calibration", str(path)] if explicit else [])) == 0
+        session = json.loads((folder / "session.json").read_text(encoding="utf-8"))
+        run = json.loads(
+            (folder / "runs" / session["runs"][-1] / "run.json").read_text(encoding="utf-8")
+        )
+        assert run["calibration"]["calibration_id"] == expected
+
+
+def test_t8_malformed_replay_calibration_is_a_persisted_failed_check(tmp_path, clips):
+    out = tmp_path / "sessions"
+    assert (
+        cli.main(
+            [
+                "--source",
+                str(clips["moving"]),
+                "--link",
+                "file",
+                "--camera-id",
+                "cam1",
+                "--no-detect",
+                "--out",
+                str(out),
+            ]
+        )
+        == 0
+    )
+    [folder] = [p for p in out.iterdir() if p.is_dir()]
+    session = json.loads((folder / "session.json").read_text(encoding="utf-8"))
+    live_path = folder / "runs" / session["runs"][0] / "run.json"
+    live = json.loads(live_path.read_text(encoding="utf-8"))
+    live_path.write_text(json.dumps({**live, "calibration": []}), encoding="utf-8")
+    assert cli.main(["--replay", str(folder), "--no-detect", "--out", str(out)]) == 0
+    session = json.loads((folder / "session.json").read_text(encoding="utf-8"))
+    run = json.loads(
+        (folder / "runs" / session["runs"][-1] / "run.json").read_text(encoding="utf-8")
+    )
+    assert run["calibration"] is None
+    assert run["checks"][0]["result"] == "failed"
+    assert {e["kind"] for e in session["events"]} == {"error", "startup_check_failed"}
+    assert all(run["run_id"] in e["detail"] for e in session["events"])
+
+
+def test_t8_unreadable_live_run_refuses_replay_before_source_open(monkeypatch, tmp_path, clips):
+    out = tmp_path / "sessions"
+    assert (
+        cli.main(
+            ["--source", str(clips["moving"]), "--link", "file", "--no-detect", "--out", str(out)]
+        )
+        == 0
+    )
+    [folder] = [p for p in out.iterdir() if p.is_dir()]
+    session = json.loads((folder / "session.json").read_text(encoding="utf-8"))
+    (folder / "runs" / session["runs"][0] / "run.json").write_text("[]", encoding="utf-8")
+
+    def unexpected_open(self):
+        raise AssertionError("a damaged live run must be refused before opening the replay source")
+
+    monkeypatch.setattr(cli.FileSource, "open", unexpected_open)
+    assert (
+        cli.main(["--replay", str(folder), "--no-detect", "--out", str(out)])
+        == cli.EXIT_OPEN_FAILED
+    )
+    assert len(json.loads((folder / "session.json").read_text(encoding="utf-8"))["runs"]) == 1
