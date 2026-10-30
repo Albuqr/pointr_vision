@@ -1369,3 +1369,18 @@ the latest cross-camera link. A camera of a group run of two or more cameras wit
 0.19.0 and 0.20.0 stay loadable (the format is unchanged). Any merge by appearance is low confidence until R2a-A5 records its
 accuracy; teammates in the same kit and of similar height will be confused.
 **Status.** Accepted.
+
+## D-062 · 2026-10-30 · Targeted tests; the full suite runs only on request
+**Context.** The pre-commit hook ran ruff and the default suite minus the recording and replay files on every commit
+that was not Markdown-only. On 2026-10-30 a commit with no Python in it (the request-logger dev tool) ran it for
+239 s and was refused by one failure, `tests/edge/test_launcher.py::test_a_child_ignores_ctrl_break_so_only_the_launcher_stops_it`,
+which passed when run alone. Test runs were taking most of each development batch. CI already runs the full
+suite on every push and pull request.
+**Decision.** While working, the agent runs only the test files for what changed and for the modules that import it,
+and names them; when no Python changed it runs none. The full suite runs only when the developer asks for it, once at
+the end of a run, sprint or session; phase gates (`docs/GATES.md` step 2) are such a request. The pre-commit hook
+keeps the `.env` refusal and runs ruff on the staged `.py` files only.
+**Consequences.** A change that breaks code reached only indirectly (a module not found by its imports, a test that
+runs code through a subprocess string) is caught later, by CI or the end-of-session run, not before the commit.
+Supersedes the hook comment's "medium run" and the CLAUDE.md line "Run both before declaring anything done".
+**Status.** Accepted.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Pre-commit gate (enable once per clone: git config core.hooksPath .githooks).
-# A medium run while the architecture changes; CI runs the full suite on every push.
+# Cheap checks only; tests are targeted while working and the full suite runs on request (D-062).
 set -euo pipefail
 
 # 1. Never commit secrets files.
@@ -9,21 +9,10 @@ if git diff --cached --name-only | grep -E '(^|/)\.env(\.testkit)?$' >/dev/null;
   exit 1
 fi
 
-# 2. A commit that only touches Markdown skips lint and tests; CI still runs them on push.
-staged=$(git diff --cached --name-only --diff-filter=ACMRD)
-if [[ -n "$staged" ]] && ! grep -v '\.md$' <<<"$staged" >/dev/null; then
-  echo "pre-commit: Markdown only, skipping lint and tests"
-  exit 0
-fi
-
-# 3. Lint, then the default tests minus R1's recording and replay files (about 2 of the
-#    suite's 5.5 minutes on the dev notebook, measured 2026-10-28). Run those three yourself when touching recording
-#    or replay.
+# 2. Lint the staged Python files; nothing else to check when none are staged.
+mapfile -t staged_py < <(git diff --cached --name-only --diff-filter=ACMR -- '*.py')
+[[ ${#staged_py[@]} -eq 0 ]] && exit 0
 py=python
 [[ -x .venv/Scripts/python ]] && py=.venv/Scripts/python
 [[ -x .venv/bin/python ]] && py=.venv/bin/python
-"$py" -m ruff check services tests
-"$py" -m pytest -q -p no:cacheprovider \
-  --ignore=tests/edge/test_recorder.py \
-  --ignore=tests/edge/test_replay.py \
-  --ignore=tests/edge/test_record_live.py
+"$py" -m ruff check "${staged_py[@]}"

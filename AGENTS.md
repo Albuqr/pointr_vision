@@ -16,6 +16,8 @@ essential rules available to every coding agent; it does not replace `CLAUDE.md`
   events. Do not silently drop data.
 - Add tests with every change. Default tests must not require a camera, model weights, or
   network access; mark any exceptional requirements explicitly.
+- Run targeted tests: the test files for what changed and for its importers. The full suite
+  runs only when the developer asks (D-062).
 - Ask before adding dependencies not listed in the phase file.
 - Privacy: never commit sessions, recordings, calibration images, or real footage.
 - Git: use explicit `git add <file>` commands, never `git add .`; make separate commits
