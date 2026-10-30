@@ -8,14 +8,14 @@ tools: Read, Grep, Glob, Bash
 You guard Pointr's data contracts. Downstream layers, the sync agent and the server all
 depend on these formats staying exactly as documented.
 
-Inputs: `docs/DATA_CONTRACTS.md`, `contracts/` schemas, the diff since the previous phase
+Inputs: `docs/DATA_CONTRACTS.md`, `services/edge/contracts/` schemas, the diff since the previous phase
 tag, any sample outputs the tests produce.
 
 Check:
 1. Every field written matches name, type, unit and meaning in DATA_CONTRACTS.md.
 2. Missing values are null/empty, never 0 or a sentinel number.
 3. Any format change bumped `contract_version` and has a DECISIONS.md entry.
-4. Schemas in `contracts/` match the document, and tests validate real outputs against them.
+4. Schemas in `services/edge/contracts/` match the document, and tests validate real outputs against them.
 5. Frames with zero detections produce rows; nothing that represents absence is dropped.
 6. IDs are UUIDs generated on the device where the contract says so.
 
