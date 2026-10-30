@@ -226,3 +226,21 @@ def test_T2_recovery_preserves_malformed_unrelated_fields_and_checks_current_sta
     assert recovered["runs"] == {} and recovered["source"] == ["damaged"]
     assert mark_interrupted(snapshot) == ()  # a stale snapshot must not add a second event
     assert len(json.loads(file.read_text(encoding="utf-8"))["events"]) == 1
+
+
+def test_T2_strict_replay_refuses_malformed_recording_path(tmp_path):
+    from services.edge.replay.resolve import ReplayError, resolve_replay
+
+    (tmp_path / "session.json").write_text(
+        json.dumps(
+            {
+                "recording": {"path": ["video.mkv"]},
+                "runs": [],
+                "events": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert read_session(tmp_path).problems
+    with pytest.raises(ReplayError, match="session damaged"):
+        resolve_replay(str(tmp_path), tmp_path.parent)
