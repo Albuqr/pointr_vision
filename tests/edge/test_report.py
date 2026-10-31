@@ -647,11 +647,11 @@ def test_nonsense_thresholds_are_refused(tmp_path, args):
 
 
 def test_a_report_interrupted_by_ctrl_c_keeps_the_session_exit_code(monkeypatch, capsys):
-    from services.edge import main as app
+    from services.edge.run import report
 
     def interrupted(run_dir):
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(app, "write_report", interrupted)
-    app.print_report("x")  # must not raise
+    monkeypatch.setattr(report, "write_report", interrupted)
+    report.print_report("x")  # must not raise
     assert "report interrupted" in capsys.readouterr().err
