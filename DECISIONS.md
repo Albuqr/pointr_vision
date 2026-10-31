@@ -1502,3 +1502,18 @@ a source change. Later resolution changes retain their existing per-frame suppre
 Single-session replay defaults to the first live run's calibration, with an explicit
 --calibration taking precedence. Intake owns validation, alias normalization, runtime
 calibration and metadata conversion; Studio fit uses its document builder.
+
+## D-069: Device and model load, and the stop policy, each written once (2026-10-30)
+
+services/edge/run/perception.py loads the device and model for single camera, group and group
+replay. A load failure prints the event line (stdout, no t0) and the `error:` line (stderr) on
+every path, so Studio shows the reason for one camera as it did for a group (closes B3).
+services/edge/run/stop.py holds the stop request, the Ctrl+C hold and ignore helpers and one
+table from (Studio stop or not, session open or not) to the event, final status and exit
+code: Studio's stop ends `ended` with a `stopped` event and exit 0, any other stop ends
+`interrupted` with exit 130, and with no session yet there is only the event. main, group_main,
+run_group and the group replay use it, and the group replay now passes Studio's stop through,
+so it no longer ends `interrupted` (closes B4 for the replay path too). A group-replay stop
+before any session opens re-raises to main's pre-session end instead of returning 130 quietly.
+main.py re-exports the moved names until T12 so the tests that replace them on that module keep
+working. No contract change.
