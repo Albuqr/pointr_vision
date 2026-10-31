@@ -188,13 +188,12 @@ def test_half_court_calibration_schema_accepts_type_and_bounds():
     assert validate_calibration(half)["court"]["type"] == "fiba_half"
 
 
-def test_saved_half_court_calibration_rejects_fit_points_clustered_in_the_key(tmp_path):
+def test_saved_half_court_calibration_with_fit_points_in_the_key_loads(tmp_path):
     saved = half_calibration_for(half_floor_points(clustered=True))
     path = tmp_path / "clustered-half-calibration.json"
     path.write_text(json.dumps(saved), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="20%.*fit points too close together"):
-        load_calibration(path)
+    assert load_calibration(path)["court"]["type"] == "fiba_half"  # no coverage rule (D-070)
 
 
 def test_saved_files_contain_only_schema_keys_even_if_the_client_sends_more(tmp_path):

@@ -80,9 +80,9 @@ sideline/baseline corner and aim both diagonally so the baseline and midcourt li
 Calibrate each camera separately after mounting. Select **Half court**; click the visible baseline
 corners (x=0) and midcourt-line corners (x=14) as the four fit points. The diagram highlights
 these anchors. Use two separate visible lane intersections or measured floor marks as held-out
-checks. Keep the fit points spread over at least 20% of the half-court area; a key-only cluster is
-rejected because it does not constrain the rest of the floor. If a recommended corner is hidden,
-use a measured floor mark with its actual coordinates. Keep out-of-court positions in the report;
+checks. A camera that sees only part of the half may use the landmarks it sees, as long as they are
+not collinear or bunched (D-070); the check points report how well they hold. If a recommended
+corner is hidden, use a measured floor mark with its actual coordinates. Keep out-of-court positions in the report;
 the calibration does not clamp them.
 
 **Tape-mark check.** Before recording, place tape marks on the floor 0.5 m in from the sideline,

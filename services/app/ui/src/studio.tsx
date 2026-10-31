@@ -330,15 +330,6 @@ export default function StudioApp() {
   // the diagram and the snap points come from the server's court model, the one the fit uses
   const landmarks: Record<string, [number, number]> =
     fit?.court.landmarks ?? geometry?.landmarks ?? {};
-  const fitCourtPoints = points.filter((point) => point.role === "calibration");
-  const fitXs = fitCourtPoints.map((point) => point.court_m[0]);
-  const fitYs = fitCourtPoints.map((point) => point.court_m[1]);
-  const fitAreaCoverage =
-    courtKind === "fiba_half" && fitXs.length >= 4
-      ? ((Math.max(...fitXs) - Math.min(...fitXs)) *
-          (Math.max(...fitYs) - Math.min(...fitYs))) /
-        (14 * 15)
-      : null;
   const halfAnchors = new Set([
     "corner_near_left",
     "corner_near_right",
@@ -1524,14 +1515,6 @@ export default function StudioApp() {
                       )}
                   </div>
                 </div>
-                {fitAreaCoverage !== null && fitAreaCoverage < 0.2 && (
-                  <p className="half-court-warning" role="alert">
-                    Fit points cover {(fitAreaCoverage * 100).toFixed(0)}% of
-                    the 210 m² half-court area; at least 20% is required. fit
-                    points too close together, add the baseline corners or
-                    midcourt line points or measured floor marks.
-                  </p>
-                )}
                 <div className="point-tools">
                   <div>
                     <b>{points.length} points</b>

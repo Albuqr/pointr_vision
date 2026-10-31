@@ -1517,3 +1517,28 @@ so it no longer ends `interrupted` (closes B4 for the replay path too). A group-
 before any session opens re-raises to main's pre-session end instead of returning 130 quietly.
 main.py re-exports the moved names until T12 so the tests that replace them on that module keep
 working. No contract change.
+
+## D-070: A half-court camera that sees part of the half calibrates (2026-10-30, contract 0.26.0)
+
+Phase 03 B12 (#19). The owner saw Studio refuse to save a camera calibrated only from the court
+points it sees, again on 2026-10-30 after B13. Cause, reproduced through `PUT
+/api/cameras/<id>/calibration` with a synthetic sideline camera: the half-court coverage rule of
+D-032. With court kind `fiba_half`, the fit points' bounding box had to cover at least 20% of the
+210 m2 half court. The four key corners cover 14% (4.9 m x 5.8 m), so a camera that sees only the
+key was refused with "fit points cover 14% of the half-court area". The same points saved with
+`fiba_full` and with `custom`, which never had the rule, so the refusal depended on the court kind
+the operator picked, not on the geometry. The other rules (D-050's image rule, the condition
+number) were not the cause: measured cond(H) was about 7e3 to 3e4 for half views at 1280 to 3840 px
+wide, against a limit of 1e7 (synthetic cameras only).
+
+Decision (owner, 2026-10-30, option 1): remove the coverage rule. D-032's sentence "Half-court
+fits must also cover at least 20% of its 210 m2 area" is superseded; its other parts stand. The
+rules that refuse a degenerate fit stay: fit points collinear or bunched on the court (spread 0.1),
+no four fit points with no three within 3 px of one line in the image, duplicate points, condition
+number, horizon, and a limit above 2.0 m; Save anyway still overrides none of them. The check
+points still measure the result. Studio drops its coverage warning and keeps the anchor advice.
+
+Contract 0.26.0 changes no field or file format: only the set of fit-point sets the fit accepts
+grows (minor, as D-050 and D-032's rule were). A calibration file saved under 0.25.0 or earlier
+still loads, as every rule it passed is still applied. `check_point_set` and `fit_calibration`
+lose their `court_dimensions` argument, which only fed the removed rule. `ui/dist` was rebuilt.

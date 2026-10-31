@@ -23,7 +23,6 @@ MIN_SPREAD = 0.1  # sqrt(minor / major variance) of the fit points on the court
 # Four fit points with no three nearer than this to one line in the image (D-050). Tuned on
 # synthetic views with 1 px click noise, not taken from a source.
 MIN_IMAGE_OFF_LINE_PX = 3.0
-MIN_HALF_COURT_COVERAGE = 0.2  # fit-point bounding box / full 14 x 15 m half-court area
 COND_LIMIT = 1e7  # a larger condition number is treated as singular or numerically unstable
 
 
@@ -148,7 +147,7 @@ def _best_off_line_px(points):
     )
 
 
-def check_point_set(points, court_dimensions=None):
+def check_point_set(points):
     """Hold-out integrity. A check point only tests the fit if it is a different physical mark
     from every fit point, so no two points may coincide; the fit points must be spread out (not
     collinear, not bunched) on the court, and four of them must have no three collinear in the
@@ -179,17 +178,6 @@ def check_point_set(points, court_dimensions=None):
             f"point at least {MIN_IMAGE_OFF_LINE_PX:g} px off the line through two others "
             f"(best {off_line:.1f} px); move a point off the line its neighbours make"
         )
-    if court_dimensions is not None and tuple(map(float, court_dimensions)) == (14.0, 15.0):
-        court_points = np.asarray([point["court_m"] for point in fit], dtype=np.float64)
-        area_fraction = (
-            float(np.ptp(court_points[:, 0]) * np.ptp(court_points[:, 1])) / (14.0 * 15.0)
-        )
-        if area_fraction < MIN_HALF_COURT_COVERAGE:
-            raise ValueError(
-                f"fit points cover {area_fraction:.0%} of the half-court area; at least "
-                f"{MIN_HALF_COURT_COVERAGE:.0%} coverage is required: fit points too close "
-                "together, add the baseline corners or midcourt line points or measured floor marks"
-            )
 
 
 class CalibrationRefused(ValueError):
@@ -202,8 +190,7 @@ class CalibrationRefused(ValueError):
 
 
 def fit_calibration(
-    points, max_check_error_m=0.5, save_anyway=False, enforce_limit=True, require_checks=True,
-    court_dimensions=None,
+    points, max_check_error_m=0.5, save_anyway=False, enforce_limit=True, require_checks=True
 ):
     if not isinstance(points, list):
         raise ValueError("calibration points must be a list")
@@ -234,7 +221,7 @@ def fit_calibration(
         raise ValueError(
             f"maximum check error must be greater than zero and at most {MAX_CHECK_ERROR_LIMIT_M} m"
         )
-    check_point_set(points, court_dimensions)
+    check_point_set(points)
     image_points = np.asarray([point["image_px"] for point in fit], dtype=np.float64)
     court_points = np.asarray([point["court_m"] for point in fit], dtype=np.float64)
     if image_points.shape != (len(fit), 2) or court_points.shape != (len(fit), 2):

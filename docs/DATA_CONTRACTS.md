@@ -1,6 +1,6 @@
 # Data contracts
 
-Contract version: **0.25.0**. Any change bumps the version (minor for additive fields, major
+Contract version: **0.26.0**. Any change bumps the version (minor for additive fields, major
 for removals or meaning changes) and needs a `DECISIONS.md` entry. JSON Schemas in
 `services/edge/contracts/` are written from this file and tests check them against it (D-009).
 The schemas hold a semver pattern, not the number: `contract.validate` in `services/edge/contract.py`
@@ -65,7 +65,7 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
 
 ```json
 {
-  "contract_version": "0.25.0",
+  "contract_version": "0.26.0",
   "session_id": "uuid",
   "device_id": "uuid",
   "camera_id": "cam1 | null",
@@ -140,7 +140,7 @@ calibration used by this session and records its mean held-out check residual in
 
 ```json
 {
-  "contract_version": "0.25.0",
+  "contract_version": "0.26.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "mode": "live | replay",
@@ -423,7 +423,7 @@ One report per run, one per camera: there is no fusion across cameras.
 
 ```json
 {
-  "contract_version": "0.25.0",
+  "contract_version": "0.26.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "camera_id": "cam1 | null",
@@ -490,10 +490,10 @@ selected court type and dimensions in the nested `court.type`, `court.length_m` 
 to `court.type`; older files with only `court.kind` remain valid. Its landmarks are the `fiba_full` landmarks at x <= 14 m,
 with identical coordinates, plus corners and centre on x=14 m. Out-of-bounds projected points
 remain in metres and have `in_court=false`. The fit requires spread >= 0.1 in court
-coordinates (since 0.13.0, no three-collinear in the image instead of an image spread; section 9)
-and, for a half court, fit-point bounding-box coverage >= 20% of the 210 m² court
-area. This area threshold rejects fits clustered in a small region such as the key while allowing
-baseline and midcourt corners to span the floor.
+coordinates (since 0.13.0, no three-collinear in the image instead of an image spread; section 9).
+Until 0.25.0 a half court also required the fit points' bounding box to cover >= 20% of the
+210 m² court area; 0.26.0 (D-070) removes that rule, so a half-court camera that sees only
+part of the half, such as the key, is calibrated from the points it sees, as for `fiba_full`.
 
 `report.json` has the same `court` object as `run.json`, or `null` when uncalibrated. Session
 calibration metadata includes the court object with its calibration id and check error.
@@ -566,7 +566,8 @@ be collinear in the image: at least four of them have no three within 3 px of on
 D-050). The image rule is not a spread ratio, because perspective squashes a camera's view of
 part of the court into a thin band of the image without making the fit degenerate; any visible
 subset of landmarks that meets these rules may be used, so a camera that sees only part of the
-court is calibrated from the points it sees. The configured maximum check mean is at most 2.0 m.
+court is calibrated from the points it sees, whichever court kind is chosen (0.26.0, D-070: no
+half-court area-coverage rule). The configured maximum check mean is at most 2.0 m.
 Saving anyway can override the check-mean threshold only, not these minimums, the point rules or the homography checks
 (finite, invertible, condition number at most 1e7, every point in front of the horizon). A loader
 recomputes the residuals, the mean errors and `forced` from the homography and the points and
@@ -766,7 +767,7 @@ recorded video and is compared with `frames.csv` `t_video`; shots and tracks joi
 
 ```json
 {
-  "contract_version": "0.25.0",
+  "contract_version": "0.26.0",
   "fusion_id": "uuid",
   "group_id": "token",
   "created_at": "2026-12-01T18:50:00Z",

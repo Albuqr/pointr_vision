@@ -72,7 +72,7 @@ def test_an_error_limit_above_two_metres_is_refused(client_and_token):
     assert response.status_code == 422 and "at most 2.0" in response.text
 
 
-def test_half_court_fit_accepts_baseline_and_midcourt_and_refuses_key_cluster(client_and_token):
+def test_half_court_fit_accepts_baseline_and_midcourt_and_a_key_cluster(client_and_token):
     client, token = client_and_token
     bounds = {"court_kind": "fiba_half", "length_m": 14, "width_m": 15}
     spanning = [
@@ -101,5 +101,4 @@ def test_half_court_fit_accepts_baseline_and_midcourt_and_refuses_key_cluster(cl
     response = client.post(
         "/api/cameras/clip/calibration/fit", json=payload(token, clustered, **bounds)
     )
-    assert response.status_code == 422
-    assert "20%" in response.text and "fit points too close together" in response.text
+    assert response.status_code == 200, response.text  # no coverage rule since D-070

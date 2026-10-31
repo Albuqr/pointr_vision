@@ -160,24 +160,19 @@ def test_half_court_perspective_fit_checks_known_points_within_one_micrometre():
         point_at(0, 0), point_at(14, 0), point_at(14, 15), point_at(0, 15),
         point_at(7, 7.5, "check"), point_at(5.8, 5.05, "check"),
     ]
-    result = fit_calibration(source, court_dimensions=(14, 15))
+    result = fit_calibration(source)
     assert result["check_mean_m"] < 1e-6
     assert result["check_max_m"] < 1e-6
 
 
-def test_half_court_fit_rejects_key_cluster_and_accepts_baseline_to_midcourt():
+def test_a_fit_over_only_the_key_is_accepted_but_a_sliver_is_still_refused():
     key = [point(0, 5.8), point(5.8, 5.8), point(5.8, 9.2), point(0, 9.2)]
     key += [point(2, 6, "check"), point(3, 8, "check")]
-    message = (
-        "20%.*fit points too close together, add the baseline corners or midcourt line points "
-        "or measured floor marks"
-    )
-    with pytest.raises(ValueError, match=message):
-        fit_calibration(key, court_dimensions=(14, 15))
+    fit_calibration(key)  # 14% of a half court: no coverage rule since D-070
 
-    spanning = [point(0, 0), point(14, 0), point(14, 15), point(0, 15)]
-    spanning += [point(7, 7.5, "check"), point(5.8, 5.05, "check")]
-    fit_calibration(spanning, court_dimensions=(14, 15))
+    sliver = [point(0, 5.0), point(5, 5.1), point(10, 5.0), point(14, 5.1)]
+    with pytest.raises(ValueError, match="collinear or bunched"):
+        fit_calibration(sliver + key[4:])
 
 
 def test_in_court_uses_full_or_half_bounds_without_clamping_positions():
