@@ -1597,3 +1597,42 @@ a source or link error of a group is found before the model loads; a group's `So
 at open is exit 2 (a group replay's was exit 1); a Ctrl+C while a report is written no longer
 changes a group's exit code (main's rule); `--calibration-problem` is ignored when `--calibration`
 is given, as in main (a group recorded both).
+
+## D-072: Group replay follows the live matcher-call order, not group time (2026-10-31, contract 0.27.0)
+
+Amends D-060. Issue #94, decided by the owner: option A.
+
+**Context.** D-060 fed the replay's matcher in the live run's group time (`t0_mono + t_recv`),
+assuming the live cameras' processing threads called the matcher in receive order. They do not
+have to: each camera has its own thread, and one camera's frame can wait on the shared detector
+while the other camera's later frame passes. The matcher's result depends on the order of its
+calls (D-055), so the replay could link differently from the live run. It did: in a recorded run
+cam1 video frame 10 was received first but reached the matcher after cam2's frame 10; live gave
+`position`, the replay `unshared`. This showed as a flaky CI node of
+`test_group_replay.py::test_the_replays_shared_ids_equal_the_live_runs_on_the_same_frames`
+(`one-person`), twice. Sorting by receive time cannot fix it.
+
+**Decision.** The live group run numbers its matcher calls and records the number. `frames.csv`
+gets a column `match_seq`: the call's position among all the group run's matcher calls (one
+counter for the group, taken in the same critical section as the call, so the number is the
+order the matcher saw). It is empty for a frame that never reached the matcher. The replay
+processes the cameras' frames in `match_seq` order, one at a time. `live_group_time` still gives
+the time passed to the matcher; only the ordering key changes. A video frame whose live row has no
+`match_seq` is not processed (tracker and matcher), so the replay makes no matcher call, and its
+tracker sees no frame, that the live run did not. A frame the live run dropped was processed by the
+replay under D-060 (its Limits paragraph); it no longer is in a group replay. A live run from
+before 0.27.0 has no `match_seq`: its replay falls back to `t_recv` order for all cameras and writes a
+`replay_order_approximate` event in each session. `finish` and `close` of the order are unchanged.
+
+The counter lives in the group runner (a lock around number-and-call), not inside the matcher,
+so the `CrossCameraMatcher` Protocol and any other matcher keep working. The replay's own runs
+record their `match_seq` too, so the order can be compared with the live run's.
+
+**Rejected.** B, ordering by live `t_proc_end`: written after the matcher call, so two cameras can
+still swap. C, making the live run call the matcher in `t_recv` order: adds delay to the live run
+and is the biggest change.
+
+**Consequences.** Contract 0.27.0, additive: a `frames.csv` column and an event kind. The
+D-060 Limits paragraph no longer holds for runs from 0.27.0 on. Replays of older recordings keep
+the old, approximate behaviour and say so.
+**Status.** Accepted.

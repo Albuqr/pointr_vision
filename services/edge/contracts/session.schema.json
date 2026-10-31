@@ -107,7 +107,7 @@
               "source_open_failed", "source_lost", "source_recovered", "frozen_frames",
               "dark_frames", "writer_backlog", "recorder_backlog", "interrupted", "error",
               "camera_gap", "sensor_outage", "startup_check_failed", "rim_drift", "stopped",
-              "appearance_only"
+              "appearance_only", "replay_order_approximate"
             ]
           },
           "detail": {"type": ["string", "null"]}
