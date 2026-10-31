@@ -1584,11 +1584,11 @@ services.edge.main --source CLIP --link file --camera-id cam1 --device cpu --no-
 "--benchmark","20","--out","OUT"]'` on this branch. Processed fps, before: 2.29 2.19 2.17 2.15
 2.01 2.08 (mean 2.15); after: 2.24 2.12 2.13 2.20 1.99 2.02 (mean 2.12). App delay p50 ms,
 before: 462.6 490.3 490.6 502.6 526.4 510.5 (mean 497); after: 476.0 504.4 494.0 488.7 515.8
-522.3 (mean 500). The difference between the means (-1.4% fps) is smaller than the run-to-run
-spread of either side (2.01 to 2.29 before), and the sign of the pairs follows the order they ran
-in, so this run shows no cost of the group path that it can tell from noise on this machine. It
-does not show there is none, and it was a clip with no people, so the tracker and the
-appearance code (which the group of one skips) were never exercised. Raw output: PR body.
+522.3 (mean 500). Per pair the group path was lower in 5 of 6 (by 0.02 to 0.07 fps) and higher in
+one (0.05); the means differ by -1.4% fps and 3 ms p50, less than the spread of either side (2.01
+to 2.29 before). Six pairs cannot separate a cost of up to about 3% from noise on this machine,
+and do not show there is none. The clip had no people in it, so the tracker and the appearance
+code (which a group of one skips) were never exercised. Raw output: PR body.
 
 Behaviour changes on the wire (all documented in the PR): a group prints each camera's
 `source:`, `health:` and `versions:` lines and the `events={...}` count, as a single camera does;
