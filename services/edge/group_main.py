@@ -16,15 +16,15 @@ prints every camera's block; the preview window is for a single camera, not a gr
 import json
 import sys
 
-from services.edge.main import (  # noqa: F401
+from services.edge.run.args import parse_args
+from services.edge.run.execute import execute
+from services.edge.run.perception import (
     create_tracker,
     load_perception,
-    parse_args,
     resolve_device,
+    start_perception,
 )
-from services.edge.run.execute import execute
-from services.edge.run.perception import start_perception
-from services.edge.run.plan import PlanError, group_det_size, group_matcher, plan_from_args  # noqa: F401
+from services.edge.run.plan import PlanError, plan_from_args
 from services.edge.run.report import Reporter, print_event
 from services.edge.run.stop import StopRequest, stop_before_session, stop_on_stdin
 from services.edge.run.wait import benchmark, plain

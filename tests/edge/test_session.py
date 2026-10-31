@@ -17,10 +17,11 @@ from services.edge import contract
 from services.edge import main as cli
 from services.edge.capture.health import HealthConfig
 from services.edge.capture.types import SourceInfo
-from services.edge.main import EXIT_CAPTURE_ERROR, EXIT_INTERRUPTED, EXIT_OPEN_FAILED
 from services.edge.perception.loop import NO_DETECTIONS
 from services.edge.perception.types import Detections, TrackObs
-from services.edge.run import report
+from services.edge.run import report, wait
+from services.edge.run.meta import RunSettings, run_meta
+from services.edge.run.stop import EXIT_CAPTURE_ERROR, EXIT_INTERRUPTED, EXIT_OPEN_FAILED
 from services.edge.session import writer as writer_mod
 from services.edge.session.types import (
     FrameRecord,
@@ -58,6 +59,7 @@ def session_files(out: Path) -> tuple[dict, dict, list[dict], list[dict]]:
 def run_main(monkeypatch, out: Path, *args: str, detector=None) -> int:
     if detector is not None:
         monkeypatch.setattr(cli, "load_perception", lambda a, d: (detector, OneTrackPerDetection()))
+        monkeypatch.setattr(cli, "create_tracker", lambda a: OneTrackPerDetection())
     return cli.main([*args, "--out", str(out)])
 
 
@@ -256,8 +258,8 @@ def test_run_metadata_records_effective_tracker_parameters():
         }
 
     info = SourceInfo("camera", "0", 1280, 720, 30.0, "builtin")
-    run = cli.run_meta(
-        cli.RunSettings((1280, 720), None), info, HealthConfig(), Detector(), Tracker(), None
+    run = run_meta(
+        RunSettings((1280, 720), None), info, HealthConfig(), Detector(), Tracker(), None
     )
 
     assert run.tracker["params"] == Tracker.params
@@ -380,7 +382,7 @@ def test_writer_refuses_an_unsafe_camera_id(tmp_path, bad):
 
 def test_preview_window_is_named_after_the_camera(monkeypatch, tmp_path, clips):
     titles = []
-    monkeypatch.setattr(cli, "run_preview", lambda *a: titles.append(a[-1]))
+    monkeypatch.setattr(wait, "run_preview", lambda *a: titles.append(a[-1]))
     for extra in (["--camera-id", "cam7"], []):
         run_main(monkeypatch, tmp_path / "s", "--source", str(clips["moving"]), "--no-detect",
                  "--preview", *extra)  # fmt: skip

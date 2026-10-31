@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from services.edge import child_protocol as protocol
-from services.edge import main as cli
+from services.edge.run.stop import EXIT_OPEN_FAILED
 from tests.edge.test_cli import run_cli
 
 EDGE = Path(__file__).resolve().parents[2] / "services" / "edge"
@@ -48,7 +48,7 @@ def test_the_scan_sees_a_prefix_in_a_literal():
 
 def test_a_link_conflict_is_a_config_conflict_start_failure(clips, tmp_path):
     result = run_cli(tmp_path / "out", "--source", str(clips["moving"]), "--link", "usb")
-    assert result.returncode == cli.EXIT_OPEN_FAILED
+    assert result.returncode == EXIT_OPEN_FAILED
     assert "error: config_conflict: --link usb contradicts a file source" in result.stderr
     kind, _, reason = result.stderr.strip().removeprefix("error: ").partition(": ")
     assert protocol.parse(f"error: {kind}: {reason}")[1] == protocol.StartFailed(kind, reason)

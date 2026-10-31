@@ -17,7 +17,7 @@ import pytest
 from scripts import run_cameras as rc
 from services.edge import main as cli
 from services.edge.capture.capture import Capture
-from services.edge.main import EXIT_INTERRUPTED
+from services.edge.run.stop import EXIT_INTERRUPTED
 from services.edge.session.writer import mask_credentials
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -437,7 +437,7 @@ def test_watching_stdin_does_not_stall_a_dll_load():
     """A thread blocked in a read on stdin hung `import scipy` (the model load) in the main
     thread on Windows: the watcher must poll, not read."""
     code = (
-        "from services.edge.main import stop_on_stdin; stop_on_stdin();"
+        "from services.edge.run.stop import stop_on_stdin; stop_on_stdin();"
         "import scipy.special; print('imported')"
     )
     p = subprocess.Popen(
@@ -592,7 +592,7 @@ def test_a_child_ignores_ctrl_break_so_only_the_launcher_stops_it():
     """Ctrl+Break reaches a child in its own process group (Ctrl+C does not) and would kill it
     before it saves."""
     code = (
-        "import signal; from services.edge.main import stop_on_stdin; stop_on_stdin();"
+        "import signal; from services.edge.run.stop import stop_on_stdin; stop_on_stdin();"
         "print(signal.getsignal(signal.SIGBREAK) == signal.SIG_IGN)"
     )
     # stdin stays open until the child has printed, as the launcher keeps it: a closed pipe makes

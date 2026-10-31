@@ -10,7 +10,8 @@ import numpy as np
 import pytest
 
 from services.edge import main as cli
-from services.edge.main import EXIT_CAPTURE_ERROR, EXIT_OPEN_FAILED
+from services.edge.run import plan, report
+from services.edge.run.stop import EXIT_CAPTURE_ERROR, EXIT_OPEN_FAILED
 from services.edge.ui.preview import BANNERS, HUD_STRIP, TRACK_COLOUR, HudInfo, draw_hud
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -144,6 +145,8 @@ def test_draw_tracks_labels_each_track():
 
 def test_model_load_failure_is_an_error_event(monkeypatch):
     class NeverOpened:
+        kind = "camera"
+
         def open(self):
             raise AssertionError("the source must not open before the model loads")
 
@@ -151,9 +154,9 @@ def test_model_load_failure_is_an_error_event(monkeypatch):
         raise RuntimeError("weights download failed")
 
     printed = []
-    monkeypatch.setattr(cli, "open_source", lambda ref, size: NeverOpened())
+    monkeypatch.setattr(plan, "open_source", lambda ref, size: NeverOpened())
     monkeypatch.setattr(cli, "load_perception", no_network)
-    monkeypatch.setattr(cli, "print_event", lambda ev, t0: printed.append(ev))
+    monkeypatch.setattr(report, "print_event", lambda ev, t0, prefix="": printed.append(ev))
     assert cli.main(["--source", "0"]) == EXIT_CAPTURE_ERROR
     [ev] = printed
     assert ev.kind == "error"
@@ -163,13 +166,15 @@ def test_model_load_failure_is_an_error_event(monkeypatch):
 
 def run_failing_model_load(monkeypatch, capsys) -> tuple[int, str, str]:
     class NeverOpened:
+        kind = "camera"
+
         def open(self):
             raise AssertionError("the source must not open before the model loads")
 
     def no_network(args, device):
         raise RuntimeError("weights download failed")
 
-    monkeypatch.setattr(cli, "open_source", lambda ref, size: NeverOpened())
+    monkeypatch.setattr(plan, "open_source", lambda ref, size: NeverOpened())
     monkeypatch.setattr(cli, "load_perception", no_network)
     monkeypatch.setattr(cli, "resolve_device", lambda requested: ("cpu", None))
     code = cli.main(["--source", "0"])
@@ -286,12 +291,14 @@ def test_cli_prints_the_size_the_camera_delivers(monkeypatch, capsys):
 
 def test_cv2_error_on_open_exits_cleanly(monkeypatch, capsys):
     class Broken:
+        kind = "camera"
+
         def open(self):
             raise cv2.error("backend exploded")
 
     printed = []
-    monkeypatch.setattr(cli, "open_source", lambda ref, size: Broken())
-    monkeypatch.setattr(cli, "print_event", lambda ev, t0: printed.append(ev))
+    monkeypatch.setattr(plan, "open_source", lambda ref, size: Broken())
+    monkeypatch.setattr(report, "print_event", lambda ev, t0, prefix="": printed.append(ev))
     assert cli.main(["--source", "0", "--no-detect"]) == EXIT_OPEN_FAILED
     [ev] = printed
     assert ev.kind == "source_open_failed"
