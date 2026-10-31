@@ -1542,3 +1542,58 @@ Contract 0.26.0 changes no field or file format: only the set of fit-point sets 
 grows (minor, as D-050 and D-032's rule were). A calibration file saved under 0.25.0 or earlier
 still loads, as every rule it passed is still applied. `check_point_set` and `fit_calibration`
 lose their `court_dimensions` argument, which only fed the removed rule. `ui/dist` was rebuilt.
+
+## D-071: One run module: a group of one, and execute(plan) for group and group replay (2026-10-30)
+
+R2a follow-up T11 (#73, brief C2 steps 5-6, ADR 0007). `services/edge/run/plan.py` builds a
+`RunPlan` from parsed arguments before the model loads (`PlanError`, exit 2: a source that cannot
+be found, a link that contradicts its source, a replay target that cannot be replayed).
+`services/edge/run/execute.py` runs a plan with a stop request, a perception loader, a reporter
+(`Reporter`, plain or tagged, in `run/report.py`) and a waiter (`run/wait.py`: plain, a benchmark
+deadline, or the preview window on the main thread), and returns the exit code and each camera's
+final status. A camera is live, a replay into a recorded session, or a replay of a bare file into
+a new session (`GroupCamera.kind`). `group_main` and the group replay only parse, plan and call
+`execute`; `replay/group.py` keeps `resolve_group`, `plan_group_replay` and a thin `run_replay`.
+`run_meta`, `RunSettings`, the event, benchmark and report printing and the HTTP preview moved
+out of main.py (re-exported until T12). The single-camera `main.run` is not routed through
+`execute` yet (T12); it shares `calibration_offer` and `single_replay` with the planner.
+
+A group of one (`is_solo`: one camera that is not a group replay) has no matcher, no per-track
+appearance description and a null `group` block, so its links are `unshared` and its files are a
+single camera's; its lines are untagged. It also uses the detector and tracker directly, with no
+`SharedDetector` lock and no `CameraTracker`: there is nobody to share with, so the lock is
+absent rather than measured. A detector failure in a group of one is therefore the camera's own
+processing error (status `error`, one event), as for a single camera, not a `SharedCodeError`. A
+group of two or more is as ADR 0007 says: one process, one shared detector, a capture thread per
+camera. No contract change: a group of one writes `group: null` (§3).
+
+Every opened session gets a final status on every path. The Ctrl+C hold during setup is now
+released inside the `try` that ends the sessions, and the shutdown ignores further Ctrl+C
+presses (as main's did), so a stop that lands in either window cannot leave a session `running`.
+An HTTP preview that fails to start is a setup failure: the sessions already open end `error`,
+and a test pins it. Groups accept `--benchmark` (the longest any camera asks for ends the group;
+each camera prints its own block); the preview window stays single-camera.
+
+Speed of a single camera on the group path, measured (rule 5), not assumed. Same synthetic clip
+(640x360, 15 fps, 450 frames, no people in it), real RF-DETR Nano on CPU (this notebook, torch
+2.14.1+cpu, 4 threads, det-size 384), `--benchmark 20 --no-record`, six pairs run back to back, the
+first three before-then-after, the last three after-then-before. Before: `python -m
+services.edge.main --source CLIP --link file --camera-id cam1 --device cpu --no-record
+--benchmark 20 --out OUT` on d7562cf. After: `python -m services.edge.group_main
+'["--source","CLIP","--link","file","--camera-id","cam1","--device","cpu","--no-record",
+"--benchmark","20","--out","OUT"]'` on this branch. Processed fps, before: 2.29 2.19 2.17 2.15
+2.01 2.08 (mean 2.15); after: 2.24 2.12 2.13 2.20 1.99 2.02 (mean 2.12). App delay p50 ms,
+before: 462.6 490.3 490.6 502.6 526.4 510.5 (mean 497); after: 476.0 504.4 494.0 488.7 515.8
+522.3 (mean 500). The difference between the means (-1.4% fps) is smaller than the run-to-run
+spread of either side (2.01 to 2.29 before), and the sign of the pairs follows the order they ran
+in, so this run shows no cost of the group path that it can tell from noise on this machine. It
+does not show there is none, and it was a clip with no people, so the tracker and the
+appearance code (which the group of one skips) were never exercised. Raw output: PR body.
+
+Behaviour changes on the wire (all documented in the PR): a group prints each camera's
+`source:`, `health:` and `versions:` lines and the `events={...}` count, as a single camera does;
+a group replay now prints those lines and the `session ended` and summary lines it did not print;
+a source or link error of a group is found before the model loads; a group's `SourceOpenError`
+at open is exit 2 (a group replay's was exit 1); a Ctrl+C while a report is written no longer
+changes a group's exit code (main's rule); `--calibration-problem` is ignored when `--calibration`
+is given, as in main (a group recorded both).

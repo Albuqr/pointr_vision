@@ -1,5 +1,6 @@
 """The one process of a group (R2a 04, ADR 0007): what services.edge.main does for one camera,
-for every camera of a group, through the group runner. The launcher starts it:
+for every camera of a group. It parses the cameras' arguments, plans the run and executes it
+(services/edge/run/). The launcher starts it:
 
     python -m services.edge.group_main CAMERA_ARGS [CAMERA_ARGS ...]
 
@@ -7,7 +8,9 @@ Each CAMERA_ARGS is a JSON list: the arguments services.edge.main would get for 
 (launcher.camera_args). The settings of the one detector (device, threshold, det-size) and the
 stop channel come from the cameras' arguments. Every output line about one camera starts with
 "[camera_id] ", so the launcher can tell the cameras apart; lines about the group (device, model
-load, a failure to start) have no prefix.
+load, a failure to start) have no prefix. One camera is a group of one (D-071): its lines are
+untagged and its files are a single camera's. --benchmark SECONDS ends the group after SECONDS and
+prints every camera's block; the preview window is for a single camera, not a group.
 """
 
 import json
