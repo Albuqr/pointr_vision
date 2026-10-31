@@ -5,13 +5,13 @@ and the `error:` line on stderr (what Studio shows)."""
 
 import argparse
 import dataclasses
-import sys
 import time
 from collections.abc import Callable
 from importlib.metadata import version
 
 import numpy as np
 
+from services.edge import child_protocol
 from services.edge.capture.types import Frame, HealthEvent, utc_now
 
 
@@ -95,13 +95,16 @@ def start_perception(
         device, gpu = resolve_device(args.device)
     except Exception as e:  # forced cuda without a GPU, or a broken torch install
         note = "" if isinstance(e, RuntimeError) else "device check failed: "
-        print(f"error: {note}{e}", file=sys.stderr)
+        kind = "model_load_failed" if note else "config_conflict"  # --device cuda, no GPU
+        child_protocol.emit(child_protocol.StartFailed(kind, f"{note}{e}"))
         return None
-    print(f"device: {device}" + (f" ({gpu})" if gpu else " (no CUDA GPU in use)"))
+    suffix = f" ({gpu})" if gpu else " (no CUDA GPU in use)"
+    child_protocol.emit(child_protocol.DeviceChosen(device + suffix))
     try:
         detector, tracker = load_perception(args, device)
     except Exception as e:  # e.g. no network for the first weights download
         emit(HealthEvent("error", utc_now(), None, f"model load failed: {e!r}"), None)
-        print(f"error: model load failed: {e!r}", file=sys.stderr)
+        failed = child_protocol.StartFailed("model_load_failed", f"model load failed: {e!r}")
+        child_protocol.emit(failed)
         return None
     return Perception(detector, tracker, gpu, {"t_wall": utc_now(), "t_pc": time.perf_counter()})

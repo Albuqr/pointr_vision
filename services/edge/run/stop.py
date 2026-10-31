@@ -13,6 +13,7 @@ import time
 from collections.abc import Callable
 
 from services.edge.capture.types import HealthEvent, utc_now
+from services.edge.child_protocol import Stop, parse
 from services.edge.contract import UI_STOP_DETAIL
 
 EXIT_INTERRUPTED = 130
@@ -73,7 +74,8 @@ def stop_before_session(
 
 def stop_source(line: str) -> str | None:
     """The source a stop line names; anything but `stop ui` is a plain stop."""
-    return "ui" if line.split() == ["stop", "ui"] else None
+    message = parse(line.strip())[1]
+    return message.source if isinstance(message, Stop) else None
 
 
 def stdin_ready() -> bool:

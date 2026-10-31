@@ -44,7 +44,7 @@ def test_a_model_load_failure_is_an_event_and_an_error_line(capsys):
     assert (event.kind, event.t_mono, t0) == ("error", None, None)  # before any run (D-014)
     assert "model load failed" in event.detail and "weights download failed" in event.detail
     err = capsys.readouterr().err
-    assert "error: model load failed" in err and "weights download failed" in err
+    assert "error: model_load_failed: model load failed" in err and "weights download failed" in err
 
 
 def test_a_device_failure_is_an_error_line_only(capsys):
@@ -56,6 +56,8 @@ def test_a_device_failure_is_an_error_line_only(capsys):
 
     result, events = start(resolve=broken)
     assert result is None and events == []
-    assert "error: device check failed: DLL load failed" in capsys.readouterr().err
+    assert (
+        "error: model_load_failed: device check failed: DLL load failed" in capsys.readouterr().err
+    )
     assert start(resolve=forced)[0] is None
-    assert "error: --device cuda but no GPU" in capsys.readouterr().err
+    assert "error: config_conflict: --device cuda but no GPU" in capsys.readouterr().err

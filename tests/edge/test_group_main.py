@@ -54,7 +54,7 @@ def test_a_source_that_cannot_open_is_an_error_on_that_camera(clips, tmp_path, c
         [camera("cam1", clips["moving"], out), camera("cam2", tmp_path / "missing.mp4", out)]
     )
     assert code == EXIT_OPEN_FAILED
-    assert "[cam2] error: cannot open source" in capsys.readouterr().out
+    assert "[cam2] error: source_open_failed: cannot open source" in capsys.readouterr().err
     assert not out.exists() or not any(out.iterdir())
 
 

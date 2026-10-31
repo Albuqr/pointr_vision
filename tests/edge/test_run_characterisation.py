@@ -303,7 +303,7 @@ for p in ALL_PATHS:
             code=EXIT_ERROR,
             sessions=unchanged(p),
             out=(r"^\[.*\] - error: model load failed: .*weights download failed",),
-            err=(r"^error: model load failed: .*weights download failed",),
+            err=(r"^error: model_load_failed: model load failed: .*weights download failed",),
         )
     )
 
@@ -314,7 +314,7 @@ for p in ALL_PATHS:
             p,
             fault="source_open",
             code=EXIT_OPEN,
-            out=(r"^\[cam2\] error: cannot open source",),
+            err=(r"^\[cam2\] error: source_open_failed: cannot open source",),
         )
     else:
         row = Row(
@@ -323,7 +323,7 @@ for p in ALL_PATHS:
             code=EXIT_OPEN,
             sessions=unchanged(p),
             out=(r"^\[.*\] - source_open_failed: ",),
-            err=(r"^error: cannot open source ",),
+            err=(r"^error: source_open_failed: cannot open source ",),
         )
     ROWS.append(row)
 
@@ -336,7 +336,7 @@ for p in ALL_PATHS:
                 fault="cv2_open",
                 code=EXIT_ERROR,
                 sessions=unchanged(p),
-                err=(r"^error: the group .*backend exploded",),
+                err=(r"^error: exited: the group .*backend exploded",),
             )
         )
     else:
@@ -347,7 +347,7 @@ for p in ALL_PATHS:
                 code=EXIT_OPEN,
                 sessions=unchanged(p),
                 out=(r"^\[.*\] - source_open_failed: .*backend exploded",),
-                err=(r"^error: cannot open source .*backend exploded",),
+                err=(r"^error: source_open_failed: cannot open source .*backend exploded",),
             )
         )
 
@@ -373,7 +373,7 @@ for p in ALL_PATHS:
             # a group: the processing error, then the group's own event, in each session
             sessions=sess(p, "error", ("error", "error") if p in IS_GROUP else ("error",)),
             out=(r"inference exploded",),
-            err=(r"^error: the group (replay )?did not run",) if p in IS_GROUP else (),
+            err=(r"^error: exited: the group (replay )?did not run",) if p in IS_GROUP else (),
         )
     )
 
@@ -510,7 +510,7 @@ for intended in tuple(ROWS):
                 today,
                 code=EXIT_ERROR,
                 sessions=unchanged(intended.path),
-                err=(r"^error: calibration cannot be used:",),
+                err=(r"^error: calibration_refused: calibration cannot be used:",),
             )
     elif intended.fault == "calibration_live":
         today = dataclasses.replace(today, sessions=sess(SESSION_REPLAY))

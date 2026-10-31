@@ -53,7 +53,7 @@ def test_bad_ref_exits_cleanly(tmp_path, out_dir, name, reason):
     assert "Traceback" not in result.stdout + result.stderr
     assert "source_open_failed" in result.stdout
     assert reason in result.stdout
-    assert f"error: cannot open source {ref!r}: " in result.stderr
+    assert f"error: source_open_failed: cannot open source {ref!r}: " in result.stderr
     assert reason in result.stderr
     assert not out_dir.exists()  # no session before the source opens (D-020)
 
@@ -180,7 +180,11 @@ def run_failing_model_load(monkeypatch, capsys) -> tuple[int, str, str]:
 def test_model_load_failure_prints_error_line_on_stderr(monkeypatch, capsys):
     code, out, err = run_failing_model_load(monkeypatch, capsys)
     assert code == EXIT_CAPTURE_ERROR
-    lines = [ln for ln in err.splitlines() if ln.startswith("error: model load failed")]
+    lines = [
+        ln
+        for ln in err.splitlines()
+        if ln.startswith("error: model_load_failed: model load failed")
+    ]
     assert len(lines) == 1 and "weights download failed" in lines[0]
     assert "error: model load failed" in out  # the event line stays
 
@@ -232,7 +236,7 @@ def test_forced_cuda_without_a_gpu_exits_with_a_clear_error(monkeypatch, capsys)
     monkeypatch.setattr(cli, "load_perception", never)
     assert cli.main(["--source", "0", "--device", "cuda"]) == EXIT_CAPTURE_ERROR != 0
     err = capsys.readouterr().err
-    assert "error: --device cuda" in err and "Traceback" not in err
+    assert "error: config_conflict: --device cuda" in err and "Traceback" not in err
 
 
 def test_broken_torch_install_exits_cleanly(monkeypatch, capsys):
@@ -242,7 +246,7 @@ def test_broken_torch_install_exits_cleanly(monkeypatch, capsys):
     monkeypatch.setattr(cli, "resolve_device", broken)
     assert cli.main(["--source", "0"]) == EXIT_CAPTURE_ERROR
     err = capsys.readouterr().err
-    assert "error: device check failed: " in err and "Traceback" not in err
+    assert "error: model_load_failed: device check failed: " in err and "Traceback" not in err
 
 
 def test_no_detect_ignores_an_unusable_device(monkeypatch, clips, capsys):

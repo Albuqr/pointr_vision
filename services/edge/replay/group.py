@@ -17,7 +17,8 @@ from pathlib import Path
 import numpy as np
 
 from services.edge.capture.sources import FileSource
-from services.edge.group_main import say
+from services.edge.child_protocol import SessionOpened, StartFailed, emit
+from services.edge.group_main import say, tell
 from services.edge.group_runner import GroupCamera, RecordedCamera, run_group
 from services.edge.main import (
     EXIT_CAPTURE_ERROR,
@@ -142,10 +143,12 @@ def run_replay(
     """The command for a group: what services.edge.main does for one replayed session, for every
     camera of the group through the group runner."""
     if args.calibration or args.camera_id:
-        print(
-            "error: a group replay takes each camera's id and calibration from its session; "
-            "do not pass --calibration or --camera-id",
-            file=sys.stderr,
+        emit(
+            StartFailed(
+                "config_conflict",
+                "a group replay takes each camera's id and calibration from its session; "
+                "do not pass --calibration or --camera-id",
+            )
         )
         return EXIT_OPEN_FAILED
     for cam in group.cameras:
@@ -178,7 +181,7 @@ def run_replay(
 
     def on_session(camera_id, pipeline):
         pipelines[camera_id] = pipeline
-        say(camera_id, f"session: {pipeline.session_dir}")
+        tell(camera_id, SessionOpened(str(pipeline.session_dir)))
 
     code = 0
     try:
@@ -203,7 +206,7 @@ def run_replay(
             raise
         code = stop_end(ui=False, session=True).exit_code
     except Exception as e:  # every replay run already ended `error`, with the failure as an event
-        print(f"error: the group replay did not run: {e!r}", file=sys.stderr)
+        emit(StartFailed("exited", f"the group replay did not run: {e!r}"))
         code = EXIT_CAPTURE_ERROR
     for camera_id, p in pipelines.items():
         try:  # a failure is a warning: the run is saved (D-023)

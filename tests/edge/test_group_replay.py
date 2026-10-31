@@ -312,4 +312,5 @@ def test_the_command_refuses_a_calibration_or_camera_id_for_a_group(clips, tmp_p
         assert cli(out, *args, "--group-id", "g1").returncode == 0
     result = cli(out, "--replay", "g1", *option)
     assert result.returncode != 0 and option[0] in result.stderr
+    assert "error: config_conflict: a group replay takes" in result.stderr
     assert all(len(r) == 1 for r in runs(out).values())
