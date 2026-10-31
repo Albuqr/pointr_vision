@@ -1622,7 +1622,9 @@ the time passed to the matcher; only the ordering key changes. A video frame who
 tracker sees no frame, that the live run did not. A frame the live run dropped was processed by the
 replay under D-060 (its Limits paragraph); it no longer is in a group replay. A live run from
 before 0.27.0 has no `match_seq`: its replay falls back to `t_recv` order for all cameras and writes a
-`replay_order_approximate` event in each session. `finish` and `close` of the order are unchanged.
+`replay_order_approximate` event in each session, one of the few events a replay writes to
+`session.json` (tagged with its run id, as `startup_check_failed` is, D-068). `finish` and `close`
+of the order are unchanged.
 
 The counter lives in the group runner (a lock around number-and-call), not inside the matcher,
 so the `CrossCameraMatcher` Protocol and any other matcher keep working. The replay's own runs

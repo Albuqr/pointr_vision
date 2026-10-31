@@ -109,7 +109,8 @@ queue, a failed writer, a frame of another size) has an empty `t_video`. A repla
 (`mode: replay`) adds a run to the session and leaves `recording` alone: in `session.json` only
 `runs` grows, plus `interrupted`, `error` or `startup_check_failed` events whose `detail` starts
 with `replay <run_id>:` when the replay did not end cleanly or calibration intake failed
-(D-042, D-068); the replay's other events are printed, not written.
+(D-042, D-068), and a `replay_order_approximate` event (0.27.0, D-072) the same way; the replay's
+other events are printed, not written.
 A replay of a bare video file starts a new session with `recording` disabled.
 A replay of a group (0.20.0, D-060: `--replay <group_id>`) adds one replay run, as above, to the session of
 every camera whose `session.json` has that `group_id`; section 3 `group` says what those runs share.
@@ -123,7 +124,8 @@ Event kinds: `source_open_failed`, `source_lost`, `source_recovered`,
 two or more cameras that has no valid calibration and a matcher running: its tracks cannot be linked by court
 position, so they link to the other cameras by appearance only (section 5). `detail` says why
 (`no valid calibration: ...`).
-`replay_order_approximate` (0.27.0, D-072) is written once to each session of a group replay whose live frames.csv
+`replay_order_approximate` (0.27.0, D-072) is written once to each session of a group replay (`detail` starting
+`replay <run_id>:`, as the other events a replay writes to `session.json`) whose live frames.csv
 has no `match_seq` (a recording from before 0.27.0): the replay then orders the cameras' frames by the live
 `t_recv`, which is the live processing order only when no camera's processing lagged another's. `detail` says so.
 `stopped` means the session was asked to stop and ended normally: status `ended`, not `interrupted`. Its
