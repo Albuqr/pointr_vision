@@ -15,6 +15,14 @@ import json
 import sys
 
 from services.edge.capture.sources import SourceOpenError, open_source
+from services.edge.child_protocol import (
+    Message,
+    PreviewListening,
+    SessionOpened,
+    StartFailed,
+    Summary,
+    emit,
+)
 from services.edge.group_runner import GroupCamera, run_group
 from services.edge.main import (
     EXIT_CAPTURE_ERROR,
@@ -41,6 +49,14 @@ def say(camera_id: str, text: str) -> None:
     try:
         for line in text.splitlines():
             print(f"[{camera_id}] {line}", flush=True)
+    except OSError:  # the launcher that read this pipe is gone: the files still get everything
+        pass
+
+
+def tell(camera_id: str, message: Message) -> None:
+    """A protocol line tagged with the camera it concerns, with `say`'s pipe-gone guard."""
+    try:
+        emit(message, camera_id)
     except OSError:  # the launcher that read this pipe is gone: the files still get everything
         pass
 
@@ -95,11 +111,11 @@ def run(cams: list[argparse.Namespace], stop: StopRequest) -> int:
         try:
             source = open_source(a.source, (a.width, a.height))
         except SourceOpenError as e:
-            say(a.camera_id, f"error: cannot open source: {e}")  # Studio shows it on that camera
+            tell(a.camera_id, StartFailed("source_open_failed", f"cannot open source: {e}"))
             return EXIT_OPEN_FAILED
         source.fps_cap = a.fps_cap
         if conflict := link_conflict(source.kind, a.link):
-            say(a.camera_id, f"error: {conflict}")
+            tell(a.camera_id, StartFailed("config_conflict", conflict))
             return EXIT_OPEN_FAILED
         cameras.append(GroupCamera(a.camera_id, source, a.link, a.calibration))
 
@@ -124,7 +140,7 @@ def run(cams: list[argparse.Namespace], stop: StopRequest) -> int:
     def on_session(camera_id, pipeline):
         a = by_id[camera_id]
         pipelines[camera_id] = pipeline
-        say(camera_id, f"session: {pipeline.session_dir}")
+        tell(camera_id, SessionOpened(str(pipeline.session_dir)))
         if a.calibration_problem:  # before any run, so no t0: t_mono is null
             from services.edge.calibration.intake import NotUsed, take_calibration
 
@@ -134,7 +150,7 @@ def run(cams: list[argparse.Namespace], stop: StopRequest) -> int:
             pipeline.log_event(event)
         if a.http_preview is not None:
             previews.append(start_http_preview(a.http_preview, pipeline))
-            say(camera_id, f"preview_port: {previews[-1].port}")
+            tell(camera_id, PreviewListening(previews[-1].port))
 
     code = 0
     try:
@@ -159,7 +175,8 @@ def run(cams: list[argparse.Namespace], stop: StopRequest) -> int:
             raise
         code = stop_end(ui=stop.ui, session=True).exit_code
     except Exception as e:  # every session already ended `error`, with the failure as an event
-        print(f"error: the group did not run: {e}", file=sys.stderr)
+        kind = "source_open_failed" if isinstance(e, SourceOpenError) else "exited"
+        emit(StartFailed(kind, f"the group did not run: {e}"))
         code = EXIT_OPEN_FAILED if isinstance(e, SourceOpenError) else EXIT_CAPTURE_ERROR
     finally:
         for preview in previews:
@@ -168,11 +185,13 @@ def run(cams: list[argparse.Namespace], stop: StopRequest) -> int:
         for camera_id, p in pipelines.items():
             c = proc = p.stats()
             say(camera_id, f"session {p.status}: {p.session_dir}")
-            say(
+            tell(
                 camera_id,
-                f"t0_wall={c.t0_wall} captured={c.captured} dropped={c.dropped} "
-                f"failed_reads={c.failed_reads} processed={proc.processed} "
-                f"unprocessed={proc.unprocessed}",
+                Summary(
+                    f"t0_wall={c.t0_wall} captured={c.captured} dropped={c.dropped} "
+                    f"failed_reads={c.failed_reads} processed={proc.processed} "
+                    f"unprocessed={proc.unprocessed}"
+                ),
             )
             try:  # a failure is a warning: the session is saved (D-023)
                 say(camera_id, format_summary(write_report(p.run_dir)))

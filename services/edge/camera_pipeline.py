@@ -18,6 +18,7 @@ from services.edge.calibration.intake import Calibration
 from services.edge.capture.capture import Capture
 from services.edge.capture.health import HealthConfig, HealthMonitor
 from services.edge.capture.types import FrameSource, HealthEvent, SourceInfo, utc_now
+from services.edge.child_protocol import StartFailed, emit
 from services.edge.contract import VIDEO_FILE
 from services.edge.perception.loop import Processor
 from services.edge.power import read_power
@@ -181,7 +182,8 @@ class CameraPipeline:
         first_frame = self._size_first
         self._size_first = False
         if first_frame and problem:
-            print(f"error: calibration cannot be used: the first {problem}", file=sys.stderr)
+            detail = f"calibration cannot be used: the first {problem}"
+            emit(StartFailed("calibration_refused", detail))
         if problem != self._size_problem and problem:
             self.log_event(
                 HealthEvent("error", utc_now(), p.frame.t_recv, f"{problem}; no positions")
@@ -316,7 +318,7 @@ class CameraPipeline:
         try:
             writer.close(session_status, counts)
         except Exception as e:  # cannot write at all: say so, keep shutting down
-            print(f"error: final session files not written: {e!r}", file=sys.stderr)
+            emit(StartFailed("exited", f"final session files not written: {e!r}"))
         return session_status
 
     @property

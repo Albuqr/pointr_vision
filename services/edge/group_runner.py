@@ -16,7 +16,6 @@ ends every camera through the one shutdown path.
 
 import dataclasses
 import functools
-import sys
 import threading
 import time
 import uuid
@@ -33,6 +32,7 @@ from services.edge.camera_pipeline import (
 )
 from services.edge.capture.health import HealthConfig
 from services.edge.capture.types import Frame, FrameSource, HealthEvent, SourceInfo, utc_now
+from services.edge.child_protocol import StartFailed, emit
 from services.edge.matcher import CourtMatcher, CrossCameraMatcher, LocalTrack
 from services.edge.perception.types import Detections, Detector, Tracker, TrackObs
 from services.edge.recording.recorder import FileRecorder
@@ -341,5 +341,5 @@ def run_group(
                 statuses[camera_id] = p.stop(status)
             except BaseException as e:  # a second Ctrl+C or a failure: the others still stop
                 statuses[camera_id] = "error"
-                print(f"error: {camera_id} did not stop cleanly: {e!r}", file=sys.stderr)
+                emit(StartFailed("exited", f"{camera_id} did not stop cleanly: {e!r}"))
     return statuses

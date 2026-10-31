@@ -499,7 +499,7 @@ def test_writer_failure_ends_as_error(tmp_path, monkeypatch, capsys):
     assert session["status"] == "error"
     assert "No space left" in session["events"][-1]["detail"]
     assert "items not written" in session["events"][-1]["detail"]
-    assert "session writer stopped" in capsys.readouterr().err
+    assert "error: exited: session writer stopped" in capsys.readouterr().err
     assert rows(run_dir / "frames.csv") == []  # header still readable
 
 

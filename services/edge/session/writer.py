@@ -410,7 +410,9 @@ class FileSessionWriter:
                     last = time.perf_counter()
         except BaseException as e:  # disk full, permissions: recorded by close()
             self.error = e
-            print(f"error: session writer stopped, data is no longer saved: {e!r}", file=sys.stderr)
+            from services.edge.child_protocol import StartFailed, emit  # it imports this module
+
+            emit(StartFailed("exited", f"session writer stopped, data is no longer saved: {e!r}"))
         finally:
             for f in (self._frames_f, self._tracks_f):
                 try:

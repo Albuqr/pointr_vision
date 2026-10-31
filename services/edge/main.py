@@ -43,6 +43,7 @@ from services.edge.capture.sources import (
     open_source,
 )
 from services.edge.capture.types import HealthEvent, utc_now
+from services.edge.child_protocol import PreviewListening, SessionOpened, StartFailed, Summary, emit
 from services.edge.contract import VIDEO_FILE
 from services.edge.perception.detector import DET_SIZE_MULTIPLE
 from services.edge.perception.loop import delay_stats, rates
@@ -252,7 +253,7 @@ def open_failed(ref: str, e: Exception) -> int:
     reason = str(e).strip()
     # no run, so no t0: t_mono is null (D-014)
     print_event(HealthEvent("source_open_failed", utc_now(), None, reason), None)
-    print(f"error: cannot open source {ref!r}: {reason}", file=sys.stderr)
+    emit(StartFailed("source_open_failed", f"cannot open source {ref!r}: {reason}"))
     return EXIT_OPEN_FAILED
 
 
@@ -469,7 +470,7 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
         return open_failed(ref, e)
     conflict = args.link and link_conflict(source.kind, args.link)
     if conflict:  # before the slow model load
-        print(f"error: {conflict}", file=sys.stderr)
+        emit(StartFailed("config_conflict", conflict))
         return EXIT_OPEN_FAILED
 
     perception = start_perception(
@@ -550,9 +551,9 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
     except OSError as e:
         release_ctrl_c(held)
         source.close()
-        print(f"error: cannot write session data under {args.out!r}: {e}", file=sys.stderr)
+        emit(StartFailed("exited", f"cannot write session data under {args.out!r}: {e}"))
         return EXIT_CAPTURE_ERROR
-    print(f"session: {pipeline.session_dir}")
+    emit(SessionOpened(str(pipeline.session_dir)))
 
     for event in intake.events:
         log_event(event)
@@ -569,7 +570,7 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
             raise KeyboardInterrupt
         if args.http_preview is not None:
             http_preview = start_http_preview(args.http_preview, pipeline)
-            print(f"preview_port: {http_preview.port}", flush=True)
+            emit(PreviewListening(http_preview.port))
         pipeline.start()
         if args.preview:
             title = f"Pointr {args.camera_id} (q to quit)" if args.camera_id else None
@@ -607,11 +608,13 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
         try:
             snapshot = pipeline.stats()
             print(f"session {pipeline.status}: {pipeline.session_dir}")
-            print(
-                f"t0_wall={snapshot.t0_wall} captured={snapshot.captured} "
-                f"dropped={snapshot.dropped} "
-                f"failed_reads={snapshot.failed_reads} processed={snapshot.processed} "
-                f"unprocessed={snapshot.unprocessed} events={dict(events.copy())}"
+            emit(
+                Summary(
+                    f"t0_wall={snapshot.t0_wall} captured={snapshot.captured} "
+                    f"dropped={snapshot.dropped} "
+                    f"failed_reads={snapshot.failed_reads} processed={snapshot.processed} "
+                    f"unprocessed={snapshot.unprocessed} events={dict(events.copy())}"
+                )
             )
             if args.benchmark:
                 det = "off" if detector is None else detector.det_size
