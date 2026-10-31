@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from services.edge import main as cli
+from services.edge.run import execute as run_execute
 from tests.edge.fakes import EvenFrameDetector
 from tests.edge.test_session import run_main, session_files, validate
 
@@ -41,7 +41,7 @@ def test_b3_a_preview_client_leaving_does_not_stop_the_session(
     out = tmp_path / "sessions"
     left = threading.Event()
     ports: list[int] = []
-    start = cli.start_http_preview
+    start = run_execute.start_http_preview
 
     def start_and_connect(port, pipeline):
         preview = start(port, pipeline)
@@ -50,7 +50,7 @@ def test_b3_a_preview_client_leaving_does_not_stop_the_session(
         ).start()
         return preview
 
-    monkeypatch.setattr(cli, "start_http_preview", start_and_connect)
+    monkeypatch.setattr(run_execute, "start_http_preview", start_and_connect)
     code = run_main(
         monkeypatch, out, "--source", str(clips["moving"]), "--link", "file",
         "--http-preview", "0", detector=SlowDetector(),

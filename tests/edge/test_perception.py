@@ -7,7 +7,6 @@ import numpy as np
 import pytest
 from fakes import FakeSource, image
 
-from services.edge import main as cli
 from services.edge.capture.capture import Capture
 from services.edge.capture.health import HealthConfig, HealthMonitor
 from services.edge.capture.types import Frame
@@ -16,6 +15,8 @@ from services.edge.perception.detector import COCO_PERSON_ID, RFDETRDetector
 from services.edge.perception.loop import NO_DETECTIONS, Processor, delay_stats, rates
 from services.edge.perception.tracker import DEFAULT_PARAMS, ByteTrackTracker
 from services.edge.perception.types import Detections, Detector, Tracker, TrackObs
+from services.edge.run.args import parse_args
+from services.edge.run.perception import create_tracker
 
 CAR = 3  # a COCO category that is not a person
 
@@ -171,7 +172,7 @@ def test_tracker_cli_settings_map_to_effective_tracker_parameters(monkeypatch):
             captured.update(params)
 
     monkeypatch.setattr(tracker_module.trackers, "ByteTrackTracker", FakeByteTrackTracker)
-    args = cli.parse_args(
+    args = parse_args(
         [
             "--source",
             "0",
@@ -183,7 +184,7 @@ def test_tracker_cli_settings_map_to_effective_tracker_parameters(monkeypatch):
             "3",
         ]
     )
-    tracker = cli.create_tracker(args)
+    tracker = create_tracker(args)
 
     assert captured == {
         **DEFAULT_PARAMS,

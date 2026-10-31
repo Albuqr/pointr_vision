@@ -4,19 +4,25 @@ from types import SimpleNamespace
 
 import pytest
 
-from services.edge import main as cli
 from services.edge.capture.health import HealthConfig
+from services.edge.capture.sources import DEFAULT_CAPTURE_SIZE
 from services.edge.capture.types import SourceInfo
-from services.edge.main import RunSettings
+from services.edge.run.args import parse_args
+from services.edge.run.meta import (
+    RunSettings,
+    calibration_failed_event,
+    failed_calibration_checks,
+    run_meta,
+)
 
 
 def meta(settings, kind="camera", **kw):
     info = SourceInfo(kind, "ref", 1280, 720, 30.0, "builtin")
-    return cli.run_meta(settings, info, HealthConfig(), None, None, None, **kw)
+    return run_meta(settings, info, HealthConfig(), None, None, None, **kw)
 
 
 def test_settings_from_args():
-    args = cli.parse_args(
+    args = parse_args(
         ["--source", "0", "--width", "640", "--height", "480", "--calibration-failed", "too few"]
     )
 
@@ -24,9 +30,9 @@ def test_settings_from_args():
 
 
 def test_settings_from_args_without_flags_use_the_defaults():
-    settings = RunSettings.from_args(cli.parse_args(["--source", "0"]))
+    settings = RunSettings.from_args(parse_args(["--source", "0"]))
 
-    assert settings == RunSettings(cli.DEFAULT_CAPTURE_SIZE, None)
+    assert settings == RunSettings(DEFAULT_CAPTURE_SIZE, None)
 
 
 @pytest.mark.parametrize("kind", ["file", "stream"])
@@ -44,11 +50,11 @@ def test_refusal_gives_a_check_and_an_event_only_when_present():
     run = meta(RunSettings(None, "points too few"))
     assert run.checks[0]["check"] == "calibration"
     assert run.checks[0]["detail"] == "points too few"
-    assert cli.calibration_failed_event("points too few").detail == "calibration: points too few"
+    assert calibration_failed_event("points too few").detail == "calibration: points too few"
 
     assert meta(RunSettings(None, None)).checks is None
-    assert cli.failed_calibration_checks(None) is None
-    assert cli.calibration_failed_event(None) is None
+    assert failed_calibration_checks(None) is None
+    assert calibration_failed_event(None) is None
 
 
 def test_model_loaded_reaches_ready():

@@ -7,7 +7,9 @@ import signal
 from services.edge import contract, group_main
 from services.edge.camera_pipeline import CameraPipeline
 from services.edge.capture.sources import FileSource
-from services.edge.main import EXIT_INTERRUPTED, EXIT_OPEN_FAILED, StopRequest
+from services.edge.run.args import parse_args
+from services.edge.run.plan import group_det_size, group_matcher
+from services.edge.run.stop import EXIT_INTERRUPTED, EXIT_OPEN_FAILED, StopRequest
 from tests.edge.fakes import EvenFrameDetector, OneTrackPerDetection
 from tests.edge.test_group_runner import camera_files
 
@@ -59,15 +61,15 @@ def test_a_source_that_cannot_open_is_an_error_on_that_camera(clips, tmp_path, c
 
 
 def test_one_detector_size_for_the_group():
-    assert group_main.group_det_size({None}) is None  # the model's own
-    assert group_main.group_det_size({640}) == 640
-    assert group_main.group_det_size({320, 640}) == 640
-    assert group_main.group_det_size({None, 320}) == 320  # the only size asked for
+    assert group_det_size({None}) is None  # the model's own
+    assert group_det_size({640}) == 640
+    assert group_det_size({320, 640}) == 640
+    assert group_det_size({None, 320}) == 320  # the only size asked for
 
 
 def test_the_matcher_keeps_a_group_id_as_long_as_the_longest_tracker_lost_time():
-    cams = [group_main.parse_args(["--source=x", f"--track-lost-secs={s}"]) for s in (1.0, 2.5)]
-    assert group_main.group_matcher(cams).record_params()["lost_s"] == 2.5
+    cams = [parse_args(["--source=x", f"--track-lost-secs={s}"]) for s in (1.0, 2.5)]
+    assert group_matcher(cams).record_params()["lost_s"] == 2.5
 
 
 def stop_on_first_call(monkeypatch, owner, name, after, ui):

@@ -17,12 +17,13 @@ import pytest
 from services.edge.capture.health import HealthConfig
 from services.edge.capture.sources import FileSource
 from services.edge.group_runner import GroupCamera, run_group
-from services.edge.main import RunSettings, parse_args, run_meta
 from services.edge.matcher import CourtMatcher, MatcherParams
 from services.edge.perception.loop import NO_DETECTIONS
 from services.edge.perception.types import Detections
 from services.edge.replay.group import live_matcher, resolve_group
 from services.edge.replay.resolve import ReplayError
+from services.edge.run.args import parse_args
+from services.edge.run.meta import RunSettings, run_meta
 from tests.edge.fakes import OneTrackPerDetection
 from tests.edge.test_group_runner import calibration_for
 from tests.edge.test_session import load, rows, validate

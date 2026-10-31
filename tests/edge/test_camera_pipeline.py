@@ -228,7 +228,7 @@ def test_t7_shared_code_error_is_exposed_and_unprocessed_count_is_saved(tmp_path
 
 def test_t7_benchmark_uses_a_handmade_stats_snapshot(capsys):
     from services.edge.camera_pipeline import CameraStats
-    from services.edge.main import print_benchmark
+    from services.edge.run.report import print_benchmark
 
     print_benchmark(
         10,

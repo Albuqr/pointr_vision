@@ -15,6 +15,9 @@ from services.app.server import create_app
 from services.edge import main as cli
 from services.edge.capture.sources import DEFAULT_CAPTURE_SIZE
 from services.edge.capture.types import Frame, SourceInfo
+from services.edge.run import plan
+from services.edge.run.args import parse_args
+from services.edge.run.stop import EXIT_OPEN_FAILED
 from tests.app.test_api import FakeLauncher
 from tests.edge.fakes import EvenFrameDetector
 from tests.edge.test_session import run_main, session_files
@@ -54,9 +57,9 @@ def calibration_file(tmp_path):
 
 
 def record(monkeypatch, tmp_path, clips, switch_at):
-    real = cli.open_source
+    real = plan.open_source
     monkeypatch.setattr(
-        cli, "open_source", lambda ref, size=None: Resizing(real(ref, size), switch_at, (320, 180))
+        plan, "open_source", lambda ref, size=None: Resizing(real(ref, size), switch_at, (320, 180))
     )
     out = tmp_path / "sessions"
     code = run_main(
@@ -142,7 +145,7 @@ def test_idle_calibration_frame_is_captured_at_the_recorders_size(monkeypatch, t
 
 
 def test_recorder_default_size_is_the_shared_constant():
-    args = cli.parse_args(["--source", "0"])
+    args = parse_args(["--source", "0"])
     assert (args.width, args.height) == DEFAULT_CAPTURE_SIZE
 
 
@@ -273,9 +276,6 @@ def test_t8_unreadable_live_run_refuses_replay_before_source_open(monkeypatch, t
     def unexpected_open(self):
         raise AssertionError("a damaged live run must be refused before opening the replay source")
 
-    monkeypatch.setattr(cli.FileSource, "open", unexpected_open)
-    assert (
-        cli.main(["--replay", str(folder), "--no-detect", "--out", str(out)])
-        == cli.EXIT_OPEN_FAILED
-    )
+    monkeypatch.setattr(plan.FileSource, "open", unexpected_open)
+    assert cli.main(["--replay", str(folder), "--no-detect", "--out", str(out)]) == EXIT_OPEN_FAILED
     assert len(json.loads((folder / "session.json").read_text(encoding="utf-8"))["runs"]) == 1

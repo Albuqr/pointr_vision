@@ -12,11 +12,11 @@ from pathlib import Path
 import pytest
 
 from services.edge import group_main
-from services.edge import main as cli
 from services.edge.capture.types import utc_now
 from services.edge.group_runner import is_solo
 from services.edge.run import execute as execute_module
 from services.edge.run import wait
+from services.edge.run.args import parse_args
 from services.edge.run.execute import execute
 from services.edge.run.perception import Perception
 from services.edge.run.plan import PlanError, plan_from_args
@@ -49,7 +49,7 @@ def argv(clip, out, camera_id="cam1", *extra):
 
 def run(cams, *, detector=None, tagged=False, stop=None, **kw):
     """Plan the arguments and execute the plan, as an entry point does."""
-    plan = plan_from_args([cli.parse_args(a) for a in cams])
+    plan = plan_from_args([parse_args(a) for a in cams])
     return plan, execute(
         plan,
         stop or StopRequest(),
@@ -96,30 +96,6 @@ def test_a_group_of_one_has_no_matcher_no_appearance_and_no_group_block(
     assert not [line for line in out if line.startswith("[cam1]")]  # untagged, as a single camera
 
 
-def test_a_group_of_one_writes_the_files_main_writes(clips, tmp_path, monkeypatch):
-    """The same clip through main.run and through execute: the same kinds of file and the same
-    keys in them. Timing decides which frames are processed, so rows are compared by shape."""
-    monkeypatch.setattr(cli, "resolve_device", lambda requested: ("cpu", None))
-    monkeypatch.setattr(
-        cli, "load_perception", lambda a, d: (EvenFrameDetector(), OneTrackPerDetection())
-    )
-    assert cli.main(argv(clips["moving"], tmp_path / "main")) == 0
-    run([argv(clips["moving"], tmp_path / "execute")], detector=EvenFrameDetector())
-    [(s1, r1, d1)] = sessions(tmp_path / "main").values()
-    [(s2, r2, d2)] = sessions(tmp_path / "execute").values()
-    assert set(s1) == set(s2) and set(r1) == set(r2)
-    for key in ("group", "calibration", "checks", "mode", "detector", "tracker"):
-        assert r1[key] == r2[key], key
-    assert r1["input"].keys() == r2["input"].keys()
-    assert sorted(p.name for p in d1.iterdir()) == sorted(p.name for p in d2.iterdir())
-    for name in ("frames.csv", "tracks.csv"):
-        first, second = rows(d1 / name), rows(d2 / name)
-        assert first[0].keys() == second[0].keys()
-    assert {t["track_id"] for t in rows(d1 / "tracks.csv")} == {
-        t["track_id"] for t in rows(d2 / "tracks.csv")
-    }
-
-
 def test_two_cameras_still_share_one_detector_with_a_capture_thread_each(clips, tmp_path):
     """ADR 0007: one detector for the group's cameras, called from each camera's own thread."""
     seen = set()
@@ -150,7 +126,7 @@ def test_planning_fails_with_exit_2(clips, tmp_path, capsys):
     ]
     for case in cases:
         with pytest.raises(PlanError) as error:
-            plan_from_args([cli.parse_args(case)])
+            plan_from_args([parse_args(case)])
         assert error.value.report(Reporter()) == EXIT_OPEN_FAILED
     err = capsys.readouterr().err
     assert "error: source_open_failed: cannot open source" in err
@@ -182,17 +158,15 @@ def test_a_plan_error_is_reported_as_the_run_reports_everything(tmp_path, capsys
 
 
 def test_the_three_kinds_of_camera(clips, tmp_path):
-    live = plan_from_args([cli.parse_args(argv(clips["moving"], tmp_path))])
+    live = plan_from_args([parse_args(argv(clips["moving"], tmp_path))])
     assert [c.kind for c in live.cameras] == ["live"]
-    file = plan_from_args(
-        [cli.parse_args(["--replay", str(clips["moving"]), "--out", str(tmp_path)])]
-    )
+    file = plan_from_args([parse_args(["--replay", str(clips["moving"]), "--out", str(tmp_path)])])
     assert [c.kind for c in file.cameras] == ["replay_file"] and file.cameras[0].camera_id is None
     record = [a for a in argv(clips["moving"], tmp_path / "rec") if a != "--no-record"]
     run([record], detector=EvenFrameDetector())
     [(session, _, _)] = sessions(tmp_path / "rec").values()
     replay = ["--replay", session["session_id"], "--out", str(tmp_path / "rec")]
-    into = plan_from_args([cli.parse_args(replay)])
+    into = plan_from_args([parse_args(replay)])
     assert is_solo(into.cameras) and [c.kind for c in into.cameras] == ["replay_session"]
 
 
@@ -315,7 +289,7 @@ def test_a_preview_that_cannot_start_ends_every_session_with_status_error(
 def test_the_benchmark_waiter_ends_a_run_at_its_deadline(clips, tmp_path, capsys):
     """The clip plays at its own 15 fps for 2 s; a 0.4 s benchmark ends the run before it does."""
     cams = [[*argv(clips["moving"], tmp_path), "--benchmark", "0.4"]]
-    plan = plan_from_args([cli.parse_args(c) for c in cams])
+    plan = plan_from_args([parse_args(c) for c in cams])
     assert plan.benchmark == 0.4
     started = time.perf_counter()
     _, outcome = run(cams, detector=EvenFrameDetector(), waiter=wait.benchmark(plan.benchmark))
