@@ -20,6 +20,7 @@ from services.edge.capture.types import SourceInfo
 from services.edge.main import EXIT_CAPTURE_ERROR, EXIT_INTERRUPTED, EXIT_OPEN_FAILED
 from services.edge.perception.loop import NO_DETECTIONS
 from services.edge.perception.types import Detections, TrackObs
+from services.edge.run import report
 from services.edge.session import writer as writer_mod
 from services.edge.session.types import (
     FrameRecord,
@@ -413,7 +414,7 @@ def test_a_report_failure_never_changes_the_session(monkeypatch, tmp_path, clips
     def boom(run_dir):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(cli, "write_report", boom)
+    monkeypatch.setattr(report, "write_report", boom)
     assert run_main(monkeypatch, out, "--source", str(clips["moving"]), "--no-detect") == 0
     session, _, _, _ = session_files(out)
     assert session["status"] == "ended"

@@ -9,7 +9,6 @@ import argparse
 import csv
 import dataclasses
 import json
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,26 +16,21 @@ from pathlib import Path
 import numpy as np
 
 from services.edge.capture.sources import FileSource
-from services.edge.child_protocol import SessionOpened, StartFailed, emit
-from services.edge.group_main import say, tell
-from services.edge.group_runner import GroupCamera, RecordedCamera, run_group
-from services.edge.main import (
-    EXIT_CAPTURE_ERROR,
-    EXIT_OPEN_FAILED,
-    RunSettings,
-    create_tracker,
-    health_config,
-    load_perception,
-    print_event,
-    resolve_device,
-    run_meta,
-)
+from services.edge.group_runner import GroupCamera, RecordedCamera
 from services.edge.matcher import CourtMatcher, MatcherParams
 from services.edge.recording.recorder import DEFAULT_FPS
 from services.edge.replay.resolve import ReplayError, resolve_replay
-from services.edge.reports.build import format_summary, write_report
-from services.edge.run.perception import start_perception
-from services.edge.run.stop import StopRequest, stop_end
+from services.edge.run.execute import execute
+from services.edge.run.perception import (
+    create_tracker,
+    load_perception,
+    resolve_device,
+    start_perception,
+)
+from services.edge.run.plan import PlanError, RunPlan
+from services.edge.run.report import Reporter
+from services.edge.run.stop import StopRequest
+from services.edge.run.wait import benchmark, plain
 
 
 @dataclass(frozen=True)
@@ -137,80 +131,46 @@ def resolve_group(target: str, out_dir: Path | str) -> GroupReplay | None:
     return GroupReplay(target, cameras, params)
 
 
+def plan_group_replay(args: argparse.Namespace, group: GroupReplay) -> RunPlan:
+    """The plan for a group replay: every camera of the group again, in the live run's matcher. The
+    cameras take their ids and calibrations from their sessions."""
+    if args.calibration or args.camera_id:
+        raise PlanError(
+            "config_conflict",
+            "a group replay takes each camera's id and calibration from its session; "
+            "do not pass --calibration or --camera-id",
+        )
+    return RunPlan(
+        group.cameras,
+        {c.camera_id: args for c in group.cameras},
+        args,
+        group.group_id,
+        False,
+        live_matcher(group.params, args.track_lost_secs),
+        args.benchmark,
+    )
+
+
 def run_replay(
     args: argparse.Namespace, group: GroupReplay, stop: StopRequest | None = None
 ) -> int:
     """The command for a group: what services.edge.main does for one replayed session, for every
-    camera of the group through the group runner."""
-    if args.calibration or args.camera_id:
-        emit(
-            StartFailed(
-                "config_conflict",
-                "a group replay takes each camera's id and calibration from its session; "
-                "do not pass --calibration or --camera-id",
-            )
-        )
-        return EXIT_OPEN_FAILED
-    for cam in group.cameras:
-        if not cam.replay.target.verified:
-            say(cam.camera_id, "warning: the session has no video hash, so the video is unchecked")
-    config = health_config(args)
-    settings = RunSettings.from_args(args)
-    perception = start_perception(
-        args, resolve_device=resolve_device, load_perception=load_perception, emit=print_event
-    )
-    if perception is None:
-        return EXIT_CAPTURE_ERROR
-    detector = perception.detector  # each camera makes its own tracker
-    targets = {c.camera_id: c.replay.target for c in group.cameras}
-
-    def make_run(camera_id, info):
-        tracker = None if detector is None else create_tracker(args)
-        return run_meta(
-            settings,
-            info,
-            config,
-            detector,
-            tracker,
-            perception.gpu,
-            targets[camera_id],
-            perception.model_loaded,
-        )
-
-    pipelines = {}
-
-    def on_session(camera_id, pipeline):
-        pipelines[camera_id] = pipeline
-        tell(camera_id, SessionOpened(str(pipeline.session_dir)))
-
-    code = 0
+    camera of the group through the run module."""
+    reporter = Reporter(tagged=True)
     try:
-        statuses = run_group(
-            group.group_id,
-            group.cameras,
-            detector,
-            lambda camera_id: create_tracker(args),
-            args.out,
-            config,
-            make_run,
-            record=False,
-            matcher=live_matcher(group.params, args.track_lost_secs),
-            on_event=lambda camera_id, ev, t0: print_event(ev, t0, f"[{camera_id}] "),
-            on_session=on_session,
-            ui_stop=lambda: stop is not None and stop.ui,  # Studio's stop passes through (D-049)
-        )
-        if any(s != "ended" for s in statuses.values()):
-            code = EXIT_CAPTURE_ERROR
-    except KeyboardInterrupt:  # every run already ended (`interrupted`, or `error` if early)
-        if not pipelines:  # a stop before any session: main's pre-session end
-            raise
-        code = stop_end(ui=False, session=True).exit_code
-    except Exception as e:  # every replay run already ended `error`, with the failure as an event
-        emit(StartFailed("exited", f"the group replay did not run: {e!r}"))
-        code = EXIT_CAPTURE_ERROR
-    for camera_id, p in pipelines.items():
-        try:  # a failure is a warning: the run is saved (D-023)
-            say(camera_id, format_summary(write_report(p.run_dir)))
-        except Exception as e:
-            print(f"warning: {camera_id}: report not written: {e!r}", file=sys.stderr)
-    return code
+        plan = plan_group_replay(args, group)
+    except PlanError as e:
+        return e.report(reporter)
+    return execute(
+        plan,
+        stop or StopRequest(),
+        perception=lambda a: start_perception(
+            a,
+            resolve_device=resolve_device,
+            load_perception=load_perception,
+            emit=lambda ev, t0: reporter.event(None, ev, t0),
+        ),
+        make_tracker=lambda a: create_tracker(a),
+        reporter=reporter,
+        waiter=benchmark(plan.benchmark) if plan.benchmark else plain,
+    ).exit_code
