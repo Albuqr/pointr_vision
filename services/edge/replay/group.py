@@ -10,7 +10,6 @@ import csv
 import dataclasses
 import json
 import sys
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,12 +17,10 @@ from pathlib import Path
 import numpy as np
 
 from services.edge.capture.sources import FileSource
-from services.edge.capture.types import utc_now
 from services.edge.group_main import say
 from services.edge.group_runner import GroupCamera, RecordedCamera, run_group
 from services.edge.main import (
     EXIT_CAPTURE_ERROR,
-    EXIT_INTERRUPTED,
     EXIT_OPEN_FAILED,
     RunSettings,
     create_tracker,
@@ -37,6 +34,8 @@ from services.edge.matcher import CourtMatcher, MatcherParams
 from services.edge.recording.recorder import DEFAULT_FPS
 from services.edge.replay.resolve import ReplayError, resolve_replay
 from services.edge.reports.build import format_summary, write_report
+from services.edge.run.perception import start_perception
+from services.edge.run.stop import StopRequest, stop_end
 
 
 @dataclass(frozen=True)
@@ -137,7 +136,9 @@ def resolve_group(target: str, out_dir: Path | str) -> GroupReplay | None:
     return GroupReplay(target, cameras, params)
 
 
-def run_replay(args: argparse.Namespace, group: GroupReplay) -> int:
+def run_replay(
+    args: argparse.Namespace, group: GroupReplay, stop: StopRequest | None = None
+) -> int:
     """The command for a group: what services.edge.main does for one replayed session, for every
     camera of the group through the group runner."""
     if args.calibration or args.camera_id:
@@ -152,22 +153,25 @@ def run_replay(args: argparse.Namespace, group: GroupReplay) -> int:
             say(cam.camera_id, "warning: the session has no video hash, so the video is unchecked")
     config = health_config(args)
     settings = RunSettings.from_args(args)
-    detector = gpu = model_loaded = None
-    if not args.no_detect:
-        try:
-            device, gpu = resolve_device(args.device)
-            print(f"device: {device}" + (f" ({gpu})" if gpu else " (no CUDA GPU in use)"))
-            detector, _ = load_perception(args, device)
-            model_loaded = {"t_wall": utc_now(), "t_pc": time.perf_counter()}
-        except Exception as e:
-            print(f"error: {e!r}", file=sys.stderr)
-            return EXIT_CAPTURE_ERROR
+    perception = start_perception(
+        args, resolve_device=resolve_device, load_perception=load_perception, emit=print_event
+    )
+    if perception is None:
+        return EXIT_CAPTURE_ERROR
+    detector = perception.detector  # each camera makes its own tracker
     targets = {c.camera_id: c.replay.target for c in group.cameras}
 
     def make_run(camera_id, info):
         tracker = None if detector is None else create_tracker(args)
         return run_meta(
-            settings, info, config, detector, tracker, gpu, targets[camera_id], model_loaded
+            settings,
+            info,
+            config,
+            detector,
+            tracker,
+            perception.gpu,
+            targets[camera_id],
+            perception.model_loaded,
         )
 
     pipelines = {}
@@ -190,11 +194,14 @@ def run_replay(args: argparse.Namespace, group: GroupReplay) -> int:
             matcher=live_matcher(group.params, args.track_lost_secs),
             on_event=lambda camera_id, ev, t0: print_event(ev, t0, f"[{camera_id}] "),
             on_session=on_session,
+            ui_stop=lambda: stop is not None and stop.ui,  # Studio's stop passes through (D-049)
         )
         if any(s != "ended" for s in statuses.values()):
             code = EXIT_CAPTURE_ERROR
     except KeyboardInterrupt:  # every run already ended (`interrupted`, or `error` if early)
-        code = EXIT_INTERRUPTED
+        if not pipelines:  # a stop before any session: main's pre-session end
+            raise
+        code = stop_end(ui=False, session=True).exit_code
     except Exception as e:  # every replay run already ended `error`, with the failure as an event
         print(f"error: the group replay did not run: {e!r}", file=sys.stderr)
         code = EXIT_CAPTURE_ERROR

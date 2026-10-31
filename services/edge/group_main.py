@@ -13,18 +13,13 @@ load, a failure to start) have no prefix.
 import argparse
 import json
 import sys
-import time
 
 from services.edge.capture.sources import SourceOpenError, open_source
-from services.edge.capture.types import HealthEvent, utc_now
-from services.edge.contract import UI_STOP_DETAIL
 from services.edge.group_runner import GroupCamera, run_group
 from services.edge.main import (
     EXIT_CAPTURE_ERROR,
-    EXIT_INTERRUPTED,
     EXIT_OPEN_FAILED,
     RunSettings,
-    StopRequest,
     calibration_failed_event,
     create_tracker,
     health_config,
@@ -35,10 +30,11 @@ from services.edge.main import (
     resolve_device,
     run_meta,
     start_http_preview,
-    stop_on_stdin,
 )
 from services.edge.matcher import CourtMatcher, MatcherParams
 from services.edge.reports.build import format_summary, write_report
+from services.edge.run.perception import start_perception
+from services.edge.run.stop import StopRequest, stop_before_session, stop_end, stop_on_stdin
 
 
 def say(camera_id: str, text: str) -> None:
@@ -58,11 +54,7 @@ def main(argv: list[str] | None = None) -> int:
             stop_on_stdin(stop)
         return run(cams, stop)
     except KeyboardInterrupt:  # a stop before the sessions (model load, slow stream open)
-        if stop.ui:  # no session yet; Studio's stop is still a normal end
-            print_event(HealthEvent("stopped", utc_now(), None, UI_STOP_DETAIL), None)
-            return 0
-        print_event(HealthEvent("interrupted", utc_now(), None, "Ctrl+C"), None)
-        return EXIT_INTERRUPTED
+        return stop_before_session(stop, print_event)
 
 
 def group_det_size(sizes: set[int | None]) -> int | None:
@@ -91,20 +83,12 @@ def run(cams: list[argparse.Namespace], stop: StopRequest) -> int:
         first = argparse.Namespace(**{**vars(first), "det_size": group_det_size(sizes)})
         asked = sorted(sizes, key=str)
         print(f"warning: cameras ask for det-size {asked}; the group uses {first.det_size}")
-    detector = gpu = model_loaded = None
-    if not first.no_detect:
-        try:
-            device, gpu = resolve_device(first.device)
-        except Exception as e:  # forced cuda without a GPU, or a broken torch install
-            print(f"error: {e}", file=sys.stderr)
-            return EXIT_CAPTURE_ERROR
-        print(f"device: {device}" + (f" ({gpu})" if gpu else " (no CUDA GPU in use)"))
-        try:
-            detector, _ = load_perception(first, device)
-            model_loaded = {"t_wall": utc_now(), "t_pc": time.perf_counter()}
-        except Exception as e:  # e.g. no network for the first weights download
-            print(f"error: model load failed: {e!r}", file=sys.stderr)
-            return EXIT_CAPTURE_ERROR
+    perception = start_perception(
+        first, resolve_device=resolve_device, load_perception=load_perception, emit=print_event
+    )
+    if perception is None:
+        return EXIT_CAPTURE_ERROR
+    detector = perception.detector  # each camera makes its own tracker
 
     cameras = []
     for a in cams:
@@ -125,7 +109,14 @@ def run(cams: list[argparse.Namespace], stop: StopRequest) -> int:
         a = by_id[camera_id]
         tracker = None if detector is None else create_tracker(a)
         return run_meta(
-            settings[camera_id], info, config, detector, tracker, gpu, None, model_loaded
+            settings[camera_id],
+            info,
+            config,
+            detector,
+            tracker,
+            perception.gpu,
+            None,
+            perception.model_loaded,
         )
 
     pipelines, previews = {}, []
@@ -166,7 +157,7 @@ def run(cams: list[argparse.Namespace], stop: StopRequest) -> int:
     except KeyboardInterrupt:  # every session already ended `interrupted`
         if not pipelines:  # a stop before any session: main's pre-session path (D-049)
             raise
-        code = EXIT_INTERRUPTED
+        code = stop_end(ui=stop.ui, session=True).exit_code
     except Exception as e:  # every session already ended `error`, with the failure as an event
         print(f"error: the group did not run: {e}", file=sys.stderr)
         code = EXIT_OPEN_FAILED if isinstance(e, SourceOpenError) else EXIT_CAPTURE_ERROR
@@ -189,7 +180,7 @@ def run(cams: list[argparse.Namespace], stop: StopRequest) -> int:
                 print(f"warning: {camera_id}: report not written: {e!r}", file=sys.stderr)
     except KeyboardInterrupt:
         print("warning: reports interrupted; run python -m services.edge.report", file=sys.stderr)
-        code = code or EXIT_INTERRUPTED
+        code = code or stop_end(ui=False, session=True).exit_code
     return code
 
 

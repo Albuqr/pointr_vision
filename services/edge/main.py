@@ -11,14 +11,11 @@ Each frame taken from capture is detected (RF-DETR Nano, person only) and tracke
 ./sessions): session.json, runs/<run_id>/run.json, frames.csv, tracks.csv (D-020).
 """
 
-import _thread
 import argparse
 import dataclasses
 import math
 import platform
 import re
-import select
-import signal
 import sys
 import threading
 import time
@@ -45,21 +42,40 @@ from services.edge.capture.sources import (
     SourceOpenError,
     open_source,
 )
-from services.edge.capture.types import Frame, HealthEvent, utc_now
-from services.edge.contract import UI_STOP_DETAIL, VIDEO_FILE
+from services.edge.capture.types import HealthEvent, utc_now
+from services.edge.contract import VIDEO_FILE
 from services.edge.perception.detector import DET_SIZE_MULTIPLE
 from services.edge.perception.loop import delay_stats, rates
 from services.edge.power import read_power
 from services.edge.recording.recorder import FileRecorder
 from services.edge.replay.resolve import ReplayError, resolve_replay
 from services.edge.reports.build import format_summary, write_report
+
+# Moved to services.edge.run (T9); re-exported until T12, tests replace these names on this module
+from services.edge.run.perception import (  # noqa: F401
+    create_tracker,
+    load_perception,
+    resolve_device,
+    start_perception,
+)
+from services.edge.run.stop import (  # noqa: F401
+    EXIT_INTERRUPTED,
+    StopRequest,
+    hold_ctrl_c,
+    ignore_ctrl_c,
+    release_ctrl_c,
+    stdin_ready,
+    stop_before_session,
+    stop_end,
+    stop_on_stdin,
+    stop_source,
+)
 from services.edge.session.types import CAMERA_ID_RE, GROUP_ID_RE, RunMeta, SessionMeta
 from services.edge.session.writer import FileSessionWriter, device_id
 from services.edge.ui.preview import run_preview
 
 EXIT_OPEN_FAILED = 2
 EXIT_CAPTURE_ERROR = 1
-EXIT_INTERRUPTED = 130
 
 
 def positive(cast):
@@ -232,57 +248,6 @@ def print_event(ev: HealthEvent, t0: float | None, prefix: str = "") -> None:
         pass
 
 
-def resolve_device(requested: str) -> tuple[str, str | None]:
-    """--device to (cpu | cuda:0, GPU name or None). auto is cuda when torch sees a CUDA GPU,
-    else cpu. Raises RuntimeError for a forced cuda with no usable GPU. Imports torch."""
-    import torch
-
-    if requested == "cuda" and not torch.cuda.is_available():
-        raise RuntimeError(
-            f"--device cuda but torch {torch.__version__} cannot use a CUDA GPU "
-            "(a CPU-only wheel, no NVIDIA GPU, or an old driver); see README, Install on a new PC"
-        )
-    if requested == "cpu" or not torch.cuda.is_available():
-        return "cpu", None
-    return "cuda:0", torch.cuda.get_device_name(0)
-
-
-def create_tracker(args: argparse.Namespace):
-    from services.edge.perception.tracker import ByteTrackTracker
-
-    return ByteTrackTracker(
-        track_lost_secs=args.track_lost_secs,
-        track_activation=args.track_activation,
-        track_min_frames=args.track_min_frames,
-    )
-
-
-def load_perception(args: argparse.Namespace, device: str):
-    """Detector and tracker, warmed up with one inference so the first slow call is not
-    counted in the run. Imported here: torch loads only when detection is on. Called before
-    the source opens, so a stream does not buffer stale frames during the load (D-018)."""
-    import torch
-
-    from services.edge.perception.detector import RFDETRDetector
-
-    t = time.perf_counter()
-    detector = RFDETRDetector.load(args.threshold, args.det_size, device)
-    loaded = time.perf_counter() - t
-    blank = np.zeros((args.height, args.width, 3), np.uint8)
-    t = time.perf_counter()
-    detector.detect(Frame(-1, t, utc_now(), blank, "warmup"))
-    warmup = time.perf_counter() - t
-    tracker = create_tracker(args)
-    print(
-        f"perception: rfdetr {version('rfdetr')} nano, device {detector.device}, "
-        f"det-size {detector.det_size}, threshold {detector.threshold}, "
-        f"torch {torch.__version__} threads {torch.get_num_threads()}; "
-        f"model load {loaded:.1f} s, warm-up {warmup * 1000:.0f} ms"
-    )
-    print(f"tracker: trackers {version('trackers')} ByteTrack {tracker.params}")
-    return detector, tracker
-
-
 def open_failed(ref: str, e: Exception) -> int:
     reason = str(e).strip()
     # no run, so no t0: t_mono is null (D-014)
@@ -391,109 +356,6 @@ def calibration_failed_event(refusal: str | None) -> HealthEvent | None:
     return take_calibration(Refused(refusal), None, (0, 0)).events[0]
 
 
-def ignore_ctrl_c():
-    """Replace the Ctrl+C handler with a message for the rest of the shutdown. Returns the
-    previous handler, or None off the main thread (handlers cannot be set there)."""
-
-    def wait(signum, frame):
-        try:
-            print("stopping, please wait: saving the session", file=sys.stderr, flush=True)
-        except OSError:  # nobody is reading any more
-            pass
-
-    try:
-        return signal.signal(signal.SIGINT, wait)
-    except ValueError:
-        return None
-
-
-def stdin_ready() -> bool:
-    """True when stdin has input or has ended (the writer closed its end). Never blocks and never
-    reads: on Windows a thread blocked in a synchronous pipe read stalls other calls on that
-    handle, and a DLL's start-up code does make one (`import scipy` hung in the main thread)."""
-    fd = sys.stdin.fileno()
-    if sys.platform != "win32":
-        return bool(select.select([fd], [], [], 0)[0])
-    import ctypes
-    import msvcrt
-    from ctypes import wintypes
-
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    peek = kernel32.PeekNamedPipe
-    peek.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p,
-                     ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p]  # fmt: skip
-    peek.restype = wintypes.BOOL
-    available = wintypes.DWORD()
-    if peek(msvcrt.get_osfhandle(fd), None, 0, None, ctypes.byref(available), None):
-        return available.value > 0
-    error = ctypes.get_last_error()
-    if error in (109, 232):  # ERROR_BROKEN_PIPE, ERROR_NO_DATA: the other end is gone
-        return True
-    raise OSError(error, "stdin is not a pipe")
-
-
-@dataclasses.dataclass
-class StopRequest:
-    """Where the launcher's stop came from: `source` is "ui" after a `stop ui` line (Studio's
-    stop, D-049) and None after a plain `stop`, the pipe closing, or a Ctrl+C."""
-
-    source: str | None = None
-
-    @property
-    def ui(self) -> bool:
-        """Studio's stop: the session ends `ended` with a `stopped` event, not `interrupted`."""
-        return self.source == "ui"
-
-
-def stop_source(line: str) -> str | None:
-    """The source a stop line names; anything but `stop ui` is a plain stop."""
-    return "ui" if line.split() == ["stop", "ui"] else None
-
-
-def stop_on_stdin(request: StopRequest | None = None) -> None:
-    """Start a thread that turns any input on stdin, or its end, into Ctrl+C: the launcher's way
-    to stop this process, also when the launcher itself dies (D-022). Fires once. The line's
-    source goes into `request` before the Ctrl+C, so the main thread reads it in its handler."""
-
-    if hasattr(signal, "SIGBREAK"):
-        # Ctrl+Break (unlike Ctrl+C) reaches a child in its own process group and would kill it
-        # before it saves: the launcher's stdin is the only stop channel
-        try:
-            signal.signal(signal.SIGBREAK, signal.SIG_IGN)
-        except ValueError:  # not the main thread
-            pass
-
-    def watch() -> None:
-        try:
-            while not stdin_ready():
-                time.sleep(0.1)
-        except (OSError, ValueError, AttributeError) as e:  # a terminal, a file, no stdin
-            print(f"warning: --stop-on-stdin cannot watch stdin ({e}); use Ctrl+C", file=sys.stderr)
-            return
-        if request is not None:
-            try:  # the launcher writes whole lines; a closed pipe reads as "" at once
-                request.source = stop_source(sys.stdin.readline())
-            except (OSError, ValueError, AttributeError):  # unreadable: a plain stop
-                pass
-        _thread.interrupt_main()  # the same path as Ctrl+C: KeyboardInterrupt in the main thread
-
-    threading.Thread(target=watch, name="stdin-stop", daemon=True).start()
-
-
-def hold_ctrl_c(arrived: threading.Event):
-    """Until release_ctrl_c, a Ctrl+C (or interrupt_main) only sets `arrived`. Returns the
-    previous handler, or None off the main thread (handlers cannot be set there)."""
-    try:
-        return signal.signal(signal.SIGINT, lambda signum, frame: arrived.set())
-    except ValueError:
-        return None
-
-
-def release_ctrl_c(previous) -> None:
-    if previous is not None:
-        signal.signal(signal.SIGINT, previous)
-
-
 def link_conflict(kind: str, link: str | None) -> str | None:
     """link is file exactly when kind is file, or link is not given (D-020)."""
     if link is not None and (kind == "file") != (link == "file"):
@@ -509,11 +371,7 @@ def main(argv: list[str] | None = None) -> int:
             stop_on_stdin(stop)
         return run(args, stop)
     except KeyboardInterrupt:  # Ctrl+C before capture started (model load, slow stream open)
-        if stop.ui:  # no session yet; Studio's stop is still a normal end
-            print_event(HealthEvent("stopped", utc_now(), None, UI_STOP_DETAIL), None)
-            return 0
-        print_event(HealthEvent("interrupted", utc_now(), None, "Ctrl+C"), None)
-        return EXIT_INTERRUPTED
+        return stop_before_session(stop, print_event)
 
 
 def health_config(args: argparse.Namespace) -> HealthConfig:
@@ -568,7 +426,7 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
         except ReplayError as e:
             return open_failed(args.replay, e)
         if group is not None:
-            return run_replay(args, group)
+            return run_replay(args, group, stop)
     ref = args.replay or args.source
     replay = None
     offer = FromFile(args.calibration) if args.calibration else None
@@ -614,23 +472,12 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
         print(f"error: {conflict}", file=sys.stderr)
         return EXIT_OPEN_FAILED
 
-    detector = tracker = gpu = model_loaded = None
-    if not args.no_detect:
-        try:
-            device, gpu = resolve_device(args.device)
-        except Exception as e:  # forced cuda without a GPU, or a broken torch install
-            note = "" if isinstance(e, RuntimeError) else "device check failed: "
-            print(f"error: {note}{e}", file=sys.stderr)
-            return EXIT_CAPTURE_ERROR
-        print(f"device: {device}" + (f" ({gpu})" if gpu else " (no CUDA GPU in use)"))
-        try:
-            detector, tracker = load_perception(args, device)
-            model_loaded = {"t_wall": utc_now(), "t_pc": time.perf_counter()}
-        except Exception as e:  # e.g. no network for the first weights download
-            # before any run, so no t0: t_mono is null (D-014)
-            on_event(HealthEvent("error", utc_now(), None, f"model load failed: {e!r}"), None)
-            print(f"error: model load failed: {e!r}", file=sys.stderr)
-            return EXIT_CAPTURE_ERROR
+    perception = start_perception(
+        args, resolve_device=resolve_device, load_perception=load_perception, emit=print_event
+    )
+    if perception is None:
+        return EXIT_CAPTURE_ERROR
+    detector, tracker = perception.detector, perception.tracker
 
     try:
         info = source.open()
@@ -687,7 +534,16 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
         log_event = pipeline.log_event
         pipeline.open_session(
             dataclasses.replace(
-                run_meta(settings, info, config, detector, tracker, gpu, replay, model_loaded),
+                run_meta(
+                    settings,
+                    info,
+                    config,
+                    detector,
+                    tracker,
+                    perception.gpu,
+                    replay,
+                    perception.model_loaded,
+                ),
                 checks=intake.checks,
             ),
         )
@@ -730,12 +586,9 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
                 if until is not None and time.perf_counter() >= until:
                     break
     except KeyboardInterrupt:
-        if stop is not None and stop.ui:  # Studio's stop: a normal end (D-049)
-            log_event(HealthEvent("stopped", utc_now(), time.perf_counter(), UI_STOP_DETAIL))
-        else:
-            session_status = "interrupted"
-            status = EXIT_INTERRUPTED
-            log_event(HealthEvent("interrupted", utc_now(), time.perf_counter(), "Ctrl+C"))
+        end = stop_end(ui=stop is not None and stop.ui, session=True)
+        session_status, status = end.status, end.exit_code
+        log_event(end.event(time.perf_counter()))
     except Exception as e:  # one shutdown path; the failure is an event, not a traceback
         session_status = "error"
         status = EXIT_CAPTURE_ERROR
@@ -750,8 +603,7 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
         try:
             session_status = pipeline.stop(session_status)
         finally:
-            if previous is not None:
-                signal.signal(signal.SIGINT, previous)
+            release_ctrl_c(previous)
         try:
             snapshot = pipeline.stats()
             print(f"session {pipeline.status}: {pipeline.session_dir}")

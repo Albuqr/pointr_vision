@@ -33,13 +33,12 @@ from services.edge.camera_pipeline import (
 )
 from services.edge.capture.health import HealthConfig
 from services.edge.capture.types import Frame, FrameSource, HealthEvent, SourceInfo, utc_now
-from services.edge.contract import UI_STOP_DETAIL
-from services.edge.main import hold_ctrl_c, release_ctrl_c
 from services.edge.matcher import CourtMatcher, CrossCameraMatcher, LocalTrack
 from services.edge.perception.types import Detections, Detector, Tracker, TrackObs
 from services.edge.recording.recorder import FileRecorder
 from services.edge.replay.order import GroupTimeOrder
 from services.edge.replay.resolve import ReplayTarget
+from services.edge.run.stop import hold_ctrl_c, release_ctrl_c, stop_end
 from services.edge.session.types import RunMeta, SessionMeta
 from services.edge.session.writer import FileSessionWriter, device_id
 
@@ -212,8 +211,7 @@ def run_group(
             for cam, info in zip(cameras, infos, strict=True)
         ]
         calibrations = [
-            (i.calibration, i.calibration.positions() if i.calibration else None)
-            for i in intakes
+            (i.calibration, i.calibration.positions() if i.calibration else None) for i in intakes
         ]
         shared_detector = None if detector is None else SharedDetector(detector)
         if detector is not None and matcher is None:
@@ -323,13 +321,11 @@ def run_group(
             _raise_shared_failure(pipelines)
         _raise_shared_failure(pipelines)  # also when the failing camera was the last one running
     except KeyboardInterrupt:
-        if ui_stop():  # Studio's stop: a normal end (D-049)
-            for p in pipelines:
-                p.log_event(HealthEvent("stopped", utc_now(), time.perf_counter(), UI_STOP_DETAIL))
-        else:
-            status = "interrupted"
-            for p in pipelines:
-                p.log_event(HealthEvent("interrupted", utc_now(), time.perf_counter(), "Ctrl+C"))
+        end = stop_end(ui=ui_stop(), session=True)  # Studio's stop is a normal end (D-049)
+        status = end.status
+        for p in pipelines:
+            p.log_event(end.event(time.perf_counter()))
+        if end.exit_code:
             raise
     except Exception as e:  # one shutdown path; the failure is an event in every session
         status = "error"
