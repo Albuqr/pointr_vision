@@ -595,9 +595,6 @@ class Studio:
                 bool(payload.get("save_anyway", False)),
                 enforce_limit=save,
                 require_checks=save,
-                court_dimensions=(court.length_m, court.width_m)
-                if court.kind == "fiba_half"
-                else None,
             )
         except (KeyError, TypeError, ValueError, np.linalg.LinAlgError, cv2.error) as exc:
             message = str(exc) or exc.__class__.__name__

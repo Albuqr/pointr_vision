@@ -164,3 +164,41 @@ def test_partial_calibration_records_metre_tracks_and_a_valid_run_block(
     assert (float(first["x_m"]), float(first["y_m"])) == pytest.approx(floor, abs=1e-3)
     assert first["in_court"] == "true"
     assert load(path)["camera_id"] == "cam1"
+
+
+def test_half_court_camera_that_sees_only_the_key_saves_and_loads(client, tmp_path):
+    """The key is 14% of a half court. A 20% coverage rule (D-032) refused it for `fiba_half`
+    only, while `fiba_full` and `custom` accepted the same points (D-070)."""
+    clip = make_clips(tmp_path)["moving"]
+    client.post("/api/cameras", json={"camera_id": "cam1", "source": str(clip), "link": "file"})
+    token = client.get("/api/cameras/cam1/calibration/frame").headers["x-frame-token"]
+    project = sideline_camera(position=(7.0, -6.0, 4.0), hfov_deg=100.0)
+    fit_names = ("near_key_near_left", "near_key_near_right", "near_key_far_left")
+    fit_names += ("near_key_far_right",)
+    points = []
+    for role, names in (
+        ("calibration", fit_names),
+        ("check", ("near_basket_floor", "centre_circle")),
+    ):
+        for name in names:
+            u, v = project(COURT.landmarks[name])
+            points.append(
+                {
+                    "image_px": [round(u), round(v)],
+                    "court_m": list(COURT.landmarks[name]),
+                    "role": role,
+                }
+            )
+    payload = {
+        "frame_token": token,
+        "court_kind": "fiba_half",
+        "length_m": 14,
+        "width_m": 15,
+        "max_check_error_m": 0.5,
+        "points": points,
+    }
+    saved = client.put("/api/cameras/cam1/calibration", json=payload)
+    assert saved.status_code == 200, saved.text
+    document = load_calibration(saved.json()["path"])  # validate_calibration runs on load
+    assert document["court"]["type"] == "fiba_half"
+    assert len(saved.json()["check_errors_m"]) == 2

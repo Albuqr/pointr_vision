@@ -7,6 +7,6 @@ def test_runbook_documents_half_court_phone_setup_points_and_tape_check():
     )
     assert "mount one phone high near each" in runbook
     assert "corners (x=0) and midcourt-line corners (x=14)" in runbook
-    assert "at least 20% of the half-court area" in runbook
+    assert "sees only part of the half" in runbook and "20%" not in runbook
     assert "at x=1 m and x=4 m" in runbook
     assert "held-out residuals for each phone" in runbook
