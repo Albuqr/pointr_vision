@@ -38,7 +38,7 @@ from services.edge.session.types import (
 
 FRAMES_COLUMNS = [
     "seq", "t_recv", "t_proc_start", "t_proc_end", "app_delay_ms",
-    "n_detections", "n_tracks", "dropped_total", "t_video",
+    "n_detections", "n_tracks", "dropped_total", "t_video", "match_seq",
 ]  # fmt: skip
 TRACKS_COLUMNS = [
     "seq", "track_id", "x1", "y1", "x2", "y2", "confidence", "state", "athlete_id",
@@ -47,6 +47,8 @@ TRACKS_COLUMNS = [
 ]  # fmt: skip
 # a row says how its track was linked (TrackObs.link, 0.14.0, D-051); UNSHARED when it could not be
 READY_STEPS = ("model_loaded", "first_frame", "first_preview")  # run.json ready (0.15.0, D-052)
+# the only events a replay adds to session.json (D-042, D-068, D-072)
+REPLAY_EVENTS = ("interrupted", "error", "startup_check_failed", "replay_order_approximate")
 FLUSH_SECS = 0.5  # flush period; under the contract's "at least once per second"
 METHOD = "box_bottom_center"
 UNPROJECTED_EVENT_SECS = 30.0  # at most one "no metre position" event per this many seconds
@@ -223,7 +225,7 @@ class FileSessionWriter:
     ) -> None:
         """A replay: add `run` to the session already in session_dir. In session.json only `runs`
         grows; the session's status and recording stay as the live run left them. The replay adds
-        no events except `interrupted`, `error` or `startup_check_failed`, tagged with its run id,
+        no events except those in REPLAY_EVENTS, tagged with its run id,
         so a replay that did not end cleanly is visible (D-042)."""
         if (positions is None) != (run.calibration is None):
             raise ValueError("a calibrated run needs positions, and positions need a calibration")
@@ -437,6 +439,7 @@ class FileSessionWriter:
                     _opt(r.n_tracks),
                     r.dropped_total,
                     _num(r.t_video),
+                    _opt(r.match_seq),
                 ]
             )
         elif kind == "tracks":
@@ -530,9 +533,9 @@ class FileSessionWriter:
 
     def _add_event(self, ev: SessionEvent) -> bool:
         """Append to session.json events; True when session.json changed. A replay keeps only
-        its interrupted, error and startup_check_failed events, tagged with its run id."""
+        its REPLAY_EVENTS events, tagged with its run id."""
         if self._replay:
-            if ev.kind not in ("interrupted", "error", "startup_check_failed"):
+            if ev.kind not in REPLAY_EVENTS:
                 return False
             detail = f"replay {self._run_doc['run_id']}: {ev.detail}"
             self._replay_events.append(asdict(replace(ev, detail=detail)))

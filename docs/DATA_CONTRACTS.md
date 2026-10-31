@@ -1,6 +1,6 @@
 # Data contracts
 
-Contract version: **0.26.0**. Any change bumps the version (minor for additive fields, major
+Contract version: **0.27.0**. Any change bumps the version (minor for additive fields, major
 for removals or meaning changes) and needs a `DECISIONS.md` entry. JSON Schemas in
 `services/edge/contracts/` are written from this file and tests check them against it (D-009).
 The schemas hold a semver pattern, not the number: `contract.validate` in `services/edge/contract.py`
@@ -65,7 +65,7 @@ status `running`. The final status, `ended_at` and counts are written in a `fina
 
 ```json
 {
-  "contract_version": "0.26.0",
+  "contract_version": "0.27.0",
   "session_id": "uuid",
   "device_id": "uuid",
   "camera_id": "cam1 | null",
@@ -109,7 +109,8 @@ queue, a failed writer, a frame of another size) has an empty `t_video`. A repla
 (`mode: replay`) adds a run to the session and leaves `recording` alone: in `session.json` only
 `runs` grows, plus `interrupted`, `error` or `startup_check_failed` events whose `detail` starts
 with `replay <run_id>:` when the replay did not end cleanly or calibration intake failed
-(D-042, D-068); the replay's other events are printed, not written.
+(D-042, D-068), and a `replay_order_approximate` event (0.27.0, D-072) the same way; the replay's
+other events are printed, not written.
 A replay of a bare video file starts a new session with `recording` disabled.
 A replay of a group (0.20.0, D-060: `--replay <group_id>`) adds one replay run, as above, to the session of
 every camera whose `session.json` has that `group_id`; section 3 `group` says what those runs share.
@@ -118,11 +119,15 @@ Event `t_mono` is `null` for events that precede the run's `t0`, such as
 Event kinds: `source_open_failed`, `source_lost`, `source_recovered`,
 `frozen_frames`, `dark_frames`, `writer_backlog`, `recorder_backlog`, `interrupted`, `error`,
 `camera_gap`, `sensor_outage`, `startup_check_failed`, `rim_drift` (those four are 0.11.0, Track R),
-`stopped` (0.12.0, D-049), `appearance_only` (0.21.0, D-061).
+`stopped` (0.12.0, D-049), `appearance_only` (0.21.0, D-061), `replay_order_approximate` (0.27.0, D-072).
 `appearance_only` is written once, when the session opens (so `t_mono` is `null`), for a camera of a group run of
 two or more cameras that has no valid calibration and a matcher running: its tracks cannot be linked by court
 position, so they link to the other cameras by appearance only (section 5). `detail` says why
 (`no valid calibration: ...`).
+`replay_order_approximate` (0.27.0, D-072) is written once to each session of a group replay (`detail` starting
+`replay <run_id>:`, as the other events a replay writes to `session.json`) whose live frames.csv
+has no `match_seq` (a recording from before 0.27.0): the replay then orders the cameras' frames by the live
+`t_recv`, which is the live processing order only when no camera's processing lagged another's. `detail` says so.
 `stopped` means the session was asked to stop and ended normally: status `ended`, not `interrupted`. Its
 `detail` starts with the source of the request and a colon; the only source so far is `ui` (Studio's stop
 button, through the launcher's stop channel), e.g. `ui: stop requested in Studio`. A Ctrl+C, the launcher's own
@@ -140,7 +145,7 @@ calibration used by this session and records its mean held-out check residual in
 
 ```json
 {
-  "contract_version": "0.26.0",
+  "contract_version": "0.27.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "mode": "live | replay",
@@ -265,8 +270,11 @@ not assumed. A group replay (0.20.0, D-060) is one group run over the recorded s
 camera's run has `mode: replay`, and `cameras` lists each session's own `session_id` with the replay's `run_id`. Its
 matcher and trackers work in the live run's group time, not the replay's: the group time of a replayed frame is the
 live run's `t0_mono + t_recv` of the frame at the same video position (`frames.csv` `t_video`), interpolated by
-video position for a frame the live run did not process, and the cameras' frames reach the matcher one at a time in
-that order. Its `params` are the live run's `group.params` (the defaults, with the replay's `--track-lost-secs` as
+video position for a frame the live run did not process. The cameras' frames reach the matcher one at a time in the
+order the live run called it (0.27.0, D-072): the live `frames.csv` `match_seq`, not group time, because the live
+cameras' processing threads need not follow receive order. A video frame whose live row has no `match_seq` (the live run
+never gave it to the matcher) is not processed. A live run from before 0.27.0 has no `match_seq`: its frames go in
+group-time order, and a `replay_order_approximate` event says so. Its `params` are the live run's `group.params` (the defaults, with the replay's `--track-lost-secs` as
 `lost_s`, when the live run has none), and its calibration is the live run's `calibration`. The replay's own
 `frames.csv` times stay the times of the replay. `params` records the effective parameters of the cross-camera matcher by name, like
 `tracker.params` (`{}` when no matcher ran); the matcher slices list the names here, with a minor bump.
@@ -321,6 +329,7 @@ One row per **processed** frame, including frames with zero detections.
 | n_tracks | int/empty | tracks output by the tracker; empty when detection is off |
 | dropped_total | int | capture's drop count when this frame was taken for processing |
 | t_video | float/empty | the frame's time in the source video, s from its first frame (0.11.0): the container timestamp on a replay, the time in `video.mkv` for a live run that records (R1); empty otherwise |
+| match_seq | int/empty | the position of this frame's call of the cross-camera matcher among all the calls of the group run (0.27.0, D-072): 0, 1, 2, ... in the order the calls were made, over all the cameras of the run, so the cameras' rows of one group run have no `match_seq` twice. Empty when the frame never reached the matcher: a single camera, a run without detection, a frame that failed before the call. A gap is possible where a frame's row was not written. A file written before 0.27.0 has no `match_seq` column; read it as empty |
 
 ## 5. `tracks.csv`
 
@@ -423,7 +432,7 @@ One report per run, one per camera: there is no fusion across cameras.
 
 ```json
 {
-  "contract_version": "0.26.0",
+  "contract_version": "0.27.0",
   "run_id": "uuid",
   "session_id": "uuid",
   "camera_id": "cam1 | null",
@@ -767,7 +776,7 @@ recorded video and is compared with `frames.csv` `t_video`; shots and tracks joi
 
 ```json
 {
-  "contract_version": "0.26.0",
+  "contract_version": "0.27.0",
   "fusion_id": "uuid",
   "group_id": "token",
   "created_at": "2026-12-01T18:50:00Z",

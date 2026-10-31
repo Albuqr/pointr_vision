@@ -3,10 +3,12 @@ processing the videos together in the live run's group time, and gives the live 
 the same frames. In-process with synthetic calibrated clips and a scripted fake detector; the
 command line by subprocess with --no-detect. No camera, weights or network."""
 
+import csv
 import hashlib
 import json
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -57,7 +59,7 @@ class Scripted:
         )
 
 
-def record_group(clips, tmp_path, detector, params=STILL) -> Path:
+def record_group(clips, tmp_path, detector, params=STILL, make_tracker=None, matcher=None) -> Path:
     """A live group run of two calibrated cameras, paced like cameras, recorded."""
     out = tmp_path / "out"
     cameras = [
@@ -68,9 +70,9 @@ def record_group(clips, tmp_path, detector, params=STILL) -> Path:
         )
     ]
     statuses = run_group(
-        "g1", cameras, detector, lambda c: OneTrackPerDetection(), out, CONFIG,
+        "g1", cameras, detector, make_tracker or (lambda c: OneTrackPerDetection()), out, CONFIG,
         lambda c, info: run_meta(SETTINGS, info, CONFIG, detector, OneTrackPerDetection(), None),
-        record=True, matcher=CourtMatcher(params),
+        record=True, matcher=matcher or CourtMatcher(params),
     )  # fmt: skip
     assert statuses == {"cam1": "ended", "cam2": "ended"}
     return out
@@ -120,6 +122,20 @@ def ids_by_video_frame(run_dir: Path, fps: float) -> dict[int, list[tuple[int, s
         if t["seq"] in index:
             out.setdefault(index[t["seq"]], []).append((int(t["track_id"]), t["link"]))
     return out
+
+
+def replay_ids_equal_live(out: Path) -> int:
+    """Assert every camera's replay gives the live run's (track_id, link) rows on the video
+    frames both processed; returns how many frames were compared."""
+    compared = 0
+    for cid, ((_, live_dir), (_, replay_dir)) in runs(out).items():
+        live_ids = ids_by_video_frame(live_dir, FPS)
+        replay_ids = ids_by_video_frame(replay_dir, FPS)
+        assert live_ids, f"{cid}: the live run has no tracks"
+        for k, rows_ in live_ids.items():
+            assert replay_ids[k] == rows_, f"{cid} video frame {k}"
+            compared += 1
+    return compared
 
 
 def test_a_group_replay_adds_one_run_per_camera_and_leaves_the_originals_byte_identical(
@@ -226,33 +242,177 @@ def test_the_replays_shared_ids_equal_the_live_runs_on_the_same_frames(
     detector = Scripted(boxes, start, gone)
     out = record_group(clips, tmp_path, detector)
     replay_group(out, detector)
-    compared = 0
-    for cid, ((_, live_dir), (_, replay_dir)) in runs(out).items():
-        live_ids = ids_by_video_frame(live_dir, FPS)
-        replay_ids = ids_by_video_frame(replay_dir, FPS)
-        assert live_ids, f"{cid}: the live run has no tracks"
-        for k, rows_ in live_ids.items():
-            assert replay_ids[k] == rows_, f"{cid} video frame {k}"
-            compared += 1
-    assert compared >= 20
+    assert replay_ids_equal_live(out) >= 20
 
 
-def test_the_replay_matcher_gets_the_live_runs_group_times_in_order(clips, tmp_path):
+class ForcedLag:
+    """Makes the live cameras' processing order differ from their receive order at video frame
+    10 (D-072): both cameras' trackers meet there, and the camera whose frame was received first
+    waits until the other camera's frame has passed the matcher. Each camera has its own tracker
+    thread and the detector lock is free by then, so nothing waits on anything but this."""
+
+    def __init__(self):
+        self.t_recv: dict[str, float] = {}
+        self.passed = {"cam1": threading.Event(), "cam2": threading.Event()}
+        self._meet = threading.Barrier(2)
+
+    def tracker(self, camera_id):
+        lag = self
+
+        class Tracker(OneTrackPerDetection):
+            def update(self, dets, frame):
+                if frame.seq == 10:
+                    lag.meet(camera_id, frame.t_recv)
+                return super().update(dets, frame)
+
+        return Tracker()
+
+    def meet(self, camera_id, t_recv):
+        self.t_recv[camera_id] = t_recv
+        try:
+            self._meet.wait(10)
+        except threading.BrokenBarrierError:
+            return  # the test then says the order was not forced
+        first = min(self.t_recv, key=self.t_recv.get)
+        if camera_id == first:
+            self.passed["cam2" if first == "cam1" else "cam1"].wait(10)
+
+    def matcher(self, params):
+        """A matcher that records its calls and says when a camera's frame 10 has passed it."""
+        lag, calls = self, []
+
+        class Spy(CourtMatcher):
+            def update(self, camera_id, t_recv, tracks):
+                out = super().update(camera_id, t_recv, tracks)
+                calls.append((camera_id, t_recv))
+                if sum(c == camera_id for c, _ in calls) == 11:  # video frame 10, nothing dropped
+                    lag.passed[camera_id].set()
+                return out
+
+        return Spy(params), calls
+
+
+def test_the_replay_follows_the_live_matcher_order_when_it_differs_from_receive_order(
+    clips, tmp_path
+):
+    detector = Scripted(NEAR, {"cam2": 10})
+    lag = ForcedLag()
+    matcher, live_calls = lag.matcher(STILL)
+    out = record_group(clips, tmp_path, detector, make_tracker=lag.tracker, matcher=matcher)
+
+    # the live run really processed frame 10 against the order it was received in
+    assert set(lag.t_recv) == {"cam1", "cam2"}, "both cameras reached video frame 10"
+    at = {c: [i for i, (cc, _) in enumerate(live_calls) if cc == c][10] for c in lag.t_recv}
+    received_first = min(lag.t_recv, key=lag.t_recv.get)
+    assert at[received_first] > at["cam2" if received_first == "cam1" else "cam1"]
+    replay_group(out, detector)
+    assert replay_ids_equal_live(out) >= 20
+
+
+def live_calls(out: Path) -> list[tuple[str, float]]:
+    """The live run's matcher calls in the order it made them: (camera_id, group time)."""
+    calls = []
+    for cid, found in runs(out).items():
+        live, live_dir = found[0]
+        for f in rows(live_dir / "frames.csv"):
+            assert f["match_seq"], f"{cid} seq {f['seq']}: a processed frame has a matcher call"
+            calls.append((int(f["match_seq"]), cid, live["t0_mono"] + float(f["t_recv"])))
+    assert sorted(n for n, _, _ in calls) == list(range(len(calls)))  # one counter, no gaps
+    return [(cid, t) for _, cid, t in sorted(calls)]
+
+
+def test_the_replay_matcher_gets_the_live_runs_group_times_in_the_live_call_order(clips, tmp_path):
     detector = Scripted(FAR, {"cam2": 5})
     out = record_group(clips, tmp_path, detector)
     calls = []
 
     class Spy(CourtMatcher):
         def update(self, camera_id, t_recv, tracks):
-            calls.append((t_recv, camera_id))
+            calls.append((camera_id, t_recv))
             return super().update(camera_id, t_recv, tracks)
 
     replay_group(out, detector, matcher=Spy(STILL))
-    assert len(calls) == 60 and calls == sorted(calls)
-    for cid, ((live, live_dir), _) in runs(out).items():  # the live times of the live frames
-        live_t = {live["t0_mono"] + float(f["t_recv"]) for f in rows(live_dir / "frames.csv")}
-        replay_t = [t for t, c in calls if c == cid]
-        assert all(any(abs(a - b) < 1e-9 for b in replay_t) for a in live_t)
+    live = live_calls(out)
+    assert len(calls) == len(live) == 60
+    assert [c for c, _ in calls] == [c for c, _ in live]
+    assert all(abs(a - b) < 1e-9 for (_, a), (_, b) in zip(calls, live, strict=True))
+    for found in runs(out).values():  # the replay numbers its own calls too
+        _, replay_dir = found[1]
+        numbers = [int(f["match_seq"]) for f in rows(replay_dir / "frames.csv")]
+        assert numbers == sorted(numbers) and len(set(numbers)) == 30
+
+
+def rewrite_live_frames(out: Path, camera_id: str, edit) -> None:
+    """Apply edit(fieldnames, rows) -> (fieldnames, rows) to a camera's live frames.csv."""
+    _, live_dir = runs(out)[camera_id][0]
+    path = live_dir / "frames.csv"
+    names = list(rows(path)[0])
+    names, new_rows = edit(names, rows(path))
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, names, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(new_rows)
+
+
+def replay_events(out: Path, kind: str) -> dict[str, list[dict]]:
+    found = {}
+    for folder in (p for p in out.iterdir() if p.is_dir()):
+        session = load(folder / "session.json")
+        found[session["camera_id"]] = [e for e in session["events"] if e["kind"] == kind]
+    return found
+
+
+def test_a_recording_without_match_seq_replays_in_receive_order_and_says_so(clips, tmp_path):
+    detector = Scripted(NEAR, {"cam2": 10})
+    out = record_group(clips, tmp_path, detector)
+    live = live_calls(out)
+    for cid in ("cam1", "cam2"):  # a recording from before 0.27.0
+        rewrite_live_frames(
+            out, cid, lambda names, rs: ([n for n in names if n != "match_seq"], rs)
+        )
+    calls = []
+
+    class Spy(CourtMatcher):
+        def update(self, camera_id, t_recv, tracks):
+            calls.append((camera_id, t_recv))
+            return super().update(camera_id, t_recv, tracks)
+
+    assert replay_group(out, detector, matcher=Spy(STILL)) == {"cam1": "ended", "cam2": "ended"}
+
+    assert len(calls) == 60  # every frame, as before
+    assert [t for _, t in calls] == sorted(t for _, t in live)  # in group-time order
+    events = replay_events(out, "replay_order_approximate")
+    assert set(events) == {"cam1", "cam2"}
+    for cid, found in events.items():
+        [event] = found
+        assert event["t_mono"] is None and "match_seq" in event["detail"], cid
+
+
+def test_a_frame_with_no_match_seq_is_not_processed_by_the_replay(clips, tmp_path):
+    detector = Scripted(NEAR)
+    out = record_group(clips, tmp_path, detector)
+    skipped = {"3", "4"}
+
+    def blank(names, rs):
+        return names, [{**r, "match_seq": ""} if r["seq"] in skipped else r for r in rs]
+
+    rewrite_live_frames(out, "cam1", blank)
+    calls = []
+
+    class Spy(CourtMatcher):
+        def update(self, camera_id, t_recv, tracks):
+            calls.append(camera_id)
+            return super().update(camera_id, t_recv, tracks)
+
+    replay_group(out, detector, matcher=Spy(STILL))
+
+    assert calls.count("cam1") == 28 and calls.count("cam2") == 30
+    assert not any(replay_events(out, "replay_order_approximate").values())  # the order is exact
+    (_, _), (_, replay_dir) = runs(out)["cam1"]
+    frames = {f["seq"]: f for f in rows(replay_dir / "frames.csv")}
+    assert len(frames) == 30  # nothing is silently dropped: the frame is logged, with no tracks
+    assert all(frames[s]["match_seq"] == "" and frames[s]["n_tracks"] == "0" for s in skipped)
+    assert not any(t["seq"] in skipped for t in rows(replay_dir / "tracks.csv"))
 
 
 def test_a_target_that_is_no_group_is_none_and_a_mixed_group_is_refused(clips, tmp_path):

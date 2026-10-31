@@ -36,7 +36,7 @@ from services.edge.child_protocol import StartFailed, emit
 from services.edge.matcher import CourtMatcher, CrossCameraMatcher, LocalTrack
 from services.edge.perception.types import Detections, Detector, Tracker, TrackObs
 from services.edge.recording.recorder import FileRecorder
-from services.edge.replay.order import GroupTimeOrder
+from services.edge.replay.order import MatcherOrder
 from services.edge.replay.resolve import ReplayTarget
 from services.edge.run.stop import hold_ctrl_c, ignore_ctrl_c, release_ctrl_c, stop_end
 from services.edge.run.wait import Waiter, plain
@@ -47,6 +47,12 @@ from services.edge.session.writer import FileSessionWriter, device_id
 # not be used has its own error event
 APPEARANCE_ONLY = (
     "no valid calibration: tracks link to the other cameras by clothing colour and box height only"
+)
+
+# the replay_order_approximate event's detail (DATA_CONTRACTS section 2, D-072)
+APPROXIMATE = (
+    "the live run recorded no matcher-call order (frames.csv match_seq): frames are replayed in "
+    "receive-time order, which is the live order only if no camera's processing lagged another's"
 )
 
 OnGroupEvent = Callable[[str, HealthEvent, float | None], None]  # camera_id, event, run's t0
@@ -67,6 +73,8 @@ class RecordedCamera:
     calibration: dict | None  # the live run's saved run block
     group_time: Callable[[int], float] | None = None  # video frame seq -> the live run's group
     # time (PC clock); None: the camera's own receive times, no group (decision 13)
+    match_seq: dict[int, int] | None = None  # video frame seq -> the live run's matcher call
+    # number (D-072); None: a live run without it, so the order is that of group_time
 
 
 @dataclass(frozen=True)
@@ -104,12 +112,27 @@ class SharedDetector:
                 raise SharedCodeError(f"detector: {e!r}") from e
 
 
+class MatchNumbers:
+    """Numbers the matcher calls of one group run, one counter for all its cameras, in the order
+    the matcher sees them: the number is taken in the same critical section as the call (D-072)."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._next = 0
+
+    def call(self, fn: Callable[[], list]) -> tuple[int, list]:
+        with self._lock:
+            n, self._next = self._next, self._next + 1
+            return n, fn()
+
+
 class CameraTracker:
     """A camera's own tracker, writing the matcher's group track IDs and links instead of its
     local ones. `positions` (a calibrated camera's PositionMap) gives each track's court position
     for the matcher; `image_size` is the size the calibration was made at, and a frame of another
     size has no positions (the writer leaves them empty too). Each track also reports its
-    appearance, from its box in the frame."""
+    appearance, from its box in the frame. `match_seq` is the number of the matcher call of the
+    frame last updated, None if it made none (frames.csv `match_seq`)."""
 
     def __init__(
         self,
@@ -118,11 +141,14 @@ class CameraTracker:
         matcher: CrossCameraMatcher,
         positions=None,
         image_size: tuple[int, int] | None = None,
-        order: GroupTimeOrder | None = None,
+        order: MatcherOrder | None = None,
+        numbers: MatchNumbers | None = None,
     ):
         self._tracker, self._camera_id, self._matcher = tracker, camera_id, matcher
         self._positions, self._image_size = positions, image_size
         self._order = order  # a group replay: the live run's group time, in its order
+        self._numbers = numbers or MatchNumbers()  # shared by the cameras of a group run
+        self.match_seq: int | None = None
 
     def _court_xy(self, box, frame: Frame):
         if self._positions is None or frame.image.shape[1::-1] != self._image_size:
@@ -133,8 +159,11 @@ class CameraTracker:
             return None
 
     def update(self, dets: Detections, frame: Frame) -> list[TrackObs]:
+        self.match_seq = None
         if self._order is None:
             return self._update(dets, frame)
+        if not self._order.takes(self._camera_id, frame.seq):
+            return []  # the live run gave this frame to no matcher: nor does the replay
         with self._order.turn(self._camera_id, frame.seq) as t:
             return self._update(dets, dataclasses.replace(frame, t_recv=t))
 
@@ -145,7 +174,9 @@ class CameraTracker:
             for t in tracks
         ]
         try:  # also with no tracks: the camera reported
-            linked = self._matcher.update(self._camera_id, frame.t_recv, local)
+            self.match_seq, linked = self._numbers.call(
+                lambda: self._matcher.update(self._camera_id, frame.t_recv, local)
+            )
         except Exception as e:
             raise SharedCodeError(f"matcher: {e!r}") from e
         return [
@@ -245,10 +276,16 @@ def run_group(
         if detector is not None and matcher is None and not solo:
             matcher = CourtMatcher()
         order = (
-            GroupTimeOrder({c.camera_id: c.replay.group_time for c in cameras})
+            MatcherOrder(
+                {c.camera_id: c.replay.group_time for c in cameras},
+                {c.camera_id: c.replay.match_seq for c in cameras}
+                if all(c.replay.match_seq is not None for c in cameras)
+                else None,  # one camera without it: all go in group-time order
+            )
             if group_replay and detector is not None
             else None
         )
+        numbers = MatchNumbers()
         session_ids = [
             c.replay.session_id if c.kind == "replay_session" else str(uuid.uuid4())
             for c in cameras
@@ -295,6 +332,7 @@ def run_group(
                     positions,
                     calibration and calibration.image_size,
                     order,
+                    numbers,
                 ),
                 calibration=calibration,
                 positions=positions,
@@ -330,6 +368,8 @@ def run_group(
             opened.append(p)
             for event in intakes[i].events:
                 p.log_event(event)
+            if order and not order.exact:
+                p.log_event(HealthEvent("replay_order_approximate", utc_now(), None, APPROXIMATE))
             if detector is not None and len(cameras) > 1 and calibrations[i][1] is None:
                 p.log_event(HealthEvent("appearance_only", utc_now(), None, APPEARANCE_ONLY))
             if on_session:

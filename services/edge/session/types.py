@@ -75,6 +75,7 @@ class FrameRecord:
     n_tracks: int | None
     dropped_total: int  # capture's drop count when this frame was taken for processing
     t_video: float | None = None  # s in the source video, None when unknown (0.11.0)
+    match_seq: int | None = None  # number of the frame's matcher call in its group run (0.27.0)
 
     @property
     def app_delay_ms(self) -> float:
