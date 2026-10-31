@@ -25,7 +25,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from services.edge.calibration.intake import FromFile, FromRun, NotUsed, Refused, take_calibration
+from services.edge.calibration.intake import take_calibration
 from services.edge.camera_pipeline import (
     CameraPipeline,
     LiveInput,
@@ -44,7 +44,7 @@ from services.edge.child_protocol import PreviewListening, SessionOpened, StartF
 from services.edge.contract import VIDEO_FILE
 from services.edge.perception.detector import DET_SIZE_MULTIPLE
 from services.edge.recording.recorder import FileRecorder
-from services.edge.replay.resolve import ReplayError, resolve_replay
+from services.edge.replay.resolve import ReplayError
 
 # Moved to services.edge.run (T9, T11); re-exported until T12, tests replace these names on this
 # module
@@ -64,8 +64,9 @@ from services.edge.run.perception import (  # noqa: F401
     resolve_device,
     start_perception,
 )
+from services.edge.run.plan import calibration_offer, single_replay
 from services.edge.run.preview import start_http_preview
-from services.edge.run.report import print_benchmark, print_event, print_report
+from services.edge.run.report import Reporter, print_benchmark, print_event, print_report
 from services.edge.run.stop import (  # noqa: F401
     EXIT_CAPTURE_ERROR,
     EXIT_INTERRUPTED,
@@ -288,38 +289,14 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
             return run_replay(args, group, stop)
     ref = args.replay or args.source
     replay = None
-    offer = FromFile(args.calibration) if args.calibration else None
-    if offer is None and args.calibration_failed:
-        offer = Refused(args.calibration_failed)
-    elif offer is None and args.calibration_problem:
-        offer = NotUsed(args.calibration_problem)
+    offer = calibration_offer(args)
     try:
         if args.replay:
-            replay = resolve_replay(args.replay, args.out)
+            replay, offer = single_replay(args, offer)
             if not replay.verified:
-                print(
-                    "warning: the session has no video hash (its recording did not finish), so "
-                    "the video cannot be checked against it",
-                    file=sys.stderr,
-                )
+                Reporter().unverified(None)
             args.link = "file"
             args.camera_id = args.camera_id or replay.camera_id
-            if offer is None and replay.session_dir is not None:
-                from services.edge.session.folder import SessionDamaged, read_session
-
-                saved = read_session(replay.session_dir)
-                try:
-                    if not saved.runs or saved.runs[0] is None:
-                        raise ReplayError("the recorded session has no readable live run")
-                    live = saved.runs[0]
-                    block = live.require().get("calibration")
-                except SessionDamaged as exc:
-                    raise ReplayError(str(exc)) from exc
-                # Tolerant snapshots replace malformed optional fields with None; damage is
-                # a refused offer, while a genuinely absent calibration stays uncalibrated.
-                if any("calibration" in problem for problem in live.problems):
-                    block = {}
-                offer = FromRun(block) if block is not None else None
             source = FileSource(replay.video, realtime=False)  # as fast as processing allows
         else:
             source = open_source(args.source, (args.width, args.height))

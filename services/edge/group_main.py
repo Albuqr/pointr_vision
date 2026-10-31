@@ -10,55 +10,21 @@ stop channel come from the cameras' arguments. Every output line about one camer
 load, a failure to start) have no prefix.
 """
 
-import argparse
 import json
 import sys
 
-from services.edge.capture.sources import SourceOpenError, open_source
-from services.edge.child_protocol import (
-    Message,
-    PreviewListening,
-    SessionOpened,
-    StartFailed,
-    Summary,
-    emit,
-)
-from services.edge.group_runner import GroupCamera, run_group
-from services.edge.main import (
-    EXIT_CAPTURE_ERROR,
-    EXIT_OPEN_FAILED,
-    RunSettings,
-    calibration_failed_event,
+from services.edge.main import (  # noqa: F401
     create_tracker,
-    health_config,
-    link_conflict,
     load_perception,
     parse_args,
-    print_event,
     resolve_device,
-    run_meta,
-    start_http_preview,
 )
-from services.edge.matcher import CourtMatcher, MatcherParams
-from services.edge.reports.build import format_summary, write_report
+from services.edge.run.execute import execute
 from services.edge.run.perception import start_perception
-from services.edge.run.stop import StopRequest, stop_before_session, stop_end, stop_on_stdin
-
-
-def say(camera_id: str, text: str) -> None:
-    try:
-        for line in text.splitlines():
-            print(f"[{camera_id}] {line}", flush=True)
-    except OSError:  # the launcher that read this pipe is gone: the files still get everything
-        pass
-
-
-def tell(camera_id: str, message: Message) -> None:
-    """A protocol line tagged with the camera it concerns, with `say`'s pipe-gone guard."""
-    try:
-        emit(message, camera_id)
-    except OSError:  # the launcher that read this pipe is gone: the files still get everything
-        pass
+from services.edge.run.plan import PlanError, group_det_size, group_matcher, plan_from_args  # noqa: F401
+from services.edge.run.report import Reporter, print_event
+from services.edge.run.stop import StopRequest, stop_before_session, stop_on_stdin
+from services.edge.run.wait import benchmark, plain
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -73,134 +39,31 @@ def main(argv: list[str] | None = None) -> int:
         return stop_before_session(stop, print_event)
 
 
-def group_det_size(sizes: set[int | None]) -> int | None:
-    """One detector, one size (D-056): the largest a camera asks for; None (the model's own) when
-    none asks for one. A camera that asks for none gets the size another camera asked for."""
-    return max((s for s in sizes if s), default=None)
-
-
-def group_matcher(cams: list[argparse.Namespace]) -> CourtMatcher:
-    """The cross-camera matcher (D-058): a group ID is kept as long as the longest lost-track time
-    of the cameras' trackers, so a track the tracker takes back is not forgotten first."""
-    return CourtMatcher(MatcherParams(lost_s=max(a.track_lost_secs for a in cams)))
-
-
-def run(cams: list[argparse.Namespace], stop: StopRequest) -> int:
+def run(cams: list, stop: StopRequest) -> int:
     """The group's settings (device, threshold, detection and recording on or off, out, group)
     come from the first camera: the launcher passes every camera the same ones. det-size is per
-    camera in Studio, so a disagreement is a warning."""
-    first = cams[0]
-    by_id = {a.camera_id: a for a in cams}
-    config = health_config(first)  # the launcher passes no health settings: the defaults
+    camera in Studio, so a disagreement is a warning. One camera is a group of one: its lines
+    carry no tag."""
     if any(a.preview for a in cams):
         print("warning: no preview window in a group; Studio shows each camera's preview")
-    sizes = {a.det_size for a in cams}
-    if len(sizes) > 1:
-        first = argparse.Namespace(**{**vars(first), "det_size": group_det_size(sizes)})
-        asked = sorted(sizes, key=str)
-        print(f"warning: cameras ask for det-size {asked}; the group uses {first.det_size}")
-    perception = start_perception(
-        first, resolve_device=resolve_device, load_perception=load_perception, emit=print_event
-    )
-    if perception is None:
-        return EXIT_CAPTURE_ERROR
-    detector = perception.detector  # each camera makes its own tracker
-
-    cameras = []
-    for a in cams:
-        try:
-            source = open_source(a.source, (a.width, a.height))
-        except SourceOpenError as e:
-            tell(a.camera_id, StartFailed("source_open_failed", f"cannot open source: {e}"))
-            return EXIT_OPEN_FAILED
-        source.fps_cap = a.fps_cap
-        if conflict := link_conflict(source.kind, a.link):
-            tell(a.camera_id, StartFailed("config_conflict", conflict))
-            return EXIT_OPEN_FAILED
-        cameras.append(GroupCamera(a.camera_id, source, a.link, a.calibration))
-
-    settings = {a.camera_id: RunSettings.from_args(a) for a in cams}
-
-    def make_run(camera_id, info):
-        a = by_id[camera_id]
-        tracker = None if detector is None else create_tracker(a)
-        return run_meta(
-            settings[camera_id],
-            info,
-            config,
-            detector,
-            tracker,
-            perception.gpu,
-            None,
-            perception.model_loaded,
-        )
-
-    pipelines, previews = {}, []
-
-    def on_session(camera_id, pipeline):
-        a = by_id[camera_id]
-        pipelines[camera_id] = pipeline
-        tell(camera_id, SessionOpened(str(pipeline.session_dir)))
-        if a.calibration_problem:  # before any run, so no t0: t_mono is null
-            from services.edge.calibration.intake import NotUsed, take_calibration
-
-            for event in take_calibration(NotUsed(a.calibration_problem), camera_id, (0, 0)).events:
-                pipeline.log_event(event)
-        if event := calibration_failed_event(settings[camera_id].calibration_refusal):
-            pipeline.log_event(event)
-        if a.http_preview is not None:
-            previews.append(start_http_preview(a.http_preview, pipeline))
-            tell(camera_id, PreviewListening(previews[-1].port))
-
-    code = 0
+    reporter = Reporter(tagged=len(cams) > 1)
     try:
-        statuses = run_group(
-            first.group_id,
-            cameras,
-            detector,
-            lambda camera_id: create_tracker(by_id[camera_id]),
-            first.out,
-            config,
-            make_run,
-            record=not first.no_record,
-            matcher=group_matcher(cams),
-            on_event=lambda camera_id, ev, t0: print_event(ev, t0, f"[{camera_id}] "),
-            on_session=on_session,
-            ui_stop=lambda: stop.ui,
-        )
-        if any(s != "ended" for s in statuses.values()):
-            code = EXIT_CAPTURE_ERROR
-    except KeyboardInterrupt:  # every session already ended `interrupted`
-        if not pipelines:  # a stop before any session: main's pre-session path (D-049)
-            raise
-        code = stop_end(ui=stop.ui, session=True).exit_code
-    except Exception as e:  # every session already ended `error`, with the failure as an event
-        kind = "source_open_failed" if isinstance(e, SourceOpenError) else "exited"
-        emit(StartFailed(kind, f"the group did not run: {e}"))
-        code = EXIT_OPEN_FAILED if isinstance(e, SourceOpenError) else EXIT_CAPTURE_ERROR
-    finally:
-        for preview in previews:
-            preview.close()
-    try:  # the sessions are saved: a stop now only cuts the summaries short
-        for camera_id, p in pipelines.items():
-            c = proc = p.stats()
-            say(camera_id, f"session {p.status}: {p.session_dir}")
-            tell(
-                camera_id,
-                Summary(
-                    f"t0_wall={c.t0_wall} captured={c.captured} dropped={c.dropped} "
-                    f"failed_reads={c.failed_reads} processed={proc.processed} "
-                    f"unprocessed={proc.unprocessed}"
-                ),
-            )
-            try:  # a failure is a warning: the session is saved (D-023)
-                say(camera_id, format_summary(write_report(p.run_dir)))
-            except Exception as e:
-                print(f"warning: {camera_id}: report not written: {e!r}", file=sys.stderr)
-    except KeyboardInterrupt:
-        print("warning: reports interrupted; run python -m services.edge.report", file=sys.stderr)
-        code = code or stop_end(ui=False, session=True).exit_code
-    return code
+        plan = plan_from_args(cams)
+    except PlanError as e:
+        return e.report(reporter)
+    return execute(
+        plan,
+        stop,
+        perception=lambda args: start_perception(
+            args,
+            resolve_device=resolve_device,
+            load_perception=load_perception,
+            emit=lambda ev, t0: reporter.event(None, ev, t0),
+        ),
+        make_tracker=lambda args: create_tracker(args),
+        reporter=reporter,
+        waiter=benchmark(plan.benchmark) if plan.benchmark else plain,
+    ).exit_code
 
 
 if __name__ == "__main__":
