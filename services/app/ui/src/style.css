@@ -1295,15 +1295,6 @@ button:focus-visible,
   color: var(--orange-dark);
   font-weight: 700;
 }
-.half-court-warning {
-  color: #842f0b;
-  background: var(--orange-wash);
-  border-left: 3px solid var(--orange);
-  margin: 10px 0;
-  padding: 10px 12px;
-  font-size: 12px;
-  line-height: 1.5;
-}
 .session-facts {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
