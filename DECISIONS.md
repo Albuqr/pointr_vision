@@ -1549,11 +1549,11 @@ R2a follow-up T11 (#73, brief C2 steps 5-6, ADR 0007). `services/edge/run/plan.p
 `RunPlan` from parsed arguments before the model loads (`PlanError`, exit 2: a source that cannot
 be found, a link that contradicts its source, a replay target that cannot be replayed).
 `services/edge/run/execute.py` runs a plan with a stop request, a perception loader, a reporter
-(`Reporter`, plain or tagged, in `run/report.py`) and a waiter (`run/wait.py`: plain, a benchmark
+(`Reporter`, plain or tagged, in `services/edge/run/report.py`) and a waiter (`services/edge/run/wait.py`: plain, a benchmark
 deadline, or the preview window on the main thread), and returns the exit code and each camera's
 final status. A camera is live, a replay into a recorded session, or a replay of a bare file into
 a new session (`GroupCamera.kind`). `group_main` and the group replay only parse, plan and call
-`execute`; `replay/group.py` keeps `resolve_group`, `plan_group_replay` and a thin `run_replay`.
+`execute`; `services/edge/replay/group.py` keeps `resolve_group`, `plan_group_replay` and a thin `run_replay`.
 `run_meta`, `RunSettings`, the event, benchmark and report printing and the HTTP preview moved
 out of main.py (re-exported until T12). The single-camera `main.run` is not routed through
 `execute` yet (T12); it shares `calibration_offer` and `single_replay` with the planner.
