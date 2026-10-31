@@ -14,14 +14,12 @@ Each frame taken from capture is detected (RF-DETR Nano, person only) and tracke
 import argparse
 import dataclasses
 import math
-import platform
 import re
 import sys
 import threading
 import time
 import uuid
 from collections import Counter
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import cv2
@@ -30,7 +28,6 @@ import numpy as np
 from services.edge.calibration.intake import FromFile, FromRun, NotUsed, Refused, take_calibration
 from services.edge.camera_pipeline import (
     CameraPipeline,
-    CameraStats,
     LiveInput,
     ReplayInput,
 )
@@ -46,21 +43,33 @@ from services.edge.capture.types import HealthEvent, utc_now
 from services.edge.child_protocol import PreviewListening, SessionOpened, StartFailed, Summary, emit
 from services.edge.contract import VIDEO_FILE
 from services.edge.perception.detector import DET_SIZE_MULTIPLE
-from services.edge.perception.loop import delay_stats, rates
-from services.edge.power import read_power
 from services.edge.recording.recorder import FileRecorder
 from services.edge.replay.resolve import ReplayError, resolve_replay
-from services.edge.reports.build import format_summary, write_report
 
-# Moved to services.edge.run (T9); re-exported until T12, tests replace these names on this module
+# Moved to services.edge.run (T9, T11); re-exported until T12, tests replace these names on this
+# module
+from services.edge.run.meta import (  # noqa: F401
+    RunSettings,
+    calibration_failed_event,
+    failed_calibration_checks,
+    health_config,
+    link_conflict,
+    normalise_device,
+    package_version,
+    run_meta,
+)
 from services.edge.run.perception import (  # noqa: F401
     create_tracker,
     load_perception,
     resolve_device,
     start_perception,
 )
+from services.edge.run.preview import start_http_preview
+from services.edge.run.report import print_benchmark, print_event, print_report
 from services.edge.run.stop import (  # noqa: F401
+    EXIT_CAPTURE_ERROR,
     EXIT_INTERRUPTED,
+    EXIT_OPEN_FAILED,
     StopRequest,
     hold_ctrl_c,
     ignore_ctrl_c,
@@ -71,12 +80,9 @@ from services.edge.run.stop import (  # noqa: F401
     stop_on_stdin,
     stop_source,
 )
-from services.edge.session.types import CAMERA_ID_RE, GROUP_ID_RE, RunMeta, SessionMeta
+from services.edge.session.types import CAMERA_ID_RE, GROUP_ID_RE, SessionMeta
 from services.edge.session.writer import FileSessionWriter, device_id
 from services.edge.ui.preview import run_preview
-
-EXIT_OPEN_FAILED = 2
-EXIT_CAPTURE_ERROR = 1
 
 
 def positive(cast):
@@ -241,127 +247,12 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     return args
 
 
-def print_event(ev: HealthEvent, t0: float | None, prefix: str = "") -> None:
-    rel = f"+{ev.t_mono - t0:.2f}s" if t0 is not None else "-"
-    try:
-        print(f"{prefix}[{ev.t_wall}] {rel} {ev.kind}: {ev.detail}", flush=True)
-    except OSError:  # the launcher that read this pipe is gone: the event still goes to the file
-        pass
-
-
 def open_failed(ref: str, e: Exception) -> int:
     reason = str(e).strip()
     # no run, so no t0: t_mono is null (D-014)
     print_event(HealthEvent("source_open_failed", utc_now(), None, reason), None)
     emit(StartFailed("source_open_failed", f"cannot open source {ref!r}: {reason}"))
     return EXIT_OPEN_FAILED
-
-
-def package_version(name: str) -> str | None:
-    try:
-        return version(name)
-    except PackageNotFoundError:
-        return None
-
-
-def normalise_device(device: str) -> str:
-    """torch device string to the contract's cpu | cuda:N ("cuda" alone is cuda:0)."""
-    return "cuda:0" if device == "cuda" else device
-
-
-@dataclasses.dataclass(frozen=True)
-class RunSettings:
-    """What run.json takes from the command line, read once per entry point."""
-
-    requested_size: tuple[int, int] | None
-    calibration_refusal: str | None
-
-    @classmethod
-    def from_args(cls, args) -> "RunSettings":
-        return cls((args.width, args.height), args.calibration_failed)
-
-
-def run_meta(
-    settings: RunSettings,
-    info,
-    config: HealthConfig,
-    detector,
-    tracker,
-    gpu,
-    replay=None,
-    model_loaded=None,
-) -> RunMeta:
-    """run.json fields known at start: input, detector, tracker, thresholds, versions."""
-    size = settings.requested_size if info.kind == "camera" else None
-    return RunMeta(
-        run_id=str(uuid.uuid4()),
-        mode="replay" if replay else "live",
-        input={
-            "kind": info.kind,
-            "ref": info.ref,
-            "sha256": replay.sha256 if replay else None,
-            "requested_width": size[0] if size else None,
-            "requested_height": size[1] if size else None,
-        },
-        detector=None
-        if detector is None
-        else {
-            "name": "rfdetr",
-            "variant": "nano",
-            "weights": "coco-pretrained",
-            "package_version": package_version("rfdetr"),
-            "threshold": detector.threshold,
-            "det_size": detector.det_size,
-        },
-        tracker=None
-        if tracker is None
-        else {
-            "name": "bytetrack",
-            "package": "trackers",
-            "package_version": package_version("trackers"),
-            "params": tracker.params,
-        },
-        health=dataclasses.asdict(config),
-        runtime={
-            "python": sys.version.split()[0],
-            "platform": platform.platform(),
-            "device": None if detector is None else normalise_device(detector.device),
-            "gpu": gpu,
-            "packages": {
-                "opencv": cv2.__version__,
-                "numpy": np.__version__,
-                "torch": package_version("torch"),
-                "supervision": package_version("supervision"),
-            },
-        },
-        started_at=utc_now(),
-        power_start=read_power(),
-        checks=failed_calibration_checks(settings.calibration_refusal),
-        ready={"model_loaded": model_loaded},
-    )
-
-
-def failed_calibration_checks(refusal: str | None) -> list | None:
-    """run.json `checks` of a camera the operator started uncalibrated after Studio refused its
-    calibration (D-057); None otherwise: the other checks belong to Track R."""
-    if not refusal:
-        return None
-    return take_calibration(Refused(refusal), None, (0, 0)).checks
-
-
-def calibration_failed_event(refusal: str | None) -> HealthEvent | None:
-    """The `startup_check_failed` event that goes with `failed_calibration_checks`. No t0 yet,
-    so t_mono is null."""
-    if not refusal:
-        return None
-    return take_calibration(Refused(refusal), None, (0, 0)).events[0]
-
-
-def link_conflict(kind: str, link: str | None) -> str | None:
-    """link is file exactly when kind is file, or link is not given (D-020)."""
-    if link is not None and (kind == "file") != (link == "file"):
-        return f"--link {link} contradicts a {kind} source"
-    return None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -373,39 +264,6 @@ def main(argv: list[str] | None = None) -> int:
         return run(args, stop)
     except KeyboardInterrupt:  # Ctrl+C before capture started (model load, slow stream open)
         return stop_before_session(stop, print_event)
-
-
-def health_config(args: argparse.Namespace) -> HealthConfig:
-    return HealthConfig(
-        lost_reads=args.lost_reads,
-        lost_secs=args.lost_secs,
-        frozen_diff=args.frozen_diff,
-        frozen_secs=args.frozen_secs,
-        dark_level=args.dark_level,
-        dark_secs=args.dark_secs,
-    )
-
-
-def start_http_preview(port: int, pipeline: CameraPipeline):
-    """The camera's loopback preview server, started and fed by its processing thread."""
-    from services.edge.ui.http_preview import HttpPreview
-
-    preview = HttpPreview(
-        port,
-        pipeline.health_state,
-        pipeline.hud,
-        lambda error: pipeline.log_event(
-            HealthEvent(
-                "error", utc_now(), time.perf_counter(), f"preview encoding failed: {error!r}"
-            )
-        ),
-        raw_snapshot=pipeline.raw_snapshot,
-        calibration=pipeline.calibration.preview_document() if pipeline.calibration else None,
-        on_first_preview=pipeline.mark_preview_ready,
-    )
-    pipeline.on_preview(preview.publish)
-    preview.start()
-    return preview
 
 
 def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
@@ -635,53 +493,6 @@ def run(args: argparse.Namespace, stop: StopRequest | None = None) -> int:
     if (pipeline.failed or pipeline.status != session_status) and not status:
         status = EXIT_CAPTURE_ERROR
     return status
-
-
-def print_report(run_dir) -> None:
-    """Write report.json and print its summary. A failure is a warning: the session is saved
-    and its status and exit code stay as they are (D-023)."""
-    try:
-        print(format_summary(write_report(run_dir)))
-    except Exception as e:
-        print(f"warning: report not written: {e!r}", file=sys.stderr)
-    except KeyboardInterrupt:  # Ctrl+C now would turn a saved "ended" session into exit 130
-        print("warning: report interrupted; run python -m services.edge.report", file=sys.stderr)
-
-
-def print_benchmark(
-    seconds: float,
-    link: str | None,
-    det: int | str,
-    device: str,
-    snapshot: CameraStats,
-    preview: bool = False,
-) -> None:
-    """The A7 baseline block. Every figure comes from this run. The run time is t0 to now,
-    so it includes the shutdown (about one inference)."""
-    elapsed = time.perf_counter() - snapshot.t0 if snapshot.t0 else 0.0
-    frame = "-" if snapshot.frame_size is None else "x".join(map(str, snapshot.frame_size))
-    proc_fps, drop_rate = rates(
-        snapshot.captured,
-        snapshot.dropped,
-        snapshot.processed,
-        snapshot.first_start,
-        snapshot.last_end,
-    )
-    fps = "-" if proc_fps is None else f"{proc_fps:.2f}"
-    rate = "-" if drop_rate is None else f"{100 * drop_rate:.1f}%"
-    stats = delay_stats(snapshot.delays_ms)
-    delay = (
-        f"p50 {stats['p50']:.1f}, p95 {stats['p95']:.1f}, max {stats['max']:.1f}" if stats else "-"
-    )
-    print(
-        f"benchmark: {elapsed:.1f} s run ({seconds:g} s requested), link {link}, "
-        f"frames {frame}, det-size {det}, device {device}, preview {'on' if preview else 'off'}, "
-        f"cpu {platform.processor() or '-'}\n"
-        f"benchmark: captured {snapshot.captured}, processed {snapshot.processed} "
-        f"({fps} fps), dropped {snapshot.dropped} ({rate} of captured), "
-        f"failed reads {snapshot.failed_reads}, unprocessed {snapshot.unprocessed}\n"
-        f"benchmark: app delay ms {delay} over {len(snapshot.delays_ms)} frames"
-    )
 
 
 if __name__ == "__main__":

@@ -16,6 +16,8 @@ from services.edge.capture.types import HealthEvent, utc_now
 from services.edge.child_protocol import Stop, parse
 from services.edge.contract import UI_STOP_DETAIL
 
+EXIT_CAPTURE_ERROR = 1
+EXIT_OPEN_FAILED = 2
 EXIT_INTERRUPTED = 130
 
 
