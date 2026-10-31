@@ -218,11 +218,6 @@ DRIFT_T8_REFUSAL = (
     "T8: calibration intake: a refusal at open is not fatal for one camera (decision 6) and is "
     "recorded as a failed calibration check plus startup_check_failed (decision 8)"
 )
-DRIFT_T11_LINES = (
-    "T11: group of one / execute: a group keeps the source:, health: and versions: lines "
-    "and the events count"
-)
-DRIFT_T11_BENCH = "T11: group of one / execute: groups accept --benchmark per camera (decision 12)"
 DRIFT_T8_REPLAY = "T8: a single replay uses the live run's calibration (decision 9)"
 
 ALL_PATHS = (SINGLE, GROUP, SESSION_REPLAY, FILE_REPLAY, GROUP_REPLAY)
@@ -246,9 +241,6 @@ ROWS.append(
         sessions={"cam1": Sess("ended")},
         out=lines_of(SINGLE, "ended"),
         absent=(r"^\[cam1\] ",),
-        xfail=(
-            "T11: a group of one has null group, unshared links, and untagged single-camera lines"
-        ),
     )
 )
 ROWS.append(
@@ -262,7 +254,6 @@ ROWS.append(
             *(rf"^\[{c}\] versions: " for c in CAMERAS[GROUP]),
             *(rf"^\[{c}\] t0_wall=.* events=\{{" for c in CAMERAS[GROUP]),
         ),
-        xfail=DRIFT_T11_LINES,
     )
 )
 ROWS.append(
@@ -284,7 +275,6 @@ ROWS.append(
         sessions=sess(GROUP),
         # Decision 12 promises per-camera benchmark results, not a literal prefix format.
         out=(r"benchmark: .*s run \(0\.3 s requested\)", r"benchmark: app delay ms"),
-        xfail=DRIFT_T11_BENCH,
     )
 )
 
@@ -483,51 +473,6 @@ ROWS += [
         },
     ),
 ]
-
-# Pin the existing drift as well as the desired outcome. Otherwise an xfail at the first
-# assertion could hide unrelated changes to the files or events on that same path.
-for intended in tuple(ROWS):
-    if not intended.xfail:
-        continue
-    label = f"{intended.label}-today" if intended.label else "today"
-    today = dataclasses.replace(intended, label=label, xfail=None)
-    if intended.fault == "calibration_edge":
-        if intended.path == GROUP:
-            today = dataclasses.replace(
-                today,
-                sessions={
-                    **sess(GROUP),
-                    "cam1": Sess(
-                        "ended",
-                        ("appearance_only", "error"),
-                        group=True,
-                        links=frozenset({"appearance", "unshared"}),
-                    ),
-                },
-            )
-        else:
-            today = dataclasses.replace(
-                today,
-                code=EXIT_ERROR,
-                sessions=unchanged(intended.path),
-                err=(r"^error: calibration_refused: calibration cannot be used:",),
-            )
-    elif intended.fault == "calibration_live":
-        today = dataclasses.replace(today, sessions=sess(SESSION_REPLAY))
-    elif intended.label == "group-of-one":
-        today = dataclasses.replace(
-            today,
-            sessions={"cam1": Sess("ended", group=True)},
-            out=lines_of(GROUP, "ended", ("cam1",)),
-            absent=(r"^session:",),
-        )
-    elif intended.label == "single-camera-lines":
-        today = dataclasses.replace(today, out=lines_of(GROUP, "ended"))
-    elif intended.label == "benchmark":
-        today = dataclasses.replace(today, out=lines_of(GROUP, "ended"), absent=(r"benchmark:",))
-    else:
-        raise AssertionError(f"No current-behaviour expectation for {intended.id}")
-    ROWS.append(today)
 
 # A requested stop prevents a later scripted fault from running. These rows pin that
 # ordering without inventing precedence for truly simultaneous faults and interrupts.
@@ -869,7 +814,6 @@ def test_the_table_covers_each_stop_and_fault_on_every_path():
         calibration = "calibration_singular" if p == GROUP_REPLAY else "calibration_edge"
         assert (p, None, calibration) in cells
     assert any(r.label == "group-of-one" for r in ROWS)
-    assert any(r.label == "group-of-one-today" for r in ROWS)
     for row in ROWS:
         if row.xfail and not (row.stop and row.fault):
             assert any(
