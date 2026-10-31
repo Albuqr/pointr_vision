@@ -203,21 +203,13 @@ def stop_row(path: str, who: str, phase: str) -> Row:
         )
     status = "ended" if ui else "interrupted"
     kind = "stopped" if ui else "interrupted"
-    row = Row(
+    return Row(
         path,
         stop,
         code=EXIT_OK if ui else EXIT_STOPPED,
         sessions=sess(path, status, (kind,)),
         out=lines_of(path, status),
     )
-    if path == GROUP_REPLAY and ui:  # drift: run_replay never passes ui_stop (brief C2)
-        return dataclasses.replace(
-            row,
-            out=(),
-            xfail="T9: one stop table on every path, incl. a group replay (a Studio stop is "
-            "a normal end: ended, stopped event, exit 0)",
-        )
-    return row
 
 
 # -- the rows ----------------------------------------------------------------------------------
@@ -225,10 +217,6 @@ def stop_row(path: str, who: str, phase: str) -> Row:
 DRIFT_T8_REFUSAL = (
     "T8: calibration intake: a refusal at open is not fatal for one camera (decision 6) and is "
     "recorded as a failed calibration check plus startup_check_failed (decision 8)"
-)
-DRIFT_T9_MODEL = (
-    "T9: perception extraction: a model-load failure prints the event line and the error: line "
-    "on every path"
 )
 DRIFT_T11_LINES = (
     "T11: group of one / execute: a group keeps the source:, health: and versions: lines "
@@ -308,17 +296,16 @@ for p in ALL_PATHS:
 
 # model load fails
 for p in ALL_PATHS:
-    row = Row(
-        p,
-        fault="model_load",
-        code=EXIT_ERROR,
-        sessions=unchanged(p),
-        out=(r"^\[.*\] - error: model load failed: .*weights download failed",),
-        err=(r"^error: model load failed: .*weights download failed",),
+    ROWS.append(
+        Row(
+            p,
+            fault="model_load",
+            code=EXIT_ERROR,
+            sessions=unchanged(p),
+            out=(r"^\[.*\] - error: model load failed: .*weights download failed",),
+            err=(r"^error: model load failed: .*weights download failed",),
+        )
     )
-    if p in (GROUP, GROUP_REPLAY):  # group: the error: line only, the event line is missing
-        row = dataclasses.replace(row, xfail=DRIFT_T9_MODEL)
-    ROWS.append(row)
 
 # the source cannot be opened (a missing file; the session's video gone; a file that is no video)
 for p in ALL_PATHS:
@@ -504,13 +491,7 @@ for intended in tuple(ROWS):
         continue
     label = f"{intended.label}-today" if intended.label else "today"
     today = dataclasses.replace(intended, label=label, xfail=None)
-    if intended.fault == "model_load":
-        today = dataclasses.replace(today, out=(), err=(r"^error: .*weights download failed",))
-    elif intended.path == GROUP_REPLAY and intended.stop:
-        today = dataclasses.replace(
-            today, code=EXIT_STOPPED, sessions=sess(GROUP_REPLAY, "interrupted", ("interrupted",))
-        )
-    elif intended.fault == "calibration_edge":
+    if intended.fault == "calibration_edge":
         if intended.path == GROUP:
             today = dataclasses.replace(
                 today,
