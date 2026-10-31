@@ -92,6 +92,7 @@ class CameraPipeline:
         self.info = input.info
         self._writer = writer
         self._detector = detector
+        self._tracker = tracker
         recorder = input.recorder if isinstance(input, LiveInput) else None
         self._recorder = recorder
         self.calibration = calibration
@@ -211,6 +212,7 @@ class CameraPipeline:
             else p.frame.t_video
             if self._replay
             else None,
+            getattr(self._tracker, "match_seq", None),  # a group's CameraTracker; else None
         )
         no_positions, first_size_mismatch = (
             self._frame_size_problem(p) if self.calibration is not None else (None, False)

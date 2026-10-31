@@ -1,6 +1,6 @@
 """Group replay (R2a 08, D-060): a recorded group's videos processed again together, one new run
-in every camera's session, in the live run's group time, so the matcher gives the live run's shared
-IDs on the same frames.
+in every camera's session, in the live run's group time and matcher-call order, so the matcher gives
+the live run's shared IDs on the same frames.
 
     python -m services.edge.main --replay <group_id> [--out sessions] [detector options]
 """
@@ -73,6 +73,21 @@ def live_group_time(run_dir: Path, t0_mono: float, fps: float) -> Callable[[int]
     return at
 
 
+def live_match_seq(run_dir: Path, fps: float) -> dict[int, int] | None:
+    """Video frame k -> the number of the live run's matcher call for that frame (frames.csv
+    `match_seq`, D-072), for the frames it gave to the matcher; None for a live run from before
+    the column (0.27.0), whose order is then only known by receive time."""
+    with open(run_dir / "frames.csv", newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        if "match_seq" not in (reader.fieldnames or ()):
+            return None
+        return {
+            round(float(r["t_video"]) * fps): int(r["match_seq"])
+            for r in reader
+            if r["t_video"] and r["match_seq"]
+        }
+
+
 def _load(path: Path) -> dict:
     from services.edge.session.folder import SessionDamaged, read_run
 
@@ -121,6 +136,7 @@ def resolve_group(target: str, out_dir: Path | str) -> GroupReplay | None:
                 session["session_id"],
                 live.get("calibration"),
                 live_group_time(run_dir, live["t0_mono"], fps),
+                live_match_seq(run_dir, fps),
             )
             source = FileSource(replay.video, realtime=False)  # as fast as processing allows
             cameras.append(GroupCamera(session["camera_id"], source, "file", replay=recorded))
