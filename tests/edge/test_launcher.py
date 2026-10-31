@@ -595,10 +595,26 @@ def test_a_child_ignores_ctrl_break_so_only_the_launcher_stops_it():
         "import signal; from services.edge.main import stop_on_stdin; stop_on_stdin();"
         "print(signal.getsignal(signal.SIGBREAK) == signal.SIG_IGN)"
     )
-    done = subprocess.run(
-        [sys.executable, "-c", code], cwd=ROOT, input="", capture_output=True, text=True, timeout=60
+    # stdin stays open until the child has printed, as the launcher keeps it: a closed pipe makes
+    # the stdin-stop thread interrupt the main thread while it is still starting that thread
+    child = subprocess.Popen(
+        [sys.executable, "-c", code],
+        cwd=ROOT,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
     )
-    assert done.stdout.strip() == "True", done.stderr
+    try:
+        line = child.stdout.readline()
+        child.stdin.close()
+        child.wait(timeout=60)
+        assert line.strip() == "True", child.stderr.read()
+    finally:
+        child.kill()
+        child.wait()
+        for pipe in (child.stdout, child.stderr):
+            pipe.close()
 
 
 def test_relative_paths_are_resolved_against_the_launchers_folder(tmp_path, monkeypatch):
