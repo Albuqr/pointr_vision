@@ -49,7 +49,7 @@ from services.edge import group_main as group_cli
 from services.edge import main as cli
 from services.edge.camera_pipeline import CameraPipeline
 from services.edge.capture.sources import FileSource
-from services.edge.replay import group as replay_group
+from services.edge.run.stop import EXIT_CAPTURE_ERROR, EXIT_INTERRUPTED, EXIT_OPEN_FAILED
 from tests.edge.fakes import EvenFrameDetector, OneTrackPerDetection
 
 SHORT_FRAMES = 8  # 0.5 s of video at the clips' 15 fps
@@ -75,9 +75,9 @@ IS_GROUP = {GROUP, GROUP_REPLAY}
 INTO_SESSION = {SESSION_REPLAY, GROUP_REPLAY}  # the run is added to a recorded session
 EXIT_OK, EXIT_ERROR, EXIT_OPEN, EXIT_STOPPED = (
     0,
-    cli.EXIT_CAPTURE_ERROR,
-    cli.EXIT_OPEN_FAILED,
-    cli.EXIT_INTERRUPTED,
+    EXIT_CAPTURE_ERROR,
+    EXIT_OPEN_FAILED,
+    EXIT_INTERRUPTED,
 )
 ALL_LINKS = frozenset({"position", "appearance", "unshared"})
 
@@ -544,10 +544,10 @@ def install(mp, detector, *, load_error: Exception | None = None, before_load=No
             raise load_error
         return detector, OneTrackPerDetection()
 
-    for module in (cli, group_cli, replay_group):
+    for module in (cli, group_cli):
         mp.setattr(module, "resolve_device", lambda requested: ("cpu", None))
         mp.setattr(module, "load_perception", load)
-    for module in (group_cli, replay_group):
+    for module in (cli, group_cli):
         mp.setattr(module, "create_tracker", lambda args: OneTrackPerDetection())
 
 

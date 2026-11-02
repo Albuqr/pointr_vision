@@ -16,10 +16,10 @@ from services.edge.capture.sources import FileSource, SourceOpenError
 from services.edge.capture.types import Frame
 from services.edge.contract import VIDEO_FILE
 from services.edge.group_runner import CameraTracker, GroupCamera, run_group
-from services.edge.main import RunSettings, run_meta
 from services.edge.matcher import CourtMatcher, GroupTrack, MatcherParams
 from services.edge.perception.loop import NO_DETECTIONS
 from services.edge.perception.types import Detections
+from services.edge.run.meta import RunSettings, run_meta
 from services.edge.session import writer as writer_mod
 from services.edge.session.writer import FileSessionWriter
 from tests.edge.fakes import EvenFrameDetector, OneTrackPerDetection

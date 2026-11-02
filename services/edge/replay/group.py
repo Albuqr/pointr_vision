@@ -20,17 +20,7 @@ from services.edge.group_runner import GroupCamera, RecordedCamera
 from services.edge.matcher import CourtMatcher, MatcherParams
 from services.edge.recording.recorder import DEFAULT_FPS
 from services.edge.replay.resolve import ReplayError, resolve_replay
-from services.edge.run.execute import execute
-from services.edge.run.perception import (
-    create_tracker,
-    load_perception,
-    resolve_device,
-    start_perception,
-)
 from services.edge.run.plan import PlanError, RunPlan
-from services.edge.run.report import Reporter
-from services.edge.run.stop import StopRequest
-from services.edge.run.wait import benchmark, plain
 
 
 @dataclass(frozen=True)
@@ -165,28 +155,3 @@ def plan_group_replay(args: argparse.Namespace, group: GroupReplay) -> RunPlan:
         live_matcher(group.params, args.track_lost_secs),
         args.benchmark,
     )
-
-
-def run_replay(
-    args: argparse.Namespace, group: GroupReplay, stop: StopRequest | None = None
-) -> int:
-    """The command for a group: what services.edge.main does for one replayed session, for every
-    camera of the group through the run module."""
-    reporter = Reporter(tagged=True)
-    try:
-        plan = plan_group_replay(args, group)
-    except PlanError as e:
-        return e.report(reporter)
-    return execute(
-        plan,
-        stop or StopRequest(),
-        perception=lambda a: start_perception(
-            a,
-            resolve_device=resolve_device,
-            load_perception=load_perception,
-            emit=lambda ev, t0: reporter.event(None, ev, t0),
-        ),
-        make_tracker=lambda a: create_tracker(a),
-        reporter=reporter,
-        waiter=benchmark(plan.benchmark) if plan.benchmark else plain,
-    ).exit_code

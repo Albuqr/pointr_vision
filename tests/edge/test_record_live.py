@@ -116,7 +116,7 @@ def run_in_process(clips, out: Path) -> tuple[int, dict, dict, list[dict]]:
 def test_recorder_stop_failing_still_writes_the_final_status(monkeypatch, clips, tmp_path):
     """A locked file while hashing, or any recorder failure at shutdown, must not leave the
     session `running` with null counts."""
-    from services.edge import main as cli
+    from services.edge import group_runner
     from services.edge.recording.recorder import FileRecorder
 
     class BadStop(FileRecorder):
@@ -124,7 +124,7 @@ def test_recorder_stop_failing_still_writes_the_final_status(monkeypatch, clips,
             super().stop()
             raise PermissionError("locked by OneDrive")
 
-    monkeypatch.setattr(cli, "FileRecorder", BadStop)
+    monkeypatch.setattr(group_runner, "FileRecorder", BadStop)
     _, session, run, _ = run_in_process(clips, tmp_path)
     assert session["status"] == "error" and session["ended_at"]
     assert run["ended_at"] and run["counts"] is not None
@@ -133,7 +133,7 @@ def test_recorder_stop_failing_still_writes_the_final_status(monkeypatch, clips,
 
 
 def test_failed_recorder_is_reported_and_leaves_no_false_video_times(monkeypatch, clips, tmp_path):
-    from services.edge import main as cli
+    from services.edge import group_runner
     from services.edge.recording.recorder import FileRecorder
 
     class DiskFullAfter5:
@@ -148,7 +148,9 @@ def test_failed_recorder_is_reported_and_leaves_no_false_video_times(monkeypatch
             pass
 
     monkeypatch.setattr(
-        cli, "FileRecorder", lambda: FileRecorder(writer_factory=lambda p, f, s: DiskFullAfter5())
+        group_runner,
+        "FileRecorder",
+        lambda: FileRecorder(writer_factory=lambda p, f, s: DiskFullAfter5()),
     )
     _, session, run, rows = run_in_process(clips, tmp_path)
     counts = run["counts"]

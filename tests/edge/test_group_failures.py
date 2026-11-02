@@ -12,9 +12,9 @@ import pytest
 from services.edge.capture.health import HealthConfig
 from services.edge.capture.sources import FileSource
 from services.edge.group_runner import GroupCamera, SharedCodeError, run_group
-from services.edge.main import RunSettings, run_meta
 from services.edge.matcher import CourtMatcher
 from services.edge.perception.types import TrackObs
+from services.edge.run.meta import RunSettings, run_meta
 from services.edge.session import writer as writer_mod
 from tests.edge.fakes import EvenFrameDetector, OneTrackPerDetection
 from tests.edge.test_group_runner import (
