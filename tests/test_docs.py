@@ -41,6 +41,8 @@ ID_RE = re.compile(r"^\**`?((?:[A-Z][A-Za-z0-9]*-)*[A-Z]\d+[a-z]?)`?\**$")
 def _doc_files() -> list[Path]:
     files = list(ROOT.glob("docs/**/*.md")) + list(ROOT.glob(".scratch/**/*.md"))
     files += [ROOT / n for n in ("DECISIONS.md", "CLAUDE.md", "AGENTS.md", "GLOSSARY.md")]
+    # .scratch/worktrees holds other checkouts of this repo, with docs of their own
+    files = [f for f in files if ".scratch/worktrees/" not in f.as_posix()]
     return sorted(f for f in files if f.is_file())
 
 
