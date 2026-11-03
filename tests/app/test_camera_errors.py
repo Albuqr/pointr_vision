@@ -14,6 +14,7 @@ from services.app.config import CameraConfig
 from services.app.server import create_app
 from services.edge.launcher import Child, Launcher
 from services.edge.session.writer import mask_credentials
+from tests.app.test_api import Child as ApiChild
 from tests.app.test_api import FakeLauncher
 
 SECRET_URL = "rtsp://admin:hunter2@192.168.1.5:554/stream?token=abc123"
@@ -23,11 +24,9 @@ class Proc:
     returncode = 3
 
 
-class FailedChild:
+class FailedChild(ApiChild):
     def __init__(self, camera):
-        self.cam = camera
-        self.session_dir = None
-        self.preview_port = camera.http_preview_port
+        super().__init__(camera)
         self.running = False
         self.proc = Proc()
         self.failure = f"cannot open source {SECRET_URL}"
