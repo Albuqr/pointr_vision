@@ -170,6 +170,50 @@ def test_bad_config_says_why(entries, message):
         rc.parse_config(entries)
 
 
+def test_config_error_lists_every_problem_with_its_field():
+    entries = [
+        cam("cam1", "0"),
+        cam("cam2", "http://localhost/v", det_size=100, track_min_frames=0),
+        cam("cam1", "0"),
+    ]
+    with pytest.raises(rc.ConfigError) as raised:
+        rc.parse_config(entries)
+    assert {(e["index"], e["field"]) for e in raised.value.field_errors} == {
+        (1, "source"),
+        (1, "det_size"),
+        (1, "track_min_frames"),
+        (2, "camera_id"),
+        (2, "name"),
+        (2, "source"),
+    }
+    assert str(raised.value).startswith("camera cam2:")
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "ftp://h/v",
+        "http://localhost/v",
+        "http://127.0.0.1/v",
+        "http://169.254.1.1/v",
+        "http://0.0.0.0/v",
+        "http://224.0.0.1/v",
+        "http:///nohost",
+        "http://h:notaport/v",
+    ],
+)
+def test_check_config_refuses_unsafe_urls(source):
+    with pytest.raises(rc.ConfigError) as raised:
+        rc.check_config([cam("a", source)])
+    assert [e["field"] for e in raised.value.field_errors] == ["source"]
+
+
+def test_check_config_allows_an_empty_list_but_parse_config_does_not():
+    assert rc.check_config([]) == []
+    with pytest.raises(rc.ConfigError, match="non-empty"):
+        rc.parse_config([])
+
+
 def test_main_refuses_a_bad_config_before_starting_anything(tmp_path, capsys, monkeypatch):
     path = tmp_path / "cams.json"
     path.write_text(json.dumps([cam("cam1", "0"), cam("cam2", "0")]))
