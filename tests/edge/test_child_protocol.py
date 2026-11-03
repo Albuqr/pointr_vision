@@ -160,7 +160,6 @@ def test_t6_default_stream_selection_and_flush(capsys):
     "action",
     [
         lambda: Stop("app"),
-        lambda: StartFailed("unknown", "x"),
         lambda: PreviewListening(True),
         lambda: PreviewListening(-1),
         lambda: emit(Stop()),

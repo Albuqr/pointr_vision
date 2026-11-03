@@ -196,13 +196,14 @@ def test_model_load_failure_prints_error_line_on_stderr(monkeypatch, capsys):
 
 @pytest.mark.parametrize("err_first", [False, True])
 def test_model_load_failure_becomes_the_launcher_failure(monkeypatch, capsys, err_first):
+    from services.edge.child_protocol import parse
     from services.edge.launcher_impl import Camera, Child, Launcher
 
     _, out, err = run_failing_model_load(monkeypatch, capsys)
     out_lines, err_lines = out.splitlines(), err.splitlines()
     child = Child(Camera("cam1", "0", "usb"))
     for line in err_lines + out_lines if err_first else out_lines + err_lines:
-        Launcher.note(child, line)
+        Launcher._note_message(child, line, parse(line)[1])
     assert child.failure is not None
     assert "model load failed" in child.failure and "weights download failed" in child.failure
     assert not child.failure.startswith("failed to start")

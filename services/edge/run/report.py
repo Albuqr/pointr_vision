@@ -58,16 +58,6 @@ def format_benchmark(
     )
 
 
-def print_benchmark(*args, **kwargs) -> None:
-    print(format_benchmark(*args, **kwargs))
-
-
-def print_report(run_dir) -> None:
-    """Write report.json and print its summary. A failure is a warning: the session is saved
-    and its status and exit code stay as they are (D-023)."""
-    Reporter().report(None, run_dir)
-
-
 class Reporter:
     """Says a run's lines. tagged=False is one camera: no tag, so a single camera's output is the
     same on every path. tagged=True is a group: `[camera_id] ` before every line about a camera."""

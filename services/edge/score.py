@@ -26,7 +26,6 @@ IDENTITY_WINDOW_S = 5.0  # seconds before a leave and after a return in which th
 
 # Thresholds of the decision record (section 4) and spec FR-006, FR-007, FR-010, FR-012.
 H1_FOUND_MIN, H1_RIGHT_MIN, H1_FLOOR = 0.85, 0.90, 0.70
-H3_MIN = 0.80
 H3B_MIN = 0.80
 H4_MAX_M = 0.5
 MIN_ATTEMPTS = 30  # "30 or more shots, hand-counted"

@@ -7,7 +7,7 @@ session opened. Multiline text produces one independently parseable message per 
 import re
 import sys
 from dataclasses import dataclass
-from typing import Literal, TextIO, TypeAlias
+from typing import Literal, TextIO, TypeAlias, get_args
 
 from services.edge.session.types import CAMERA_ID_RE
 from services.edge.session.writer import mask_credentials
@@ -21,15 +21,6 @@ FailureKind = Literal[
     "spawn_failed",
     "exited",
 ]
-FAILURE_KINDS = (
-    "source_open_failed",
-    "model_load_failed",
-    "calibration_refused",
-    "config_conflict",
-    "start_timeout",
-    "spawn_failed",
-    "exited",
-)
 
 
 @dataclass(frozen=True)
@@ -59,10 +50,6 @@ class PreviewListening:
 class StartFailed:
     kind: FailureKind
     detail: str
-
-    def __post_init__(self):
-        if self.kind not in FAILURE_KINDS:
-            raise ValueError(f"unknown failure kind {self.kind!r}")
 
 
 @dataclass(frozen=True)
@@ -106,7 +93,7 @@ def parse(line: str) -> tuple[str | None, Message | None]:
     if text.startswith("error: "):
         detail = text[len("error: ") :]
         kind, separator, reason = detail.partition(": ")
-        if separator and kind in FAILURE_KINDS:
+        if separator and kind in get_args(FailureKind):
             return camera, StartFailed(kind, reason)
         return camera, StartFailed("exited", detail)
     if text.startswith("t0_wall=") and Summary(text).failed_reads is not None:
@@ -124,17 +111,17 @@ def emit(message: Message, camera_id: str | None = None, *, stream: TextIO | Non
     if isinstance(message, Stop):
         if camera_id is not None or stream is None:
             raise ValueError("stop requires an untagged explicit stdin stream")
-        text = "stop ui" if message.source else "stop"
-    elif isinstance(message, SessionOpened):
-        text = "session: " + message.path
-    elif isinstance(message, DeviceChosen):
-        text = "device: " + message.device
+        header, payload = "", "stop ui" if message.source else "stop"
     elif isinstance(message, PreviewListening):
-        text = f"preview_port: {message.port}"
-    elif isinstance(message, StartFailed):
-        text = f"error: {message.kind}: " + message.detail
+        header, payload = "", f"preview_port: {message.port}"
     elif isinstance(message, Summary):
-        text = message.detail
+        header, payload = "", message.detail
+    elif isinstance(message, SessionOpened):
+        header, payload = "session: ", message.path
+    elif isinstance(message, DeviceChosen):
+        header, payload = "device: ", message.device
+    elif isinstance(message, StartFailed):
+        header, payload = f"error: {message.kind}: ", message.detail
     else:
         raise TypeError(f"unknown protocol message {message!r}")
     output = (
@@ -142,22 +129,14 @@ def emit(message: Message, camera_id: str | None = None, *, stream: TextIO | Non
         if stream is not None
         else (sys.stderr if isinstance(message, StartFailed) else sys.stdout)
     )
-    # Repeat the message header on each payload line so no line can inject another message.
-    if isinstance(message, (SessionOpened, DeviceChosen, StartFailed)):
-        header, payload = (
-            ("session: ", message.path)
-            if isinstance(message, SessionOpened)
-            else ("device: ", message.device)
-            if isinstance(message, DeviceChosen)
-            else (f"error: {message.kind}: ", message.detail)
-        )
-        lines = [
-            header + part for part in payload.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-        ]
+    if header:
+        # Repeat the message header on each payload line so no line can inject another message.
+        payload = payload.replace("\r\n", "\n").replace("\r", "\n")
+        lines = [header + part for part in payload.split("\n")]
     else:
-        if "\n" in text or "\r" in text:
+        if "\n" in payload or "\r" in payload:
             raise ValueError("summary must be one physical line")
-        lines = [text]
+        lines = [payload]
     for line in lines:
         output.write(mask_credentials(prefix + line) + "\n")
     output.flush()

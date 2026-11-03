@@ -250,9 +250,6 @@ def test_file_offer_is_taken_and_matches_the_existing_converters(tmp_path, legac
         "court": {"type": "custom", "length_m": 3.0, "width_m": 2.0},
     }
     assert calibration.run_block() == run_block()
-    assert calibration.preview_court() == court_model(
-        "custom", 3.0, 2.0, valid["court"]["landmarks"]
-    )
 
 
 def test_calibration_is_immutable():

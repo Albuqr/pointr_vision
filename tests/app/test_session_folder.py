@@ -81,7 +81,7 @@ def test_T2_damage_table(tmp_path, damage):
             run_snapshot.require()
     elif damage in {"ready-missing", "ready-null", "counts-null"}:
         field = "counts" if damage == "counts-null" else "ready"
-        assert getattr(run_snapshot, field) is None
+        assert run_snapshot.get(field) is None
         with pytest.raises(SessionDamaged, match="session damaged"):
             run_snapshot.require(field)
     else:

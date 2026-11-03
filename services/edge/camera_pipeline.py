@@ -58,7 +58,6 @@ class CameraStats:
     processed: int = 0
     dropped: int = 0
     unprocessed: int = 0
-    rec_dropped: int | None = None
     failed_reads: int = 0
     t0: float | None = None
     t0_wall: str | None = None
@@ -99,7 +98,6 @@ class CameraPipeline:
         self._positions = positions
         self._replay = isinstance(input, ReplayInput)
         self._started = False
-        self._rec_dropped = None
         self._on_event = on_event or (lambda ev, t0: None)
         self._size_first = True
         self._size_problem: str | None = None
@@ -316,7 +314,6 @@ class CameraPipeline:
             capture.captured, processor.processed, capture.dropped, processor.unprocessed,
             rec_dropped, capture.failed_reads,
         )  # fmt: skip
-        self._rec_dropped = rec_dropped
         try:
             writer.close(session_status, counts)
         except Exception as e:  # cannot write at all: say so, keep shutting down
@@ -368,7 +365,6 @@ class CameraPipeline:
             processed=processor.processed,
             dropped=capture.dropped,
             unprocessed=processor.unprocessed,
-            rec_dropped=self._rec_dropped,
             failed_reads=capture.failed_reads,
             t0=capture.t0,
             t0_wall=capture.t0_wall,
