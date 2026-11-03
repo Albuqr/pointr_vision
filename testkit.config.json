@@ -1,6 +1,5 @@
 {
   "project": { "name": "pointr_vision" },
-  "auth": { "strategy": "none", "roles": [] },
   "links": { "checkExternal": false },
   "security": {
     "semgrepExcludeRules": [

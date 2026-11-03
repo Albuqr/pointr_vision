@@ -20,13 +20,9 @@ done
 [[ -n "$(cfg api.includePathRegex)" ]] && args+=(--include-path-regex "$(cfg api.includePathRegex)")
 [[ -n "$(cfg api.excludePathRegex)" ]] && args+=(--exclude-path-regex "$(cfg api.excludePathRegex)")
 
-# Autenticação: token do papel configurado (api.role) ou cabeçalho livre TESTKIT_API_AUTH_HEADER.
-role="$(cfg api.role)"
+# Optional header supplied by the environment.
 if [[ -n "${TESTKIT_API_AUTH_HEADER:-}" ]]; then
   args+=(-H "$TESTKIT_API_AUTH_HEADER")
-elif [[ -n "$role" ]]; then
-  header="$("$PYTHON_BIN" "$KIT_DIR/bin/lib/api_token.py" "$role")" || { step "API: obter token do papel $role" false; finish; exit $?; }
-  if [[ -n "$header" ]]; then args+=(-H "$header"); else warn "papel '$role' sem token; rodando a API sem autenticação"; fi
 fi
 
 extra="$(cfg api.extraArgs)"

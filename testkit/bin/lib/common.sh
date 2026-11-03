@@ -88,16 +88,6 @@ detect_python() {
   local d="$PROJECT_ROOT/$(cfg python.workingDirectory .)"
   [[ -f "$d/pyproject.toml" || -f "$d/requirements.txt" || -f "$d/setup.py" || -f "$d/setup.cfg" || -f "$d/Pipfile" ]]
 }
-detect_mobile_framework() {
-  local fw; fw="$(cfg mobile.framework auto)"
-  if [[ "$fw" != "auto" ]]; then echo "$fw"; return; fi
-  if [[ -f "$PROJECT_ROOT/pubspec.yaml" ]]; then echo flutter; return; fi
-  if [[ -f "$PROJECT_ROOT/package.json" ]] && grep -q '"expo"' "$PROJECT_ROOT/package.json"; then echo expo; return; fi
-  if [[ -f "$PROJECT_ROOT/package.json" ]] && grep -q '"react-native"' "$PROJECT_ROOT/package.json"; then echo react-native; return; fi
-  if [[ -f "$PROJECT_ROOT/android/build.gradle" || -f "$PROJECT_ROOT/android/build.gradle.kts" || -f "$PROJECT_ROOT/build.gradle.kts" ]]; then echo android; return; fi
-  if compgen -G "$PROJECT_ROOT/*.xcodeproj" >/dev/null || compgen -G "$PROJECT_ROOT/ios/*.xcodeproj" >/dev/null; then echo ios; return; fi
-  echo none
-}
 detect_web() {
   [[ -n "$(cfg web.startCommand)" ]] || [[ -n "${TESTKIT_BASE_URL:-}" ]] || {
     [[ -f "$PROJECT_ROOT/testkit.config.json" ]] && grep -q '"baseUrl"' "$PROJECT_ROOT/testkit.config.json"
@@ -113,25 +103,4 @@ is_enabled() {
     false) return 1 ;;
     *) "$2" ;;
   esac
-}
-
-# Exporta credenciais de um papel como USERNAME/PASSWORD/TOTP_SECRET/TOKEN/EMAIL.
-export_role_env() {
-  local role="$1" prefix
-  prefix="$("$PYTHON_BIN" - "$role" <<'PY'
-import json, subprocess, sys, os
-cfg = json.loads(subprocess.check_output([sys.executable, os.path.join(os.environ["KIT_DIR"], "bin/lib/config.py"), "resolved"]))
-for r in cfg["auth"]["roles"]:
-    if r["name"] == sys.argv[1]:
-        print(r["envPrefix"]); break
-PY
-)"
-  [[ -n "$prefix" ]] || { warn "papel '$role' não encontrado em auth.roles"; return 1; }
-  local v
-  for v in USERNAME PASSWORD TOTP_SECRET TOKEN EMAIL COOKIE; do
-    local src="${prefix}_${v}"
-    export "ROLE_${v}=${!src:-}"
-  done
-  [[ -z "$ROLE_EMAIL" ]] && export ROLE_EMAIL="$ROLE_USERNAME"
-  return 0
 }

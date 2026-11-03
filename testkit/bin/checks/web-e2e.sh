@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Testes de navegador (Playwright): fumaça, login, permissões, acessibilidade, segurança,
+# Testes de navegador (Playwright): smoke, a11y, security,
 # responsividade, performance e varredura de links. Uso: web-e2e.sh [args extras do playwright]
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 WEB_DIR="$KIT_DIR/web"
