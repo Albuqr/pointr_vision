@@ -243,7 +243,7 @@ source, 12 s into detection): about **610 MB resident per process (peak 862 MB),
 committed**, and the launcher itself about 4 MB. The two cameras shared one CPU: 2.10 and 1.56
 processed fps, against 2.84 for one camera alone on the same clip (one short run each, not a
 benchmark). A GPU PC was not measured; CUDA adds its own host memory. With that launcher, N cameras
-took about N GB of RAM and watch Task Manager during the first run.
+took about N GB of RAM. Watch Task Manager during the first run.
 
 **CPU contention, measured on real hardware (laptop webcam + phone URL, i7-10510U, CPU
 build):** the laptop camera processed 1.5-1.7 fps and the phone URL camera 0.35-0.57 fps, against
