@@ -14,16 +14,43 @@ from services.app import __main__ as app_cli
 from services.app.config import CameraConfig
 from services.app.server import create_app
 from services.edge import contract
-from services.edge.launcher import Camera, Options, camera_args
+from services.edge.launcher import Camera, ChildProgress, Options, camera_args
 from tests.fixtures.make_clips import make_clips
 
 
 class Child:
+    """A launcher child that has only just been spawned; tests set what they want to see."""
+
     def __init__(self, camera):
         self.cam = camera
         self.session_dir = None
         self.preview_port = camera.http_preview_port
+        self.preview_ready = False
         self.running = True
+        self.failure = None
+        self.failure_kind = None
+        self.run_errors = []
+        self.tail = []
+        self.exit_code = None
+        self.stop_sent = False
+        self.loading_model = False
+
+    def progress(self):
+        return ChildProgress(
+            cam=self.cam,
+            alive=self.running,
+            session_dir=self.session_dir,
+            failure=self.failure,
+            failure_kind=self.failure_kind,
+            run_errors=tuple(self.run_errors),
+            tail=tuple(self.tail),
+            exit_code=getattr(getattr(self, "proc", None), "returncode", self.exit_code),
+            preview_port=self.preview_port,
+            preview_ready=self.preview_ready,
+            stop_sent=self.stop_sent,
+            loading_model=self.loading_model,
+            token=self,
+        )
 
 
 class FakeLauncher:

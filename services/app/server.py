@@ -25,6 +25,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from services.app.audit import AuditTrail
 from services.app.calibrations import CalibrationStore
 from services.app.camera_log import CameraLog
+from services.app.camera_status import camera_view, latest_frames_path
 from services.app.config import CameraConfig, resolve_camera_source
 from services.edge.calibration.court import court_lines, court_model
 from services.edge.calibration.homography import fit_calibration
@@ -33,7 +34,7 @@ from services.edge.capture.sources import DEFAULT_CAPTURE_SIZE, SourceOpenError,
 from services.edge.capture.types import SourceEnded
 from services.edge.launcher import Camera, ConfigError, Launcher, Options, parse_config
 from services.edge.reports.build import build_report
-from services.edge.session.folder import find_sessions, mark_interrupted, read_run, read_session
+from services.edge.session.folder import find_sessions, mark_interrupted, read_session
 from services.edge.session.writer import mask_credentials
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -142,77 +143,33 @@ class Studio:
             "fps_cap": camera.fps_cap,
         }
 
-    def note_child(self, child, log, state, events, session):
-        """Copy a child's news into its camera log: session events, and, once, why it ended
-        or never recorded, and run-time errors once each (the error stays until dismissed or
-        the camera next starts)."""
-        if child.session_dir:
-            log.ingest_session(session)
-            key = f"{child.session_dir}#run_errors"
-            run_errors = list(getattr(child, "run_errors", ()))
+    def apply_view(self, log, view, snapshot):
+        """Copy a camera's news into its camera log: session events, run-time errors once each
+        (the error stays until dismissed or the camera next starts) and, once per child, why it
+        ended or never recorded."""
+        if snapshot is not None and view.session_folder:
+            log.ingest_session(snapshot)
+            key = f"{view.session_folder}#run_errors"
             with log.lock:  # two polls at once must not report the same error twice
                 start = log.seen.get(key, 0)
-                log.seen[key] = len(run_errors)
-            for error in run_errors[start:]:
-                detail = f"source: {mask_credentials(str(child.cam.source))}\nreason: {error}"
-                log.set_error("The camera reported an error while recording.", detail)
-                log.add_event("error", error)
-        failure = getattr(child, "failure", None)
-        running = child.running
-        session_status = session.status if session else None
-        if failure is None and running and session_status not in ("ended", "interrupted", "error"):
+                log.seen[key] = len(view.run_errors)
+            for run_error in view.run_errors[start:]:
+                log.set_error("The camera reported an error while recording.", run_error.detail)
+                log.add_event("error", run_error.error)
+        problem = view.problem
+        if problem is None:
             return
         with log.lock:
-            if log.reported_child is child:
+            if log.reported_child is problem.token:
                 return
-            log.reported_child = child
-        proc = getattr(child, "proc", None)
-        code = getattr(proc, "returncode", None)
-        failure_kind = getattr(child, "failure_kind", None) or "exited"
-        if failure is not None and failure_kind == "start_timeout":
-            message = "The camera took too long to open, so it was stopped."
-        elif failure is not None:
-            message = "The camera could not start recording."
-        else:
-            message = "The camera stopped recording because of an error."
-        lines = [f"source: {mask_credentials(str(child.cam.source))}"]
-        if failure is not None:
-            lines.append(f"failure kind: {failure_kind}")
-            lines.append(f"reason: {failure}")
-        else:
-            lines.append(f"session status: {session_status}")
-            if state == "error":
-                reason = camera_error(child, state, events, session_status)
-                if not running and session_status not in ("ended", "interrupted", "error"):
-                    message = reason
-            elif getattr(child, "stop_sent", False) and session_status not in (
-                "ended",
-                "interrupted",
-            ):
-                message = (
-                    "The camera was stopped; its process exited without writing a session end."
-                )
-            else:
-                message = f"The camera recording ended with status {state}."
-            lines.append(f"reason: {reason if state == 'error' else message}")
-        if code is not None:
-            lines.append(f"exit code: {code}")
-        tail = list(getattr(child, "tail", ()))
-        if tail:
-            lines.append(f"output (last {len(tail)} lines):")
-            lines.extend(tail)
-        detail = "\n".join(lines)
-        if failure is None and state != "error":
-            kind = "stopped" if state == "ended" else "interrupted"
-            if not any(event.get("kind") == kind for event in events):
-                log.add_event(kind, message)
-            self.audit.record("recording_stop", child.cam.camera_id, detail={"reason": detail})
+            log.reported_child = problem.token
+        if problem.is_error:
+            log.set_error(problem.message, problem.detail)
+            log.add_event(problem.event_kind, problem.event_detail)
             return
-        log.set_error(message, detail)
-        log.add_event(
-            failure_kind if failure is not None else "error",
-            failure if failure is not None else message,
-        )
+        if problem.event_kind:
+            log.add_event(problem.event_kind, problem.event_detail)
+        self.audit.record("recording_stop", view.camera_id, detail={"reason": problem.detail})
 
     def start(self):
         with self.lock:
@@ -340,86 +297,35 @@ class Studio:
             uncalibrated = dict(self.uncalibrated)
         cameras = []
         for child in getattr(launcher, "children", []):
-            session_dir = child.session_dir
-            alive = child.running  # before the files: once gone, what they say is final
-            snapshot = read_session(session_dir) if session_dir else None
-            session = snapshot.document() if snapshot else {}
-            if snapshot and snapshot.data is None:
-                session = {
-                    "status": "error",
-                    "events": [{"kind": "error", "detail": "; ".join(snapshot.problems)}],
-                }
-            run_dir = snapshot.latest_run.path if snapshot and snapshot.latest_run else None
+            progress = child.progress()
+            snapshot = read_session(progress.session_dir) if progress.session_dir else None
+            frames_path = latest_frames_path(snapshot)
             try:
-                frames = self.read_recent_frames(run_dir / "frames.csv") if run_dir else []
-                frame = frames[-1] if frames else {}
-                elapsed = (
-                    float(frame.get("t_proc_end", 0)) - float(frames[0].get("t_proc_start", 0))
-                    if frames
-                    else 0
-                )
-                fps = len(frames) / elapsed if elapsed > 0 else None
-                people = int(frame.get("n_detections") or 0)
-                track_count = int(frame.get("n_tracks") or 0)
-                drops = int(frame.get("dropped_total") or 0)
-            except (OSError, ValueError, KeyError):
-                fps, people, track_count, drops = None, 0, 0, 0
-            events = session.get("events") or []
-            state = camera_state(child, alive, session, run_dir)
-            log = self.log(child.cam.camera_id)
-            self.note_child(child, log, state, events, snapshot)
-            health = "OK"
-            for event in events:
-                health = {
-                    "source_lost": "LOST",
-                    "source_recovered": "OK",
-                    "frozen_frames": "FROZEN",
-                    "dark_frames": "DARK",
-                }.get(event.get("kind"), health)
-            # only a port the camera has confirmed: it may still be loading its model, and it picks
-            # another port when the one Studio chose is busy. Until then the UI shows a placeholder.
-            preview_port = child.preview_port if getattr(child, "preview_ready", False) else None
-            live = {}
-            if preview_port:
-                try:
-                    with preview_get(preview_port, "status.json", timeout=0.1) as response:
-                        live = json.loads(response.read())
-                    health = live.get("health", health)
-                    fps = live.get("processed_fps", fps)
-                    people = live.get("people", people) or 0
-                    track_count = live.get("tracks", track_count) or 0
-                    drops = live.get("drops", drops) or 0
-                except (OSError, ValueError):
-                    pass
+                frames = self.read_recent_frames(frames_path) if frames_path else []
+            except (OSError, ValueError):
+                frames = []
+            live = self.read_live(progress.confirmed_preview_port)
+            view = camera_view(progress, snapshot, frames, live)
+            log = self.log(view.camera_id)
+            self.apply_view(log, view, snapshot)
             cameras.append(
                 {
-                    "camera_id": child.cam.camera_id,
-                    "name": child.cam.name or child.cam.camera_id,
-                    "state": state,
-                    "processed_fps": fps,
-                    "people": people,
-                    "tracks": track_count,
-                    "drops": drops,
-                    "preview_drops": live.get("preview_drops", 0) if preview_port else 0,
-                    "health": health,
-                    "last_event": (
-                        {**events[-1], "detail": mask_credentials(str(events[-1].get("detail")))}
-                        if events and events[-1].get("detail") is not None
-                        else (events[-1] if events else None)
-                    ),
-                    "session_folder": str(session_dir) if session_dir else None,
-                    "preview_port": preview_port,
-                    "error": camera_error(child, state, events, session.get("status")),
-                    "calibration_warning": self.calibration_warnings.get(child.cam.camera_id),
+                    "camera_id": view.camera_id,
+                    "name": view.name,
+                    "state": view.state,
+                    "processed_fps": view.processed_fps,
+                    "people": view.people,
+                    "tracks": view.tracks,
+                    "drops": view.drops,
+                    "preview_drops": view.preview_drops,
+                    "health": view.health,
+                    "last_event": view.last_event,
+                    "session_folder": view.session_folder,
+                    "preview_port": view.preview_port,
+                    "error": view.error,
+                    "calibration_warning": self.calibration_warnings.get(view.camera_id),
                     **log.snapshot(),
-                    "calibration": (
-                        {
-                            "calibration_id": session.get("calibration", {}).get("calibration_id"),
-                            "check_error_m": session.get("calibration", {}).get("check_error_m"),
-                        }
-                        if session.get("calibration")
-                        else None
-                    ),
+                    "calibration": view.calibration,
                 }
             )
         shown = {camera["camera_id"] for camera in cameras}
@@ -439,6 +345,18 @@ class Studio:
             "uncalibrated": uncalibrated,
             "final": finals,
         }
+
+    @staticmethod
+    def read_live(port):
+        """The preview's status.json, or {} when there is no confirmed preview or it is silent."""
+        if not port:
+            return {}
+        try:
+            with preview_get(port, "status.json", timeout=0.1) as response:
+                live = json.loads(response.read())
+        except (OSError, ValueError):
+            return {}
+        return live if isinstance(live, dict) else {}
 
     def read_recent_frames(self, path):
         state = self.frame_cache.setdefault(
@@ -535,15 +453,15 @@ class Studio:
         if entry is None:
             raise HTTPException(404, "camera not found")
         with self.lock:
-            child = next(
+            progress = next(
                 (
-                    c
-                    for c in getattr(self.launcher, "children", [])
-                    if c.cam.camera_id == camera_id and c.running
+                    p
+                    for p in (c.progress() for c in getattr(self.launcher, "children", []))
+                    if p.cam.camera_id == camera_id and p.alive
                 ),
                 None,
             )
-            port = child.preview_port if child else None
+            port = progress.preview_port if progress else None
         try:
             if port:
                 with preview_get(port, "raw-snapshot.jpg", timeout=3) as r:
@@ -968,40 +886,6 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
         return {"message": "Build the UI with npm run build in services/app/ui"}
 
     return app
-
-
-def camera_state(child, alive, session, run_dir) -> str:
-    """Where one camera is, from the signals the launcher and the session files already carry:
-    its output (device line, session line), session.json status and run.json `ready` (D-052)."""
-    status = session.get("status")
-    if status in ("ended", "interrupted"):
-        return status
-    if getattr(child, "failure", None) is not None or status == "error":
-        return "error"
-    if getattr(child, "stop_sent", False):
-        return "stopping" if alive else "interrupted"
-    if not alive:  # gone with no end written: it died, or it never recorded
-        return "error"
-    if not child.session_dir:
-        return "loading_model" if getattr(child, "loading_model", False) else "starting"
-    ready = read_run(run_dir).ready if run_dir else None
-    ready = ready or {}
-    if not ready.get("first_frame"):
-        return "waiting_first_frame"
-    return "preview_ready" if ready.get("first_preview") else "recording"
-
-
-def camera_error(child, state, events, session_status=None) -> str | None:
-    """Why a camera is in error, credentials masked; None in any other state."""
-    reason = getattr(child, "failure", None)
-    if state != "error":
-        return mask_credentials(reason or "") or None
-    if not reason and not child.running and session_status not in ("ended", "interrupted", "error"):
-        return "the camera process exited without writing a session end"
-    if not reason:
-        last = events[-1].get("detail") if events else None
-        reason = last or "the camera stopped without ending its session"
-    return mask_credentials(str(reason))
 
 
 def preview_get(port: int, path: str, timeout: float) -> http.client.HTTPResponse:

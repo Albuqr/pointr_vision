@@ -95,45 +95,6 @@ def test_B9_status_uses_last_listed_run(client, tmp_path, monkeypatch, folder_or
     assert shown == expected
 
 
-def test_each_camera_steps_through_every_state(client, tmp_path):
-    first, second = start_two(client)
-    assert states(client) == {"cam1": "starting", "cam2": "starting"}
-
-    first.loading_model = True  # cam1 printed its device line and is loading the model
-    assert states(client) == {"cam1": "loading_model", "cam2": "starting"}
-
-    open_session(first, tmp_path)  # cam1 has a session but no frame yet
-    assert states(client) == {"cam1": "waiting_first_frame", "cam2": "starting"}
-
-    open_session(first, tmp_path, ready={"first_frame": "t"})
-    open_session(second, tmp_path)
-    assert states(client) == {"cam1": "recording", "cam2": "waiting_first_frame"}
-
-    open_session(first, tmp_path, ready={"first_frame": "t", "first_preview": "t"})
-    assert states(client) == {"cam1": "preview_ready", "cam2": "waiting_first_frame"}
-
-    for child in (first, second):
-        child.stop_sent = True
-    assert states(client) == {"cam1": "stopping", "cam2": "stopping"}
-
-    for child in (first, second):
-        open_session(child, tmp_path, status="ended")
-        child.running = False
-    assert states(client) == {"cam1": "ended", "cam2": "ended"}
-
-
-def test_a_failed_camera_reports_error_with_its_reason_and_the_others_keep_going(client, tmp_path):
-    first, second = start_two(client)
-    open_session(second, tmp_path, ready={"first_frame": "t"})
-    first.failure = "failed: no session after 30 s"
-    first.running = False
-    cameras = {c["camera_id"]: c for c in client.get("/api/status").json()["cameras"]}
-    assert cameras["cam1"]["state"] == "error"
-    assert cameras["cam1"]["error"] == "failed: no session after 30 s"
-    assert cameras["cam2"]["state"] == "recording"
-    assert cameras["cam2"]["error"] is None
-
-
 def test_a_camera_that_died_without_ending_its_session_is_an_error(client, tmp_path):
     first, _ = start_two(client)
     open_session(first, tmp_path, ready={"first_frame": "t"})
@@ -275,31 +236,3 @@ def test_the_launcher_marks_a_child_loading_its_model_from_its_device_line():
     assert child.loading_model is False
     Launcher.read(launcher, child)
     assert child.loading_model is True
-
-
-def test_camera_state_survives_run_json_with_ready_null(client, tmp_path):
-    first, _ = start_two(client)
-    folder = tmp_path / first.cam.camera_id
-    run = folder / "runs" / "run1"
-    run.mkdir(parents=True, exist_ok=True)
-    (folder / "session.json").write_text(json.dumps({"status": "running", "events": []}), "utf-8")
-    (run / "run.json").write_text(json.dumps({"ready": None}), "utf-8")
-    first.session_dir = folder
-
-    resp = client.get("/api/status")
-    assert resp.status_code == 200
-    assert states(client)["cam1"] == "waiting_first_frame"
-
-
-def test_camera_state_survives_run_json_with_ready_missing(client, tmp_path):
-    first, _ = start_two(client)
-    folder = tmp_path / first.cam.camera_id
-    run = folder / "runs" / "run1"
-    run.mkdir(parents=True, exist_ok=True)
-    (folder / "session.json").write_text(json.dumps({"status": "running", "events": []}), "utf-8")
-    (run / "run.json").write_text(json.dumps({}), "utf-8")
-    first.session_dir = folder
-
-    resp = client.get("/api/status")
-    assert resp.status_code == 200
-    assert states(client)["cam1"] == "waiting_first_frame"

@@ -367,6 +367,34 @@ def camera_args(cam: Camera, opts: Options) -> list[str]:
     return cmd
 
 
+@dataclass(frozen=True)
+class ChildProgress:
+    """One consistent read of a Child, for readers on other threads (Studio). Build it with
+    `Child.progress()`; a fake builds a complete one too, so a reader never needs a default."""
+
+    cam: Camera
+    alive: (
+        bool  # read before everything else: once the process is gone, what the files say is final
+    )
+    session_dir: Path | None
+    failure: str | None
+    failure_kind: str | None
+    run_errors: tuple[str, ...]
+    tail: tuple[str, ...]
+    exit_code: int | None
+    preview_port: int | None  # the port asked for, until the camera confirms its own
+    preview_ready: bool
+    stop_sent: bool
+    loading_model: bool
+    token: object  # identifies the child, so a caller can report each child once
+
+    @property
+    def confirmed_preview_port(self) -> int | None:
+        """Only a port the camera has confirmed: it may still be loading its model, and it picks
+        another port when the one asked for is busy."""
+        return self.preview_port if self.preview_ready else None
+
+
 class Child:
     """One camera's process (shared by every camera of a group) and what the launcher learned
     from its output about that camera."""
@@ -395,6 +423,25 @@ class Child:
     @property
     def running(self) -> bool:
         return self.proc is not None and self.proc.poll() is None
+
+    def progress(self) -> ChildProgress:
+        alive = self.running  # first: see ChildProgress.alive
+        proc = self.proc
+        return ChildProgress(
+            cam=self.cam,
+            alive=alive,
+            session_dir=self.session_dir,
+            failure=self.failure,
+            failure_kind=self.failure_kind,
+            run_errors=tuple(self.run_errors),
+            tail=tuple(self.tail),
+            exit_code=proc.returncode if proc is not None else None,
+            preview_port=self.preview_port,
+            preview_ready=self.preview_ready,
+            stop_sent=self.stop_sent,
+            loading_model=self.loading_model,
+            token=self,
+        )
 
 
 class Launcher:
