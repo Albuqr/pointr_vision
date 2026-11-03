@@ -72,13 +72,20 @@ KEYS = {
     "track_activation",
     "track_min_frames",
 }
-DEFAULT_PORTS = {"http": 80, "https": 443, "rtsp": 554}
+DEFAULT_PORTS = {"http": 80, "https": 443, "rtsp": 554}  # also the allowed URL schemes
+DET_SIZES = range(320, 1281, DET_SIZE_MULTIPLE)
+MAX_FPS_CAP = 60.0
+NOT_A_LIST = "the config must be a non-empty JSON list of cameras"
 TAIL_LINES = 20  # last output lines of a child kept for the Studio error panel
 OK_STATUSES = ("ended", "interrupted")
 
 
 class ConfigError(Exception):
     """The config cannot be used; nothing has been started."""
+
+    def __init__(self, message: str, field_errors: list[dict] | None = None):
+        super().__init__(message)
+        self.field_errors = field_errors or []
 
 
 @dataclass(frozen=True)
@@ -123,139 +130,180 @@ def absolute(source: str) -> str:
     return str(Path(source).resolve())
 
 
-def _validate_url(source: str, where: str) -> None:
-    parts = urlsplit(source)
-    if parts.scheme.lower() not in ("http", "https", "rtsp"):
-        raise ConfigError(f"{where}: URL scheme must be http, https, or rtsp")
+def url_problem(source: str) -> str | None:
+    """Why a camera URL is refused (scheme, host, loopback, link-local, ...), or None."""
     try:
+        parts = urlsplit(source)
+        if parts.scheme.lower() not in DEFAULT_PORTS:
+            return "URL scheme must be http, https, or rtsp"
         host = parts.hostname
-        _ = parts.port
-    except ValueError as exc:
-        raise ConfigError(f"{where}: URL is malformed") from exc
+        _ = parts.port  # reject malformed ports
+    except ValueError:
+        return "URL is malformed"
     if not host:
-        raise ConfigError(f"{where}: URL must include a host")
+        return "URL must include a host"
     if host.lower() == "localhost" or host.lower().endswith(".localhost"):
-        raise ConfigError(f"{where}: loopback camera URLs are not allowed")
+        return "loopback camera URLs are not allowed"
     try:
         address = ipaddress.ip_address(host)
     except ValueError:
-        address = None
-    if address and (
+        return None
+    if (
         address.is_loopback
         or address.is_link_local
         or address.is_unspecified
         or address.is_multicast
     ):
-        raise ConfigError(f"{where}: loopback and link-local camera URLs are not allowed")
+        return "loopback and link-local camera URLs are not allowed"
+    return None
 
 
-def parse_config(data: object) -> list[Camera]:
-    """The camera list from parsed JSON; ConfigError says which entry is wrong and why."""
-    if not isinstance(data, list) or not data:
-        raise ConfigError("the config must be a non-empty JSON list of cameras")
+def _is_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _collect(data: object) -> tuple[list[Camera], list[dict]]:
+    """Every problem in the config as {index, field, message}, plus the cameras that parsed."""
+    if not isinstance(data, list):
+        return [], [{"index": None, "field": "cameras", "message": NOT_A_LIST}]
     cameras: list[Camera] = []
-    for i, entry in enumerate(data):
-        where = f"entry {i + 1}"
+    errors: list[dict] = []
+    ids: set[str] = set()
+    names: set[str] = set()
+    sources: dict[str, str] = {}
+    for index, entry in enumerate(data):
+        problems: list[dict] = []
+
+        def bad(field: str, message: str, index: int = index, problems: list = problems) -> None:
+            problems.append({"index": index, "field": field, "message": message})
+
         if not isinstance(entry, dict):
-            raise ConfigError(f"{where}: must be an object")
+            bad("camera", "must be an object")
+            errors += problems
+            continue
         if unknown := set(entry) - KEYS:
-            raise ConfigError(f"{where}: unknown keys {sorted(unknown)}; allowed {sorted(KEYS)}")
+            bad("camera", f"unknown keys {sorted(unknown)}; allowed {sorted(KEYS)}")
         for key in ("camera_id", "source", "link"):
             if key not in entry:
-                raise ConfigError(f"{where}: missing {key!r}")
-        camera_id = entry["camera_id"]
-        if not isinstance(camera_id, str) or not CAMERA_ID_RE.fullmatch(camera_id):
-            raise ConfigError(f"{where}: camera_id must match {CAMERA_ID_RE.pattern}")
-        where = f"camera {camera_id}"
+                bad(key, f"missing {key!r}")
+        camera_id = entry.get("camera_id")
+        if "camera_id" in entry:
+            if not isinstance(camera_id, str) or not CAMERA_ID_RE.fullmatch(camera_id):
+                bad("camera_id", f"camera_id must match {CAMERA_ID_RE.pattern}")
+            elif camera_id in ids:
+                bad("camera_id", "camera_id is used twice")
+            else:
+                ids.add(camera_id)
         name = entry.get("name")
         if name is not None and (not isinstance(name, str) or not name.strip()):
-            raise ConfigError(f"{where}: name must not be empty")
-        source = entry["source"]
+            bad("name", "name must not be empty")
+        elif isinstance(name, str) or isinstance(camera_id, str):
+            key = (name if isinstance(name, str) else camera_id).strip().casefold()
+            if key in names:
+                bad("name", f"camera name {key!r} is used twice")
+            names.add(key)
+        source = entry.get("source")
         if isinstance(source, int) and not isinstance(source, bool):
             source = str(source)  # 0 is as good as "0"
-        if not isinstance(source, str) or not source.strip():
-            raise ConfigError(f"{where}: source must be a camera index or a URL or path")
-        source = source.strip()
-        if "://" in source or source.lower().startswith(("http:", "https:", "rtsp:", "file:")):
-            _validate_url(source, where)
-        if entry["link"] not in LINKS:
-            raise ConfigError(f"{where}: link must be one of {', '.join(LINKS)}")
+        if "source" in entry:
+            if not isinstance(source, str) or not source.strip():
+                bad("source", "source must be a camera index or a URL or path")
+            else:
+                source = source.strip()
+                is_url = "://" in source or source.lower().startswith(
+                    ("http:", "https:", "rtsp:", "file:")
+                )
+                if problem := (url_problem(source) if is_url else None):
+                    bad("source", problem)
+                else:
+                    key = source_key(absolute(source))
+                    if key in sources:
+                        bad(
+                            "source",
+                            f"same source as {sources[key]} ({mask_credentials(source)}): "
+                            "a phone serves ONE viewer, so a second reader would fail",
+                        )
+                    elif isinstance(camera_id, str):
+                        sources[key] = camera_id
+        if "link" in entry and entry["link"] not in LINKS:
+            bad("link", f"link must be one of {', '.join(LINKS)}")
         size = entry.get("det_size")
         if size is not None and (
-            not isinstance(size, int)
-            or isinstance(size, bool)
-            or size not in range(320, 1281, DET_SIZE_MULTIPLE)
+            not isinstance(size, int) or isinstance(size, bool) or size not in DET_SIZES
         ):
-            raise ConfigError(f"{where}: det_size must be an allowed size from 320 through 1280")
+            bad("det_size", "det_size must be an allowed size from 320 through 1280")
         fps_cap = entry.get("fps_cap")
         try:
             fps_valid = fps_cap is None or (
-                not isinstance(fps_cap, bool)
-                and isinstance(fps_cap, (int, float))
-                and math.isfinite(float(fps_cap))
-                and 0 < fps_cap <= 60
+                _is_number(fps_cap) and math.isfinite(float(fps_cap)) and 0 < fps_cap <= MAX_FPS_CAP
             )
         except OverflowError:
             fps_valid = False
         if not fps_valid:
-            raise ConfigError(f"{where}: fps_cap must be greater than 0 and at most 60")
+            bad("fps_cap", f"fps_cap must be greater than 0 and at most {MAX_FPS_CAP:g}")
         enabled = entry.get("enabled", True)
         if not isinstance(enabled, bool):
-            raise ConfigError(f"{where}: enabled must be true or false")
+            bad("enabled", "enabled must be true or false")
         preview = entry.get("preview")
         if preview is not None and not isinstance(preview, bool):
-            raise ConfigError(f"{where}: preview must be true or false")
-        track_lost_secs = entry.get("track_lost_secs")
-        if track_lost_secs is not None and (
-            isinstance(track_lost_secs, bool)
-            or not isinstance(track_lost_secs, (int, float))
-            or not 0 < track_lost_secs < float("inf")
+            bad("preview", "preview must be true or false")
+        lost = entry.get("track_lost_secs")
+        if lost is not None and not (_is_number(lost) and 0 < lost < float("inf")):
+            bad("track_lost_secs", "track_lost_secs must be a finite number greater than 0")
+        activation = entry.get("track_activation")
+        if activation is not None and not (_is_number(activation) and 0 < activation <= 1):
+            bad("track_activation", "track_activation must be a number in (0, 1]")
+        min_frames = entry.get("track_min_frames")
+        if min_frames is not None and (
+            not isinstance(min_frames, int) or isinstance(min_frames, bool) or min_frames < 1
         ):
-            raise ConfigError(f"{where}: track_lost_secs must be a finite number greater than 0")
-        track_activation = entry.get("track_activation")
-        if track_activation is not None and (
-            isinstance(track_activation, bool)
-            or not isinstance(track_activation, (int, float))
-            or not 0 < track_activation <= 1
-        ):
-            raise ConfigError(f"{where}: track_activation must be a number in (0, 1]")
-        track_min_frames = entry.get("track_min_frames")
-        if track_min_frames is not None and (
-            not isinstance(track_min_frames, int)
-            or isinstance(track_min_frames, bool)
-            or track_min_frames < 1
-        ):
-            raise ConfigError(f"{where}: track_min_frames must be a positive integer")
-        cameras.append(
-            Camera(
-                camera_id,
-                absolute(source.strip()),
-                entry["link"],
-                size,
-                preview,
-                track_lost_secs,
-                track_activation,
-                track_min_frames,
-                name=name.strip() if name else None,
-                fps_cap=fps_cap,
-                enabled=enabled,
-            )
-        )
-    for a in range(len(cameras)):
-        for b in range(a):
-            if cameras[a].camera_id == cameras[b].camera_id:
-                raise ConfigError(f"camera_id {cameras[a].camera_id!r} is used twice")
-            name_a = (cameras[a].name or cameras[a].camera_id).casefold()
-            name_b = (cameras[b].name or cameras[b].camera_id).casefold()
-            if name_a == name_b:
-                raise ConfigError(f"camera name {name_a!r} is used twice")
-            if source_key(cameras[a].source) == source_key(cameras[b].source):
-                raise ConfigError(
-                    f"{cameras[b].camera_id} and {cameras[a].camera_id} use the same source "
-                    f"({mask_credentials(cameras[a].source)})"
-                    ": a phone serves ONE viewer, so a second reader would fail"
+            bad("track_min_frames", "track_min_frames must be a positive integer")
+        errors += problems
+        if not problems:
+            cameras.append(
+                Camera(
+                    camera_id,
+                    absolute(source),
+                    entry["link"],
+                    size,
+                    preview,
+                    lost,
+                    activation,
+                    min_frames,
+                    name=name.strip() if name else None,
+                    fps_cap=fps_cap,
+                    enabled=enabled,
                 )
+            )
+    return cameras, errors
+
+
+def check_config(data: object) -> list[Camera]:
+    """The cameras of a parsed config; an empty list is valid (Studio may save no cameras).
+
+    The one set of camera rules, used by the launcher and by Studio. On failure ConfigError
+    says which entry is wrong and why, and its field_errors lists every problem found as
+    {index, field, message}.
+    """
+    cameras, errors = _collect(data)
+    if errors:
+        first = errors[0]
+        index = first["index"]
+        message = first["message"]
+        if index is not None:
+            entry = data[index]
+            cid = entry.get("camera_id") if isinstance(entry, dict) else None
+            ok = isinstance(cid, str) and CAMERA_ID_RE.fullmatch(cid)
+            message = f"{'camera ' + cid if ok else f'entry {index + 1}'}: {message}"
+        raise ConfigError(message, errors)
     return cameras
+
+
+def parse_config(data: object) -> list[Camera]:
+    """The camera list to run: check_config, and it must not be empty."""
+    if data == []:
+        raise ConfigError(NOT_A_LIST)
+    return check_config(data)
 
 
 def load_config(path: Path) -> list[Camera]:
