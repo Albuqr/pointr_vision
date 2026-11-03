@@ -11,8 +11,7 @@ from starlette.testclient import TestClient
 
 from services.app.config import CameraConfig
 from services.app.server import create_app
-from services.edge.launcher import Options, camera_args
-from services.edge.launcher_impl import Camera
+from services.edge.launcher import Camera, Options, camera_args
 from tests.app.test_api import FakeLauncher
 from tests.edge.test_session import run_main, session_files
 

@@ -197,7 +197,7 @@ def test_model_load_failure_prints_error_line_on_stderr(monkeypatch, capsys):
 @pytest.mark.parametrize("err_first", [False, True])
 def test_model_load_failure_becomes_the_launcher_failure(monkeypatch, capsys, err_first):
     from services.edge.child_protocol import parse
-    from services.edge.launcher_impl import Camera, Child, Launcher
+    from services.edge.launcher import Camera, Child, Launcher
 
     _, out, err = run_failing_model_load(monkeypatch, capsys)
     out_lines, err_lines = out.splitlines(), err.splitlines()

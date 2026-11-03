@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts import run_cameras as rc
+from services.edge import launcher as rc
 from services.edge import main as cli
 from services.edge.capture.capture import Capture
 from services.edge.run import entry

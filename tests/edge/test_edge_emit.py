@@ -17,7 +17,7 @@ from tests.edge.test_cli import run_cli
 EDGE = Path(__file__).resolve().parents[2] / "services" / "edge"
 PREFIXES = ("session: ", "device: ", "preview_port: ", "error: ", "stop ui")
 # standalone command-line tools whose errors go to a person's terminal, not to a launcher
-TERMINAL_TOOLS = {"launcher_impl.py", "reports/cli.py", "score.py"}
+TERMINAL_TOOLS = {"launcher.py", "reports/cli.py", "score.py"}
 
 
 def test_no_edge_module_writes_a_protocol_line_by_hand():

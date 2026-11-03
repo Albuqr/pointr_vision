@@ -11,8 +11,7 @@ from starlette.testclient import TestClient
 
 from services.app.config import CameraConfig
 from services.app.server import create_app
-from services.edge.launcher import Options
-from services.edge.launcher_impl import Child, Launcher
+from services.edge.launcher import Child, Launcher, Options
 from tests.app.test_api import Camera, FakeLauncher
 
 

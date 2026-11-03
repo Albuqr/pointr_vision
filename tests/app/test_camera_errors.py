@@ -12,7 +12,7 @@ from starlette.testclient import TestClient
 from services.app.camera_log import EVENT_LIMIT
 from services.app.config import CameraConfig
 from services.app.server import create_app
-from services.edge.launcher_impl import Child, Launcher
+from services.edge.launcher import Child, Launcher
 from services.edge.session.writer import mask_credentials
 from tests.app.test_api import FakeLauncher
 
