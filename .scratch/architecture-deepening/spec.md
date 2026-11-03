@@ -284,6 +284,7 @@ behaviour. Output files stay readable by today's readers, apart from the documen
   - T0 normalises line endings and records the scope.
   - BK, BS and BE are the Phase 03 bug tickets, one per lane.
   - T1–T12 are the refactors.
+  - T13 (issue #123, accepted by the owner 2026-11-03) gives track position one home: a projector class that owns the box-to-position rule, the frame-size guard and the calibration block, a position verdict carried on `TrackObs`, and one `PositionMap` Protocol. `tracks.csv` and the unprojected reason strings stay unchanged (no contract bump). It absorbs BACKLOG rows 60 and 67 and touches rows 63 and 64. Not yet in `coordination.md`: its lane, blockers and decision number are still to be assigned.
   - Blockers, lanes, owned files and reserved decision numbers (D-063 to D-070, contract 0.22.0 for T1) are in `coordination.md`.
 - **Models per provider (owner).**
   - Claude Code runs an Opus overseer that delegates implementation to Sonnet subagents.

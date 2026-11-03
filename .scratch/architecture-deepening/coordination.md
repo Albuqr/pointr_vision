@@ -145,6 +145,7 @@ come with T0.
 | T10 | #72 | E | #68, #71 |
 | T11 | #73 | E | #72 |
 | T12 | #74 | E | #73 |
+| T13 | #123 | E (+ reads in S) | none (T12 #74 is merged) |
 
 The bugs were split into one ticket per bug (owner, 2026-10-30). The BK/BS/BE rows in the table below
 are now B6 / (B1, B7, B8, B9, B2, B10) / (B3, B4, B5). Bugs in the same lane that touch the same function
@@ -169,6 +170,7 @@ touching only its named functions.
 | **T10** Emitters switched to `child_protocol.emit` (main, group_main, replay, pipeline, group_runner) | E | C4b | none | T6, T9 | S |
 | **T11** Group-of-one mode, `ReplayNewSession`, `execute(plan)`; route replay and group_main through it; benchmark before and after | E | C2 steps 5–6 | D-070 | T10 | L |
 | **T12** Route `main` through `execute`; delete `main.run` and the re-exports | E | C2 step 7 | none | T11 | M |
+| **T13** *(accepted 2026-11-03)* Track position one home: a projector class owns the box-to-position rule, the frame-size guard and the calibration block; `TrackObs` carries the position verdict; one `PositionMap` Protocol; the report reads `x_m` (BACKLOG row 60). `tracks.csv` and the unprojected reason strings unchanged. Also touches `services/edge/reports/movement.py` and `reports/build.py` (position handling only), `tests/edge/test_matcher.py`, `test_report.py`, `tests/test_interfaces.py`; GLOSSARY terms already added | E | #123, spec.md T13 | D-073 (the next free number; take the next unused one if another ticket has claimed it) | T12 (merged) | M |
 
 \* T4 adds only a new test file, so it can run beside T3 even though both are lane E. Use a different
 agent from T3's if you like.

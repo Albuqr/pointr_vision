@@ -41,6 +41,14 @@ Where a session's frames come from: a camera, a network stream or a video file.
 **Calibration**:
 The mapping from one camera's image to court metres, made at the court before recording.
 
+**Position verdict**:
+The result of asking where a detected person's box stands on the court: either a court position or
+"unprojected". It is decided once per box, per frame.
+
+**Unprojected**:
+A box that has no court position, always with a reason (outside the camera's view, a frame of the wrong
+size, an unusable calibration, a box that is not a number). It is logged and counted, never dropped.
+
 ## People and identity
 
 **Operator**:
