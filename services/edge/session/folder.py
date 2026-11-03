@@ -95,10 +95,6 @@ class Snapshot:
     def ready(self):
         return self.get("ready")
 
-    @property
-    def counts(self):
-        return self.get("counts")
-
 
 @dataclass(frozen=True)
 class RunSnapshot(Snapshot):

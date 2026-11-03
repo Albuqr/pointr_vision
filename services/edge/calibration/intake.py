@@ -198,10 +198,6 @@ class Calibration:
 
         return CalibrationPositions(self.run_block())
 
-    def preview_court(self) -> Court:
-        """The court the preview draws over the frame."""
-        return court_model(self.court_type, self.length_m, self.width_m, self.landmarks)
-
 
 @dataclass(frozen=True)
 class Intake:

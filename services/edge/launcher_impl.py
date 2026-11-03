@@ -436,12 +436,6 @@ class Launcher:
             self.say(f"[{tag}] {mask_credentials(line)}")
 
     @staticmethod
-    def note(child: Child, line: str) -> None:
-        """What one parsed output line says about a camera."""
-        _, message = parse(line)
-        Launcher._note_message(child, line, message)
-
-    @staticmethod
     def _note_message(child: Child, line: str, message: Message | None) -> None:
         child.tail.append(mask_credentials(line))
         if isinstance(message, SessionOpened):

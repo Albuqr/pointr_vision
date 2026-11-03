@@ -26,6 +26,12 @@ from tests.edge.fakes import EvenFrameDetector, OneTrackPerDetection, sample_run
 from tests.edge.test_session import session_files
 
 
+def assert_counts_match(run, stats):
+    """run.json counts are the stats' counters; rec_dropped lives only in run.json (RunCounts)."""
+    counts = {key: value for key, value in run["counts"].items() if key != "rec_dropped"}
+    assert counts == {key: getattr(stats, key) for key in counts}
+
+
 def run_pipeline(clip: Path, out: Path, *, detector=None, tracker=None, record=False):
     """Open, run to the end of the clip, stop. Returns the pipeline and the events it reported."""
     source = FileSource(str(clip), realtime=False)
@@ -57,7 +63,7 @@ def test_a_clip_run_through_the_pipeline_leaves_a_complete_session(clips, tmp_pa
     assert session["status"] == "ended" and session["camera_id"] == "cam1"
     assert run["counts"]["processed"] == len(frames) == pipeline.stats().processed > 0
     stats = pipeline.stats()
-    assert run["counts"] == {key: getattr(stats, key) for key in run["counts"]}
+    assert_counts_match(run, stats)
     # no detector: the count is absent, not zero
     assert all(f["n_detections"] == "" for f in frames)
     assert tracks == []
@@ -150,11 +156,11 @@ def test_t7_all_final_counters_match_files_for_live_and_replay(tmp_path, replay)
     assert pipeline.stop("ended") == "ended"
     stats = pipeline.stats()
     run = json.loads((pipeline.run_dir / "run.json").read_text())
-    assert run["counts"] == {key: getattr(stats, key) for key in run["counts"]}
+    assert_counts_match(run, stats)
     assert stats.captured == 20 and stats.failed_reads == 1
     assert stats.processed == len(seen) and len(set(seen)) == len(seen)
     assert stats.captured == stats.processed + stats.dropped + stats.unprocessed
-    assert stats.rec_dropped == (None if replay else 20)
+    assert run["counts"]["rec_dropped"] == (None if replay else 20)
     if replay:
         assert stats.processed == 20 and stats.dropped == 0
     events = json.loads((pipeline.session_dir / "session.json").read_text())["events"]
@@ -183,8 +189,8 @@ def test_t7_replay_adds_a_run_without_recording(clips, tmp_path):
     assert len(session["runs"]) == 2 and video.read_bytes() == original_video
     assert not (pipeline.run_dir / VIDEO_FILE).exists()
     run = json.loads((pipeline.run_dir / "run.json").read_text())
-    assert run["counts"] == {key: getattr(pipeline.stats(), key) for key in run["counts"]}
-    assert pipeline.stats().rec_dropped is None
+    assert_counts_match(run, pipeline.stats())
+    assert run["counts"]["rec_dropped"] is None
 
 
 def test_t7_shared_code_error_is_exposed_and_unprocessed_count_is_saved(tmp_path):
@@ -223,14 +229,14 @@ def test_t7_shared_code_error_is_exposed_and_unprocessed_count_is_saved(tmp_path
     stats = pipeline.stats()
     assert stats.unprocessed > 0 and stats.dropped > 0
     run = json.loads((pipeline.run_dir / "run.json").read_text())
-    assert run["counts"] == {key: getattr(stats, key) for key in run["counts"]}
+    assert_counts_match(run, stats)
 
 
-def test_t7_benchmark_uses_a_handmade_stats_snapshot(capsys):
+def test_t7_benchmark_uses_a_handmade_stats_snapshot():
     from services.edge.camera_pipeline import CameraStats
-    from services.edge.run.report import print_benchmark
+    from services.edge.run.report import format_benchmark
 
-    print_benchmark(
+    text = format_benchmark(
         10,
         "file",
         "off",
@@ -247,7 +253,6 @@ def test_t7_benchmark_uses_a_handmade_stats_snapshot(capsys):
             frame_size=(640, 480),
         ),
     )
-    text = capsys.readouterr().out
     assert "frames 640x480" in text
     assert "captured 10, processed 6 (3.00 fps), dropped 3 (30.0%" in text
     assert "failed reads 2, unprocessed 1" in text

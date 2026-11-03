@@ -68,6 +68,15 @@ class HttpPreview:
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
+            def _send(self, payload: bytes, content_type: str, *, no_store: bool = False):
+                self.send_response(200)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(payload)))
+                if no_store:
+                    self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(payload)
+
             def do_GET(self):
                 if self.path == "/raw-snapshot.jpg":
                     image = owner.raw_snapshot()
@@ -78,13 +87,7 @@ class HttpPreview:
                     if not ok:
                         self.send_error(503, "raw snapshot encoding failed")
                         return
-                    payload = encoded.tobytes()
-                    self.send_response(200)
-                    self.send_header("Content-Type", "image/jpeg")
-                    self.send_header("Content-Length", str(len(payload)))
-                    self.send_header("Cache-Control", "no-store")
-                    self.end_headers()
-                    self.wfile.write(payload)
+                    self._send(encoded.tobytes(), "image/jpeg", no_store=True)
                     return
                 if self.path == "/status.json":
                     hud = owner.hud()
@@ -99,11 +102,7 @@ class HttpPreview:
                             "preview_drops": owner.preview_dropped,
                         }
                     ).encode("utf-8")
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json")
-                    self.send_header("Content-Length", str(len(payload)))
-                    self.end_headers()
-                    self.wfile.write(payload)
+                    self._send(payload, "application/json")
                     return
                 if self.path not in ("/snapshot.jpg", "/mjpeg"):
                     self.send_error(404)
@@ -115,11 +114,7 @@ class HttpPreview:
                     if payload is None:
                         self.send_error(503, "preview not ready")
                         return
-                    self.send_response(200)
-                    self.send_header("Content-Type", "image/jpeg")
-                    self.send_header("Content-Length", str(len(payload)))
-                    self.end_headers()
-                    self.wfile.write(payload)
+                    self._send(payload, "image/jpeg")
                     return
                 self.send_response(200)
                 self.send_header("Cache-Control", "no-store")

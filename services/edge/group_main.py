@@ -63,7 +63,7 @@ def run(cams: list, stop: StopRequest) -> int:
             load_perception=load_perception,
             emit=lambda ev, t0: reporter.event(None, ev, t0),
         ),
-        make_tracker=lambda args: create_tracker(args),
+        make_tracker=create_tracker,
         reporter=reporter,
         waiter=benchmark(plan.benchmark) if plan.benchmark else plain,
     ).exit_code
