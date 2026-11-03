@@ -33,9 +33,3 @@ testkit-reports/
 .suite/media/recordings/
 testkit/web/node_modules/
 testkit/.bin/
-
-# request-logger: its own npm project. Captured logs hold full prompts and code; never committed
-request-logger/node_modules/
-request-logger/logs/*
-!request-logger/logs/.gitkeep
-request-logger/.agent-choice.json
