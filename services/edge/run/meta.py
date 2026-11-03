@@ -1,5 +1,5 @@
-"""What run.json takes at the start of a run (R2a follow-up T11, D-071): the settings read from the
-command line, `run_meta`, and the small checks that go with them. Moved out of main.py so the run
+"""What run.json takes at the start of a run (R2a follow-up T11, D-071): `run_meta` and the small
+checks that go with it. Moved out of main.py so the run
 module needs nothing from an entry point."""
 
 import argparse
@@ -12,9 +12,8 @@ from importlib.metadata import PackageNotFoundError, version
 import cv2
 import numpy as np
 
-from services.edge.calibration.intake import Refused, take_calibration
 from services.edge.capture.health import HealthConfig
-from services.edge.capture.types import HealthEvent, utc_now
+from services.edge.capture.types import utc_now
 from services.edge.power import read_power
 from services.edge.session.types import RunMeta
 
@@ -31,20 +30,8 @@ def normalise_device(device: str) -> str:
     return "cuda:0" if device == "cuda" else device
 
 
-@dataclasses.dataclass(frozen=True)
-class RunSettings:
-    """What run.json takes from the command line, read once per entry point."""
-
-    requested_size: tuple[int, int] | None
-    calibration_refusal: str | None
-
-    @classmethod
-    def from_args(cls, args) -> "RunSettings":
-        return cls((args.width, args.height), args.calibration_failed)
-
-
 def run_meta(
-    settings: RunSettings,
+    requested_size: tuple[int, int] | None,
     info,
     config: HealthConfig,
     detector,
@@ -54,7 +41,7 @@ def run_meta(
     model_loaded=None,
 ) -> RunMeta:
     """run.json fields known at start: input, detector, tracker, thresholds, versions."""
-    size = settings.requested_size if info.kind == "camera" else None
+    size = requested_size if info.kind == "camera" else None
     return RunMeta(
         run_id=str(uuid.uuid4()),
         mode="replay" if replay else "live",
@@ -98,25 +85,8 @@ def run_meta(
         },
         started_at=utc_now(),
         power_start=read_power(),
-        checks=failed_calibration_checks(settings.calibration_refusal),
         ready={"model_loaded": model_loaded},
     )
-
-
-def failed_calibration_checks(refusal: str | None) -> list | None:
-    """run.json `checks` of a camera the operator started uncalibrated after Studio refused its
-    calibration (D-057); None otherwise: the other checks belong to Track R."""
-    if not refusal:
-        return None
-    return take_calibration(Refused(refusal), None, (0, 0)).checks
-
-
-def calibration_failed_event(refusal: str | None) -> HealthEvent | None:
-    """The `startup_check_failed` event that goes with `failed_calibration_checks`. No t0 yet,
-    so t_mono is null."""
-    if not refusal:
-        return None
-    return take_calibration(Refused(refusal), None, (0, 0)).events[0]
 
 
 def health_config(args: argparse.Namespace) -> HealthConfig:

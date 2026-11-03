@@ -361,9 +361,7 @@ def run_group(
         # a stop from here on waits until every session is open, so it ends them all, not half
         held = hold_ctrl_c(stop_early)
         for i, p in enumerate(pipelines):
-            run = dataclasses.replace(
-                runs[i], group=group, checks=intakes[i].checks or runs[i].checks
-            )
+            run = dataclasses.replace(runs[i], group=group, checks=intakes[i].checks)
             p.open_session(run)
             opened.append(p)
             for event in intakes[i].events:

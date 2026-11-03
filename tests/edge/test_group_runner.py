@@ -19,7 +19,7 @@ from services.edge.group_runner import CameraTracker, GroupCamera, run_group
 from services.edge.matcher import CourtMatcher, GroupTrack, MatcherParams
 from services.edge.perception.loop import NO_DETECTIONS
 from services.edge.perception.types import Detections
-from services.edge.run.meta import RunSettings, run_meta
+from services.edge.run.meta import run_meta
 from services.edge.session import writer as writer_mod
 from services.edge.session.writer import FileSessionWriter
 from tests.edge.fakes import EvenFrameDetector, OneTrackPerDetection
@@ -52,7 +52,6 @@ class CountingDetector(EvenFrameDetector):
 def run_two(
     clips, out: Path, detector, record=False, second=None, calibrations=None, **kw
 ) -> dict[str, str]:
-    settings = RunSettings(None, None)
     config = HealthConfig()
     calibrations = calibrations or {}
     cameras = [
@@ -67,7 +66,7 @@ def run_two(
         out,
         config,
         lambda camera_id, info: run_meta(
-            settings, info, config, detector, OneTrackPerDetection(), None
+            None, info, config, detector, OneTrackPerDetection(), None
         ),
         record=record,
         **kw,

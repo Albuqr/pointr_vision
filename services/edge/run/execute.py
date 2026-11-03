@@ -21,7 +21,7 @@ from services.edge.capture.sources import CameraSource, SourceOpenError
 from services.edge.capture.types import HealthEvent
 from services.edge.child_protocol import PreviewListening, SessionOpened, StartFailed, Summary
 from services.edge.group_runner import run_group
-from services.edge.run.meta import RunSettings, health_config, run_meta
+from services.edge.run.meta import health_config, run_meta
 from services.edge.run.perception import Perception
 from services.edge.run.plan import RunPlan
 from services.edge.run.preview import start_http_preview
@@ -84,13 +84,12 @@ def _run(plan, stop, perception, make_tracker, reporter, waiter, pipelines) -> R
     cameras = {c.camera_id: c for c in plan.cameras}
     counts = {camera_id: Counter() for camera_id in cameras}
     counts_lock = threading.Lock()  # called from the capture, processing and main threads
-    run_settings = {camera_id: RunSettings.from_args(a) for camera_id, a in plan.args.items()}
 
     def make_run(camera_id, info):
         tracker = None if detector is None else make_tracker(plan.args[camera_id])
         replay = cameras[camera_id].replay
         return run_meta(
-            run_settings[camera_id],
+            (plan.args[camera_id].width, plan.args[camera_id].height),
             info,
             config,
             detector,
