@@ -6,7 +6,7 @@
 #   testkit/bin/run-all.sh --detect        -> mostra (JSON) o que seria executado
 #   testkit/bin/run-all.sh --validate      -> valida testkit.config.json
 #
-# Verificações: node python security links web lighthouse api mobile-static mobile-android mobile-ios
+# Verificações: node python security links web lighthouse api
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 CHECKS_DIR="$KIT_DIR/bin/checks"
 
@@ -21,15 +21,6 @@ detect_all() {
     [[ "$(cfg web.performance.lighthouse.enabled true)" == "true" ]] && list+=(lighthouse)
   fi
   is_enabled api detect_api && list+=(api)
-  local fw; fw="$(detect_mobile_framework)"
-  if [[ "$(cfg mobile.enabled auto)" != "false" && "$fw" != "none" ]]; then
-    list+=(mobile-static)
-    if [[ -n "$(cfg mobile.appId)" ]]; then
-      for p in $("$PYTHON_BIN" -c 'import json,sys; print(" ".join(json.loads(sys.argv[1])))' "$(cfg mobile.platforms)"); do
-        list+=("mobile-$p")
-      done
-    fi
-  fi
   echo "${list[@]}"
 }
 
@@ -60,9 +51,6 @@ for check in "${checks[@]}"; do
     web)            bash "$CHECKS_DIR/web-e2e.sh" ;;
     lighthouse)     bash "$CHECKS_DIR/lighthouse.sh" ;;
     api)            bash "$CHECKS_DIR/api-contract.sh" ;;
-    mobile-static)  bash "$CHECKS_DIR/mobile.sh" static ;;
-    mobile-android) bash "$CHECKS_DIR/mobile.sh" e2e android ;;
-    mobile-ios)     bash "$CHECKS_DIR/mobile.sh" e2e ios ;;
     *) fail_msg "verificação desconhecida: $check"; false ;;
   esac || overall=1
 done

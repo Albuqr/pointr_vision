@@ -1,34 +1,31 @@
 import AxeBuilder from "@axe-core/playwright";
-import { config, expect, pagesFor, test, testRoles, url } from "../src/fixtures";
+import { config, expect, test, url } from "../src/fixtures";
 
 const cfg = config.web.accessibility;
 test.skip(!config.web.checks.accessibility, "web.checks.accessibility desativado");
 
-for (const role of testRoles()) {
-  for (const path of pagesFor(role)) {
-    test(`acessibilidade (${cfg.tags.join(", ")}) — ${role} ${path}`, async ({ as }) => {
-      const page = await as(role);
-      await page.goto(url(path));
-      await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => undefined);
+for (const path of config.web.publicPages) {
+  test(`acessibilidade (${cfg.tags.join(", ")}) — ${path}`, async ({ page }) => {
+    await page.goto(url(path));
+    await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => undefined);
 
-      let builder = new AxeBuilder({ page }).withTags(cfg.tags);
-      if (cfg.disableRules.length) builder = builder.disableRules(cfg.disableRules);
-      for (const selector of cfg.exclude) builder = builder.exclude(selector);
-      const results = await builder.analyze();
+    let builder = new AxeBuilder({ page }).withTags(cfg.tags);
+    if (cfg.disableRules.length) builder = builder.disableRules(cfg.disableRules);
+    for (const selector of cfg.exclude) builder = builder.exclude(selector);
+    const results = await builder.analyze();
 
-      const blocking = results.violations.filter((v) => cfg.failOnImpacts.includes(v.impact ?? ""));
-      const minor = results.violations.filter((v) => !cfg.failOnImpacts.includes(v.impact ?? ""));
-      for (const v of minor) {
-        test.info().annotations.push({ type: `a11y ${v.impact}`, description: `${v.id}: ${v.help} (${v.nodes.length} elemento(s))` });
-      }
-      await test.info().attach("axe-results.json", { body: JSON.stringify(results.violations, null, 2), contentType: "application/json" });
+    const blocking = results.violations.filter((v) => cfg.failOnImpacts.includes(v.impact ?? ""));
+    const minor = results.violations.filter((v) => !cfg.failOnImpacts.includes(v.impact ?? ""));
+    for (const v of minor) {
+      test.info().annotations.push({ type: `a11y ${v.impact}`, description: `${v.id}: ${v.help} (${v.nodes.length} elemento(s))` });
+    }
+    await test.info().attach("axe-results.json", { body: JSON.stringify(results.violations, null, 2), contentType: "application/json" });
 
-      const report = blocking.map(
-        (v) => `[${v.impact}] ${v.id}: ${v.help}\n  ${v.helpUrl}\n  ${v.nodes.slice(0, 5).map((n) => n.target.join(" ")).join("\n  ")}`,
-      );
-      expect(report, `violações de acessibilidade em ${path}`).toEqual([]);
-    });
-  }
+    const report = blocking.map(
+      (v) => `[${v.impact}] ${v.id}: ${v.help}\n  ${v.helpUrl}\n  ${v.nodes.slice(0, 5).map((n) => n.target.join(" ")).join("\n  ")}`,
+    );
+    expect(report, `violações de acessibilidade em ${path}`).toEqual([]);
+  });
 }
 
 test("navegação por teclado alcança elementos interativos", async ({ page }) => {

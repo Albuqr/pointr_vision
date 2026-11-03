@@ -1,27 +1,21 @@
-import { config, expect, expectNoIssues, looksLikeLogin, monitor, pagesFor, test, testRoles, url } from "../src/fixtures";
+import { config, expect, expectNoIssues, monitor, test, url } from "../src/fixtures";
 
 test.skip(!config.web.checks.smoke, "web.checks.smoke desativado");
 
-for (const role of testRoles()) {
-  test.describe(`fumaça — ${role}`, () => {
-    for (const path of pagesFor(role)) {
-      test(`abre ${path} sem erros`, async ({ as }) => {
-        const page = await as(role);
-        const issues = monitor(page);
-        const response = await page.goto(url(path), { waitUntil: "load" });
-        await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => undefined);
+for (const path of config.web.publicPages) {
+  test(`abre ${path} sem erros`, async ({ page }) => {
+    const issues = monitor(page);
+    const response = await page.goto(url(path), { waitUntil: "load" });
+    await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => undefined);
 
-        expect(response, `sem resposta para ${path}`).not.toBeNull();
-        expect(response!.status(), `status HTTP de ${path}`).toBeLessThan(400);
-        if (role !== "anonymous") expect(looksLikeLogin(page), `${role} foi mandado ao login ao abrir ${path}`).toBe(false);
+    expect(response, `sem resposta para ${path}`).not.toBeNull();
+    expect(response!.status(), `status HTTP de ${path}`).toBeLessThan(400);
 
-        await expect(page.locator("body")).toBeVisible();
-        const text = (await page.locator("body").innerText()).trim();
-        expect(text.length, `${path} renderizou página vazia`).toBeGreaterThan(0);
-        expect(await page.title(), `${path} sem <title>`).not.toBe("");
-        expectNoIssues(issues, path);
-      });
-    }
+    await expect(page.locator("body")).toBeVisible();
+    const text = (await page.locator("body").innerText()).trim();
+    expect(text.length, `${path} renderizou página vazia`).toBeGreaterThan(0);
+    expect(await page.title(), `${path} sem <title>`).not.toBe("");
+    expectNoIssues(issues, path);
   });
 }
 

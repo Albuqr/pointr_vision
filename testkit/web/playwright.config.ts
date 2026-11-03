@@ -15,7 +15,6 @@ const browserProjects: Project[] = config.web.browsers.map((name) => ({
     // Navegador já instalado no sistema (ex.: imagens Nix/Alpine): TESTKIT_CHROMIUM_PATH=/caminho/chromium
     ...(name === "chromium" && process.env.TESTKIT_CHROMIUM_PATH ? { launchOptions: { executablePath: process.env.TESTKIT_CHROMIUM_PATH } } : {}),
   },
-  dependencies: ["setup"],
   // Auditorias pesadas e independentes de motor rodam só no Chromium.
   testIgnore: name === "chromium" ? [] : [/performance\.spec\.ts/, /crawl\.spec\.ts/, /security\.spec\.ts/],
 }));
@@ -37,18 +36,12 @@ export default defineConfig({
   ],
   use: {
     baseURL: config.web.baseUrl,
+    navigationTimeout: config.web.navigationTimeoutMs,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "retain-on-failure",
     ignoreHTTPSErrors: !!process.env.TESTKIT_IGNORE_HTTPS_ERRORS,
     locale: process.env.TESTKIT_LOCALE || "pt-BR",
   },
-  projects: [{
-      name: "setup",
-      testMatch: /setup\/.*\.setup\.ts/,
-      use: {
-        ...devices["Desktop Chrome"],
-        ...(process.env.TESTKIT_CHROMIUM_PATH ? { launchOptions: { executablePath: process.env.TESTKIT_CHROMIUM_PATH } } : {}),
-      },
-    }, ...browserProjects],
+  projects: browserProjects,
 });

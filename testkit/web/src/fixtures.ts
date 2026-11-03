@@ -1,7 +1,5 @@
-import { test as base, expect, type BrowserContext, type Page } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { config, url } from "./config";
-import { roles } from "./auth/credentials";
-import { contextOptionsFor, sessionMeta } from "./auth/login";
 
 export interface PageIssues {
   consoleErrors: string[];
@@ -38,50 +36,4 @@ export function expectNoIssues(issues: PageIssues, where: string) {
   expect.soft(issues.failedRequests, `requisições com falha em ${where}`).toEqual([]);
 }
 
-/** Papéis testáveis: anônimo + papéis com sessão criada no setup. */
-export function testRoles(): string[] {
-  return ["anonymous", ...roles().map((r) => r.name)];
-}
-
-/** Páginas que cada papel deve conseguir abrir. */
-export function pagesFor(role: string): string[] {
-  const set = new Set<string>();
-  if (role === "anonymous") config.web.publicPages.forEach((p) => set.add(p));
-  else {
-    const r = config.auth.roles.find((x) => x.name === role);
-    if (r?.homePath) set.add(r.homePath);
-    r?.pages?.forEach((p) => set.add(p));
-  }
-  for (const rule of config.auth.rules) if (rule.allow?.includes(role) && !rule.path.includes(":")) set.add(rule.path);
-  return [...set];
-}
-
-export function looksLikeLogin(page: Page): boolean {
-  return new RegExp(config.auth.redirectToLoginPattern, "i").test(new URL(page.url()).pathname + new URL(page.url()).search);
-}
-
-type Fixtures = {
-  /** Abre uma página nova autenticada como o papel informado ("anonymous" para visitante). */
-  as: (role: string) => Promise<Page>;
-};
-
-export const test = base.extend<Fixtures>({
-  as: async ({ browser }, use) => {
-    const contexts: BrowserContext[] = [];
-    await use(async (role: string) => {
-      const context = await browser.newContext(contextOptionsFor(role));
-      const meta = role === "anonymous" ? undefined : sessionMeta(role);
-      if (meta?.sessionStorage) {
-        await context.addInitScript((items: Record<string, string>) => {
-          for (const [k, v] of Object.entries(items)) window.sessionStorage.setItem(k, v);
-        }, meta.sessionStorage);
-      }
-      context.setDefaultNavigationTimeout(config.web.navigationTimeoutMs);
-      contexts.push(context);
-      return context.newPage();
-    });
-    await Promise.all(contexts.map((c) => c.close()));
-  },
-});
-
-export { expect, url, config };
+export { test, expect, url, config };

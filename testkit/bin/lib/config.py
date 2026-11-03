@@ -22,20 +22,6 @@ from typing import Any
 KIT_DIR = Path(__file__).resolve().parents[2]
 PROJECT_ROOT = Path(os.environ.get("TESTKIT_PROJECT_ROOT", KIT_DIR.parent)).resolve()
 
-AUTH_STRATEGIES = {
-    "none",
-    "form",
-    "form-totp",
-    "form-email-code",
-    "magic-link",
-    "oauth",
-    "steps",
-    "api",
-    "bearer",
-    "cookie",
-    "basic",
-    "storage-state",
-}
 ENV_PATTERN = re.compile(r"\$\{([A-Z0-9_]+)(?::-([^}]*))?\}")
 
 
@@ -80,8 +66,6 @@ def load() -> dict[str, Any]:
     # Atalhos por variável de ambiente (úteis em CI).
     if os.environ.get("TESTKIT_BASE_URL"):
         cfg["web"]["baseUrl"] = os.environ["TESTKIT_BASE_URL"]
-    if os.environ.get("TESTKIT_AUTH_STRATEGY"):
-        cfg["auth"]["strategy"] = os.environ["TESTKIT_AUTH_STRATEGY"]
     cfg["_meta"] = {
         "projectRoot": str(PROJECT_ROOT),
         "kitDir": str(KIT_DIR),
@@ -106,42 +90,6 @@ def validate(cfg: dict[str, Any]) -> tuple[list[str], list[str]]:
     warnings: list[str] = []
     if not cfg["_meta"]["configFound"]:
         warnings.append(f"{cfg['_meta']['configFile']} não encontrado; usando apenas os padrões.")
-    auth = cfg["auth"]
-    roles = auth.get("roles") or []
-    strategies = {auth.get("strategy")} | {r.get("strategy") for r in roles if r.get("strategy")}
-    for strategy in strategies:
-        if strategy not in AUTH_STRATEGIES:
-            errors.append(f"auth.strategy inválida: {strategy!r}. Use uma de: {', '.join(sorted(AUTH_STRATEGIES))}")
-    names = [r.get("name") for r in roles]
-    if len(names) != len(set(names)):
-        errors.append("auth.roles possui nomes repetidos.")
-    if "anonymous" in names:
-        errors.append("'anonymous' é reservado para visitantes sem login; não declare como papel.")
-    for role in roles:
-        if not role.get("name") or not re.fullmatch(r"[a-zA-Z0-9_-]+", role["name"]):
-            errors.append(f"Papel com nome inválido: {role!r}")
-        if not role.get("envPrefix"):
-            errors.append(f"Papel {role.get('name')!r} precisa de envPrefix.")
-    known = set(names) | {"anonymous"}
-    for kind in ("rules", "apiRules"):
-        for rule in auth.get(kind) or []:
-            if not rule.get("path"):
-                errors.append(f"auth.{kind}: regra sem path: {rule!r}")
-            for role in (rule.get("allow") or []) + (rule.get("deny") or []):
-                if role not in known:
-                    errors.append(f"auth.{kind}: papel desconhecido {role!r} em {rule.get('path')}")
-    if "steps" in strategies and not auth.get("steps"):
-        errors.append("auth.strategy=steps exige auth.steps com a sequência de ações.")
-    if "oauth" in strategies and not auth["oauth"].get("providerButtonSelector"):
-        errors.append("auth.strategy=oauth exige auth.oauth.providerButtonSelector.")
-    if auth.get("strategy") not in (None, "none") and not roles:
-        errors.append("Há estratégia de login mas nenhum papel em auth.roles.")
-    if (
-        cfg["web"].get("enabled") is not False
-        and auth.get("strategy") in ("form", "form-totp", "form-email-code", "oauth")
-        and not (auth["success"].get("urlPattern") or auth["success"].get("selector"))
-    ):
-        warnings.append("Defina auth.success.urlPattern ou auth.success.selector para confirmar o login com precisão.")
     base_url = cfg["web"].get("baseUrl", "")
     if base_url and not re.match(r"^https?://", base_url):
         errors.append(f"web.baseUrl precisa começar com http:// ou https:// (atual: {base_url!r}).")
