@@ -23,14 +23,13 @@ from services.edge.perception.types import Detections
 from services.edge.replay.group import live_matcher, resolve_group
 from services.edge.replay.resolve import ReplayError
 from services.edge.run.args import parse_args
-from services.edge.run.meta import RunSettings, run_meta
+from services.edge.run.meta import run_meta
 from tests.edge.fakes import OneTrackPerDetection
 from tests.edge.test_group_runner import calibration_for
 from tests.edge.test_session import load, rows, validate
 
 ROOT = Path(__file__).resolve().parents[2]
 ARGS = parse_args(["--source", "unused"])  # the CLI's defaults
-SETTINGS = RunSettings(None, None)
 CONFIG = HealthConfig()
 # two people far apart: neither camera links, so which ID each gets depends on who came first
 FAR = {"cam1": [10.0, 20.0, 110.0, 220.0], "cam2": [400.0, 200.0, 500.0, 340.0]}
@@ -72,7 +71,7 @@ def record_group(clips, tmp_path, detector, params=STILL, make_tracker=None, mat
     ]
     statuses = run_group(
         "g1", cameras, detector, make_tracker or (lambda c: OneTrackPerDetection()), out, CONFIG,
-        lambda c, info: run_meta(SETTINGS, info, CONFIG, detector, OneTrackPerDetection(), None),
+        lambda c, info: run_meta(None, info, CONFIG, detector, OneTrackPerDetection(), None),
         record=True, matcher=matcher or CourtMatcher(params),
     )  # fmt: skip
     assert statuses == {"cam1": "ended", "cam2": "ended"}
@@ -85,7 +84,7 @@ def replay_group(out: Path, detector, matcher=None) -> dict[str, str]:
     return run_group(
         group.group_id, group.cameras, detector, lambda c: OneTrackPerDetection(), out, CONFIG,
         lambda c, info: run_meta(
-            SETTINGS, info, CONFIG, detector, OneTrackPerDetection(), None, targets[c]
+            None, info, CONFIG, detector, OneTrackPerDetection(), None, targets[c]
         ),
         record=False, matcher=matcher or live_matcher(group.params, ARGS.track_lost_secs),
     )  # fmt: skip
@@ -465,7 +464,10 @@ def test_the_command_replays_a_group_by_its_id_and_one_session_alone_as_before(c
     assert load(folders[0] / "runs" / session["runs"][2] / "run.json")["group"] is None
 
 
-@pytest.mark.parametrize("option", [["--calibration", "x.json"], ["--camera-id", "cam9"]])
+@pytest.mark.parametrize(
+    "option",
+    [["--calibration", "x.json"], ["--calibration-failed", "too few"], ["--camera-id", "cam9"]],
+)
 def test_the_command_refuses_a_calibration_or_camera_id_for_a_group(clips, tmp_path, option):
     out = tmp_path / "out"
     for cid, clip in (("cam1", "moving"), ("cam2", "frozen")):

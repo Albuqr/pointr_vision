@@ -20,7 +20,7 @@ from services.edge.capture.types import SourceInfo
 from services.edge.perception.loop import NO_DETECTIONS
 from services.edge.perception.types import Detections, TrackObs
 from services.edge.run import report, wait
-from services.edge.run.meta import RunSettings, run_meta
+from services.edge.run.meta import run_meta
 from services.edge.run.stop import EXIT_CAPTURE_ERROR, EXIT_INTERRUPTED, EXIT_OPEN_FAILED
 from services.edge.session import writer as writer_mod
 from services.edge.session.types import (
@@ -258,9 +258,7 @@ def test_run_metadata_records_effective_tracker_parameters():
         }
 
     info = SourceInfo("camera", "0", 1280, 720, 30.0, "builtin")
-    run = run_meta(
-        RunSettings((1280, 720), None), info, HealthConfig(), Detector(), Tracker(), None
-    )
+    run = run_meta((1280, 720), info, HealthConfig(), Detector(), Tracker(), None)
 
     assert run.tracker["params"] == Tracker.params
 

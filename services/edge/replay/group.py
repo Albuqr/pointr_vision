@@ -140,11 +140,11 @@ def resolve_group(target: str, out_dir: Path | str) -> GroupReplay | None:
 def plan_group_replay(args: argparse.Namespace, group: GroupReplay) -> RunPlan:
     """The plan for a group replay: every camera of the group again, in the live run's matcher. The
     cameras take their ids and calibrations from their sessions."""
-    if args.calibration or args.camera_id:
+    if args.calibration or args.calibration_failed or args.camera_id:
         raise PlanError(
             "config_conflict",
             "a group replay takes each camera's id and calibration from its session; "
-            "do not pass --calibration or --camera-id",
+            "do not pass --calibration, --calibration-failed or --camera-id",
         )
     return RunPlan(
         group.cameras,
