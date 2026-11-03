@@ -77,7 +77,8 @@ def camera_view(
     """`session` was read after `progress`; `live` is the preview's status.json ({} if none)."""
     cam = progress.cam
     document = session.document() if session else {}
-    status = session.status if session else None
+    written = session.status if session else None  # None when session.json is unreadable
+    status = written
     if session and session.data is None:
         status = "error"
         document = {
@@ -128,7 +129,7 @@ def camera_view(
             else None
         ),
         run_errors=_run_errors(progress),
-        problem=_problem(progress, state, status, events),
+        problem=_problem(progress, state, written, events),
     )
 
 

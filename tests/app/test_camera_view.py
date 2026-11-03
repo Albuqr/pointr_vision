@@ -184,3 +184,11 @@ def test_camera_view_takes_no_file_or_log(monkeypatch):
 
     monkeypatch.setattr(builtins, "open", refuse)
     camera_view(progress(**WITH_SESSION), session(), FRAMES, {})
+
+
+def test_a_running_camera_with_a_damaged_session_file_logs_no_problem_yet():
+    damaged = session(data=False)
+    view = camera_view(progress(**WITH_SESSION), damaged, [], {})
+    assert view.state == "error" and view.error and view.problem is None
+    dead = camera_view(progress(alive=False, **WITH_SESSION), damaged, [], {}).problem
+    assert "session status: None" in dead.detail
