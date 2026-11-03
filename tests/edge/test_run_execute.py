@@ -14,8 +14,8 @@ import pytest
 from services.edge import group_main
 from services.edge.capture.types import utc_now
 from services.edge.group_runner import is_solo
+from services.edge.run import entry, wait
 from services.edge.run import execute as execute_module
-from services.edge.run import wait
 from services.edge.run.args import parse_args
 from services.edge.run.execute import execute
 from services.edge.run.perception import Perception
@@ -134,8 +134,8 @@ def test_planning_fails_with_exit_2(clips, tmp_path, capsys):
 
 
 def test_an_entry_point_plans_before_it_loads_the_model(clips, tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(group_main, "load_perception", lambda a, d: pytest.fail("the model loaded"))
-    monkeypatch.setattr(group_main, "resolve_device", lambda requested: ("cpu", None))
+    monkeypatch.setattr(entry, "load_perception", lambda a, d: pytest.fail("the model loaded"))
+    monkeypatch.setattr(entry, "resolve_device", lambda requested: ("cpu", None))
     cams = [
         json.dumps(argv(clips["moving"], tmp_path, "cam1")),
         json.dumps(argv(tmp_path / "missing.mp4", tmp_path, "cam2")),

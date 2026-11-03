@@ -72,7 +72,7 @@ def test_a_studio_stop_ends_each_session_normally(tmp_path, long_clips):
         Draft202012Validator(REPORT_SCHEMA).validate(report)
 
 
-def test_a_camera_without_a_group_runs_as_before(tmp_path, long_clips):
+def test_a_camera_without_a_group_runs_as_a_group_of_one(tmp_path, long_clips):
     config = CameraConfig(tmp_path / "config.json")
     config.write([{"camera_id": "cam1", "source": str(long_clips[0]), "link": "file"}])
     out = tmp_path / "sessions"
@@ -87,7 +87,7 @@ def test_a_camera_without_a_group_runs_as_before(tmp_path, long_clips):
             time.sleep(0.2)
         assert camera["state"] in RECORDING and camera["preview_port"], camera
         [child] = app.state.studio.launcher.children
-        assert "services.edge.main" in child.proc.args
+        assert "services.edge.group_main" in child.proc.args
         assert client.post("/api/recording/stop").json()["running"] is False
     [folder] = out.glob("cam1_*")
     session = json.loads((folder / "session.json").read_text("utf-8"))

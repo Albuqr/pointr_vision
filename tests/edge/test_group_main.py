@@ -7,6 +7,7 @@ import signal
 from services.edge import contract, group_main
 from services.edge.camera_pipeline import CameraPipeline
 from services.edge.capture.sources import FileSource
+from services.edge.run import entry
 from services.edge.run.args import parse_args
 from services.edge.run.plan import group_det_size, group_matcher
 from services.edge.run.stop import EXIT_INTERRUPTED, EXIT_OPEN_FAILED, StopRequest
@@ -78,7 +79,7 @@ def stop_on_first_call(monkeypatch, owner, name, after, ui):
     request = StopRequest()
     if ui:
         request.source = "ui"
-    monkeypatch.setattr(group_main, "StopRequest", lambda: request)
+    monkeypatch.setattr(entry, "StopRequest", lambda: request)
     original, calls = getattr(owner, name), []
 
     def wrapper(*args, **kwargs):
@@ -95,11 +96,9 @@ def stop_on_first_call(monkeypatch, owner, name, after, ui):
 
 
 def fake_detection(monkeypatch):
-    monkeypatch.setattr(group_main, "resolve_device", lambda requested: ("cpu", None))
-    monkeypatch.setattr(
-        group_main, "load_perception", lambda args, device: (EvenFrameDetector(), None)
-    )
-    monkeypatch.setattr(group_main, "create_tracker", lambda args: OneTrackPerDetection())
+    monkeypatch.setattr(entry, "resolve_device", lambda requested: ("cpu", None))
+    monkeypatch.setattr(entry, "load_perception", lambda args, device: (EvenFrameDetector(), None))
+    monkeypatch.setattr(entry, "create_tracker", lambda args: OneTrackPerDetection())
 
 
 def with_detection(argv):
@@ -167,3 +166,26 @@ def test_a_plain_stop_while_the_sources_open_ends_with_no_session(
     assert code == EXIT_INTERRUPTED
     assert not out.exists() or not any(out.iterdir())
     assert "interrupted: Ctrl+C" in capsys.readouterr().out
+
+
+def test_one_camera_is_a_group_of_one_with_untagged_lines_and_its_preview_window(
+    clips, tmp_path, capsys, monkeypatch
+):
+    """The launcher always starts group_main (#111): one camera keeps its files and its window."""
+    windows = []
+
+    def fake_preview(title, seconds):
+        windows.append(title)
+        return entry.plain
+
+    monkeypatch.setattr(entry, "preview", fake_preview)
+    out = tmp_path / "out"
+    assert group_main.main([camera("cam1", clips["moving"], out, "--preview")]) == 0
+    assert windows == ["Pointr cam1 (q to quit)"]
+    lines = capsys.readouterr().out.splitlines()
+    assert any(line.startswith("session: ") for line in lines)
+    assert not any(line.startswith("[cam1]") for line in lines)
+    assert "warning: no preview window" not in "\n".join(lines)
+    [(session, run, *_)] = camera_files(out).values()
+    assert session["status"] == "ended"
+    assert run["group"] is None  # a group of one is a single camera's files (D-071)

@@ -11,7 +11,7 @@ from starlette.testclient import TestClient
 
 from services.app.config import CameraConfig
 from services.app.server import create_app
-from services.edge.launcher import Options, child_command
+from services.edge.launcher import Options, camera_args
 from services.edge.launcher_impl import Camera
 from tests.app.test_api import FakeLauncher
 from tests.edge.test_session import run_main, session_files
@@ -117,9 +117,9 @@ def test_an_unexpected_calibration_load_error_only_disables_that_camera(two_came
 
 def test_the_launcher_passes_the_problem_to_the_recorder():
     cam = Camera("cam1", "0", "usb", calibration_problem="active.json is unreadable")
-    command = child_command(cam, Options("out", "g1"))
+    command = camera_args(cam, Options("out", "g1"))
     assert "--calibration-problem=active.json is unreadable" in command
-    assert not any(part.startswith("--calibration-problem") for part in child_command(
+    assert not any(part.startswith("--calibration-problem") for part in camera_args(
         Camera("cam1", "0", "usb"), Options("out", "g1")
     ))  # fmt: skip
 

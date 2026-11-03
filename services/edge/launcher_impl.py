@@ -4,17 +4,15 @@
 
 cams.json is a list of {"camera_id", "source", "link", "det_size"?, "preview"?,
 "track_lost_secs"?, "track_activation"?, "track_min_frames"?}; see
-docs/cameras.example.json. Every camera is its own session, and all share one group_id. Two or
-more cameras run in one process (services.edge.group_main) with one detector; a single camera runs
-services.edge.main in its own process, as before (D-022). The launcher waits for each camera's
-"session:" line. Every output line is prefixed with [camera_id] ([group] for a line about the
-whole group).
+docs/cameras.example.json. Every camera is its own session, and all share one group_id. All the
+cameras run in ONE process (services.edge.group_main) with one detector; one camera is a group
+of one (D-071), with untagged files and its own preview window. The launcher waits for each
+camera's "session:" line. Every output line is prefixed with [camera_id] ([group] for a line about
+the whole group).
 
-Ctrl+C here stops ALL processes the way Ctrl+C stops one: the launcher writes "stop" to each
+Ctrl+C here stops the group the way Ctrl+C stops one camera: the launcher writes "stop" to the
 process's stdin and waits, so every session ends "interrupted" or "ended", never "running".
-Killing a process is the last resort after --stop-timeout and is marked "killed" in the table.
-With one process per camera (group_command None), a child that fails to start does not stop the
-others.
+Killing the process is the last resort after --stop-timeout and is marked "killed" in the table.
 """
 
 import argparse
@@ -279,11 +277,6 @@ class Options:
     no_detect: bool = False
 
 
-def child_command(cam: Camera, opts: Options) -> list[str]:
-    """The command line of one camera's process: services.edge.main with its identity."""
-    return [sys.executable, "-u", "-m", "services.edge.main", *camera_args(cam, opts)]
-
-
 def group_command(cams: list[Camera], opts: Options) -> list[str]:
     """The command line of a group's one process: each camera's own arguments as a JSON list."""
     args = [json.dumps(camera_args(c, opts)) for c in cams]
@@ -359,14 +352,12 @@ class Launcher:
         self,
         cameras: list[Camera],
         opts: Options,
-        command=child_command,
         start_timeout: float = 180.0,
         stop_timeout: float = 45.0,
-        group_command=group_command,  # None: one process per camera, also for a group
+        group_command=group_command,
     ):
         self.cameras = cameras
         self.opts = opts
-        self.command = command
         self.group_command = group_command
         self.start_timeout = start_timeout
         self.stop_timeout = stop_timeout
@@ -455,9 +446,6 @@ class Launcher:
                 child.failure = message.detail
                 child.failure_kind = message.kind
 
-    def start_one(self, cam: Camera) -> None:
-        self.start([Child(cam)], self.command(cam, self.opts))
-
     def start_group(self, cams: list[Camera]) -> None:
         self.start([Child(c) for c in cams], self.group_command(cams, self.opts))
 
@@ -497,8 +485,7 @@ class Launcher:
                 if child.failure is None:
                     child.failure = f"failed to start (exit {child.proc.returncode})"
                     child.failure_kind = "exited"
-                others = ", the others go on" if len(children) == 1 else ""
-                self.say(f"[launcher] {child.cam.camera_id}: {child.failure}{others}")
+                self.say(f"[launcher] {child.cam.camera_id}: {child.failure}")
 
     # -- stop ----------------------------------------------------------------------------------
 
@@ -567,11 +554,7 @@ class Launcher:
         )
         reason = None
         try:
-            if self.group_command and len(self.cameras) > 1:
-                self.start_group(self.cameras)
-            else:
-                for cam in self.cameras:  # one at a time: first starts share device_id, RAM spikes
-                    self.start_one(cam)
+            self.start_group(self.cameras)
             while any(c.running for c in self.children):
                 time.sleep(0.2)
             reason = "[launcher] every camera has stopped"
@@ -580,12 +563,6 @@ class Launcher:
         finally:
             self.stop_all(reason)
         rows = [self.summary(c) for c in self.children]
-        started = {c.cam.camera_id for c in self.children}
-        rows += [
-            (c.camera_id, "-", "not started", "-", "-", "-")
-            for c in self.cameras
-            if c.camera_id not in started
-        ]  # a Ctrl+C during the staggered start
         self.say(format_table(rows))
         if reports := self.report_rows():
             self.say(format_table(reports, REPORT_HEADER, "report (per camera, from the files):"))

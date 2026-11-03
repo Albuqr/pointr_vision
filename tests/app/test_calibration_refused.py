@@ -2,7 +2,7 @@
 start is recorded as a failed calibration check (FR-003, D-057)."""
 
 from services.edge import group_main
-from services.edge.launcher import Options, child_command
+from services.edge.launcher import Options, camera_args
 from services.edge.launcher_impl import Camera
 from tests.edge.fakes import EvenFrameDetector
 from tests.edge.test_group_main import camera
@@ -14,11 +14,9 @@ REASON = "mean check error 0.900 m exceeds 0.500 m"
 
 
 def test_the_launcher_passes_the_failed_calibration_to_the_recorder():
-    command = child_command(
-        Camera("cam1", "0", "usb", calibration_failed=REASON), Options("o", "g")
-    )
+    command = camera_args(Camera("cam1", "0", "usb", calibration_failed=REASON), Options("o", "g"))
     assert f"--calibration-failed={REASON}" in command
-    plain = child_command(Camera("cam1", "0", "usb"), Options("o", "g"))
+    plain = camera_args(Camera("cam1", "0", "usb"), Options("o", "g"))
     assert not any(part.startswith("--calibration-failed") for part in plain)
 
 

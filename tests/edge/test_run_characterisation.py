@@ -49,6 +49,7 @@ from services.edge import group_main as group_cli
 from services.edge import main as cli
 from services.edge.camera_pipeline import CameraPipeline
 from services.edge.capture.sources import FileSource
+from services.edge.run import entry
 from services.edge.run.stop import EXIT_CAPTURE_ERROR, EXIT_INTERRUPTED, EXIT_OPEN_FAILED
 from tests.edge.fakes import EvenFrameDetector, OneTrackPerDetection
 
@@ -544,18 +545,15 @@ def install(mp, detector, *, load_error: Exception | None = None, before_load=No
             raise load_error
         return detector, OneTrackPerDetection()
 
-    for module in (cli, group_cli):
-        mp.setattr(module, "resolve_device", lambda requested: ("cpu", None))
-        mp.setattr(module, "load_perception", load)
-    for module in (cli, group_cli):
-        mp.setattr(module, "create_tracker", lambda args: OneTrackPerDetection())
+    mp.setattr(entry, "resolve_device", lambda requested: ("cpu", None))
+    mp.setattr(entry, "load_perception", load)
+    mp.setattr(entry, "create_tracker", lambda args: OneTrackPerDetection())
 
 
 def stop_request(mp, who: str) -> None:
     """The stop channel both mains build: Studio's (source "ui") or a plain one."""
-    request = cli.StopRequest("ui" if who == UI else None)
-    mp.setattr(cli, "StopRequest", lambda: request)
-    mp.setattr(group_cli, "StopRequest", lambda: request)
+    request = entry.StopRequest("ui" if who == UI else None)
+    mp.setattr(entry, "StopRequest", lambda: request)
 
 
 def signal_after_first_session_opens(mp) -> None:

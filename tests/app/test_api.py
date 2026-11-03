@@ -15,7 +15,7 @@ from services.app import __main__ as app_cli
 from services.app.config import CameraConfig
 from services.app.server import create_app
 from services.edge import contract
-from services.edge.launcher import Camera, Options, child_command
+from services.edge.launcher import Camera, Options, camera_args
 from services.edge.launcher_impl import Launcher
 from tests.fixtures.make_clips import make_clips
 
@@ -246,10 +246,10 @@ def test_camera_test_opens_the_pinned_dns_address(client, monkeypatch):
 def test_cli_and_app_share_launcher_library_and_http_preview_flag():
     assert run_cameras.Launcher is Launcher
     camera = Camera("cam1", "0", "builtin", http_preview_port=45678)
-    command = child_command(camera, Options("C:/sessions", "group"))
+    command = camera_args(camera, Options("C:/sessions", "group"))
     assert "--http-preview=45678" in command
     calibrated = Camera("cam1", "0", "builtin", calibration_path="C:/calibration.json")
-    assert "--calibration=C:/calibration.json" in child_command(
+    assert "--calibration=C:/calibration.json" in camera_args(
         calibrated, Options("C:/sessions", "group")
     )
     result = subprocess.run(

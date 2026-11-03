@@ -19,7 +19,7 @@ from services.edge.capture.health import HealthConfig
 from services.edge.capture.types import SourceInfo
 from services.edge.perception.loop import NO_DETECTIONS
 from services.edge.perception.types import Detections, TrackObs
-from services.edge.run import report, wait
+from services.edge.run import entry, report, wait
 from services.edge.run.meta import run_meta
 from services.edge.run.stop import EXIT_CAPTURE_ERROR, EXIT_INTERRUPTED, EXIT_OPEN_FAILED
 from services.edge.session import writer as writer_mod
@@ -58,8 +58,10 @@ def session_files(out: Path) -> tuple[dict, dict, list[dict], list[dict]]:
 
 def run_main(monkeypatch, out: Path, *args: str, detector=None) -> int:
     if detector is not None:
-        monkeypatch.setattr(cli, "load_perception", lambda a, d: (detector, OneTrackPerDetection()))
-        monkeypatch.setattr(cli, "create_tracker", lambda a: OneTrackPerDetection())
+        monkeypatch.setattr(
+            entry, "load_perception", lambda a, d: (detector, OneTrackPerDetection())
+        )
+        monkeypatch.setattr(entry, "create_tracker", lambda a: OneTrackPerDetection())
     return cli.main([*args, "--out", str(out)])
 
 
