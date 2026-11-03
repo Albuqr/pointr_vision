@@ -157,13 +157,15 @@ class Studio:
                 detail = f"source: {mask_credentials(str(child.cam.source))}\nreason: {error}"
                 log.set_error("The camera reported an error while recording.", detail)
                 log.add_event("error", error)
-        if log.reported_child is child:
-            return
         failure = getattr(child, "failure", None)
         running = child.running
-        if failure is None and (running or state != "error"):
+        session_status = session.status if session else None
+        if failure is None and running and session_status not in ("ended", "interrupted", "error"):
             return
-        log.reported_child = child
+        with log.lock:
+            if log.reported_child is child:
+                return
+            log.reported_child = child
         proc = getattr(child, "proc", None)
         code = getattr(proc, "returncode", None)
         failure_kind = getattr(child, "failure_kind", None) or "exited"
@@ -177,13 +179,36 @@ class Studio:
         if failure is not None:
             lines.append(f"failure kind: {failure_kind}")
             lines.append(f"reason: {failure}")
+        else:
+            lines.append(f"session status: {session_status}")
+            if state == "error":
+                reason = camera_error(child, state, events, session_status)
+                if not running and session_status not in ("ended", "interrupted", "error"):
+                    message = reason
+            elif getattr(child, "stop_sent", False) and session_status not in (
+                "ended",
+                "interrupted",
+            ):
+                message = (
+                    "The camera was stopped; its process exited without writing a session end."
+                )
+            else:
+                message = f"The camera recording ended with status {state}."
+            lines.append(f"reason: {reason if state == 'error' else message}")
         if code is not None:
             lines.append(f"exit code: {code}")
         tail = list(getattr(child, "tail", ()))
         if tail:
             lines.append(f"output (last {len(tail)} lines):")
             lines.extend(tail)
-        log.set_error(message, "\n".join(lines))
+        detail = "\n".join(lines)
+        if failure is None and state != "error":
+            kind = "stopped" if state == "ended" else "interrupted"
+            if not any(event.get("kind") == kind for event in events):
+                log.add_event(kind, message)
+            self.audit.record("recording_stop", child.cam.camera_id, detail={"reason": detail})
+            return
+        log.set_error(message, detail)
         log.add_event(
             failure_kind if failure is not None else "error",
             failure if failure is not None else message,
@@ -324,7 +349,6 @@ class Studio:
                     "status": "error",
                     "events": [{"kind": "error", "detail": "; ".join(snapshot.problems)}],
                 }
-            status = session.get("status") or ("starting" if child.running else "error")
             run_dir = snapshot.latest_run.path if snapshot and snapshot.latest_run else None
             try:
                 frames = self.read_recent_frames(run_dir / "frames.csv") if run_dir else []
@@ -343,7 +367,7 @@ class Studio:
             events = session.get("events") or []
             state = camera_state(child, alive, session, run_dir)
             log = self.log(child.cam.camera_id)
-            self.note_child(child, log, status, events, snapshot)
+            self.note_child(child, log, state, events, snapshot)
             health = "OK"
             for event in events:
                 health = {
@@ -385,7 +409,7 @@ class Studio:
                     ),
                     "session_folder": str(session_dir) if session_dir else None,
                     "preview_port": preview_port,
-                    "error": camera_error(child, state, events),
+                    "error": camera_error(child, state, events, session.get("status")),
                     "calibration_warning": self.calibration_warnings.get(child.cam.camera_id),
                     **log.snapshot(),
                     "calibration": (
@@ -954,10 +978,10 @@ def camera_state(child, alive, session, run_dir) -> str:
         return status
     if getattr(child, "failure", None) is not None or status == "error":
         return "error"
+    if getattr(child, "stop_sent", False):
+        return "stopping" if alive else "interrupted"
     if not alive:  # gone with no end written: it died, or it never recorded
         return "error"
-    if getattr(child, "stop_sent", False):
-        return "stopping"
     if not child.session_dir:
         return "loading_model" if getattr(child, "loading_model", False) else "starting"
     ready = read_run(run_dir).ready if run_dir else None
@@ -967,11 +991,13 @@ def camera_state(child, alive, session, run_dir) -> str:
     return "preview_ready" if ready.get("first_preview") else "recording"
 
 
-def camera_error(child, state, events) -> str | None:
+def camera_error(child, state, events, session_status=None) -> str | None:
     """Why a camera is in error, credentials masked; None in any other state."""
     reason = getattr(child, "failure", None)
     if state != "error":
         return mask_credentials(reason or "") or None
+    if not reason and not child.running and session_status not in ("ended", "interrupted", "error"):
+        return "the camera process exited without writing a session end"
     if not reason:
         last = events[-1].get("detail") if events else None
         reason = last or "the camera stopped without ending its session"
