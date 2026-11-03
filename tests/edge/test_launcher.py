@@ -17,6 +17,7 @@ import pytest
 from scripts import run_cameras as rc
 from services.edge import main as cli
 from services.edge.capture.capture import Capture
+from services.edge.run import entry
 from services.edge.run.stop import EXIT_INTERRUPTED
 from services.edge.session.writer import mask_credentials
 
@@ -26,20 +27,22 @@ GROUP = str(uuid.uuid4())
 
 
 def fake_command(modes: dict[str, str]):
-    """child_command for the launcher that starts fake_camera.py in the mode of each camera."""
+    """group_command for the launcher that starts fake_camera.py: one process for the group, each
+    camera in its own mode."""
 
-    def command(cam: rc.Camera, opts: rc.Options) -> list[str]:
-        return [sys.executable, "-u", str(FAKE), modes[cam.camera_id], cam.camera_id, opts.out]
+    def command(cams: list[rc.Camera], opts: rc.Options) -> list[str]:
+        specs = [f"{modes[c.camera_id]}:{c.camera_id}" for c in cams]
+        return [sys.executable, "-u", str(FAKE), opts.out, *specs]
 
     return command
 
 
 def launcher(tmp_path: Path, modes: dict[str, str], **kw) -> rc.Launcher:
-    """One fake process per camera: the process mechanics (start, stop, kill) are the same for a
-    group's one process, which the real end-to-end tests below cover."""
+    """One fake process for the group, as the launcher always starts it; the real end-to-end tests
+    below cover the real one."""
     cams = [rc.Camera(cid, f"src-{cid}", "wifi") for cid in modes]
     opts = rc.Options(str(tmp_path), GROUP)
-    return rc.Launcher(cams, opts, command=fake_command(modes), group_command=None, **kw)
+    return rc.Launcher(cams, opts, group_command=fake_command(modes), **kw)
 
 
 def run_then_ctrl_c(lau: rc.Launcher, ready, presses: int = 1) -> int:
@@ -187,7 +190,7 @@ def test_tracker_config_is_preserved_and_passed_to_camera_process():
     [camera] = rc.parse_config(
         [cam("cam1", "0", track_lost_secs=4, track_activation=0.55, track_min_frames=3)]
     )
-    command = rc.child_command(camera, rc.Options("C:/out", GROUP))
+    command = rc.camera_args(camera, rc.Options("C:/out", GROUP))
 
     assert camera.track_lost_secs == 4
     assert camera.track_activation == 0.55
@@ -197,27 +200,27 @@ def test_tracker_config_is_preserved_and_passed_to_camera_process():
     assert "--track-min-frames=3" in command
 
 
-def test_tracker_config_defaults_are_omitted_from_child_command():
+def test_tracker_config_defaults_are_omitted_from_camera_args():
     camera = rc.parse_config([cam("cam1", "0")])[0]
-    command = rc.child_command(camera, rc.Options("C:/out", GROUP))
+    command = rc.camera_args(camera, rc.Options("C:/out", GROUP))
 
     assert not any(arg.startswith("--track-") for arg in command)
 
 
-def test_child_command_carries_the_identity():
+def test_camera_args_carry_the_identity():
     c = rc.Camera("cam1", "http://10.0.0.5:4747/video", "wifi", det_size=320)
-    cmd = rc.child_command(c, rc.Options("C:/out", GROUP, preview=True, device="cpu"))
+    cmd = rc.camera_args(c, rc.Options("C:/out", GROUP, preview=True, device="cpu"))
     arg = lambda flag: next(c.split("=", 1)[1] for c in cmd if c.startswith(flag + "="))  # noqa: E731
     assert arg("--camera-id") == "cam1" and arg("--group-id") == GROUP
     assert arg("--det-size") == "320" and arg("--device") == "cpu" and arg("--out") == "C:/out"
     assert arg("--source") == "http://10.0.0.5:4747/video" and arg("--link") == "wifi"
     assert "--stop-on-stdin" in cmd and "--preview" in cmd
     # a value that starts with "-" must not be taken for a flag by the child's argparse
-    odd = rc.child_command(rc.Camera("-cam", "-1", "usb"), rc.Options("o", GROUP))
+    odd = rc.camera_args(rc.Camera("-cam", "-1", "usb"), rc.Options("o", GROUP))
     assert "--camera-id=-cam" in odd and "--source=-1" in odd
     off = rc.Camera("cam2", "0", "usb", preview=False)  # the entry wins over --preview
-    assert "--preview" not in rc.child_command(off, rc.Options("o", GROUP, preview=True))
-    assert "--preview" in rc.child_command(
+    assert "--preview" not in rc.camera_args(off, rc.Options("o", GROUP, preview=True))
+    assert "--preview" in rc.camera_args(
         rc.Camera("c", "0", "usb", preview=True), rc.Options("o", GROUP)
     )
 
@@ -236,20 +239,11 @@ def test_start_log_masks_url_userinfo_and_query_secrets(tmp_path, monkeypatch, c
         child.opened.set()
 
     monkeypatch.setattr(lau, "spawn", opened.__get__(lau, rc.Launcher))
-    lau.start_one(camera)
+    lau.start_group([camera])
     output = capsys.readouterr().out
     assert "secret" not in output
     assert "token-secret" not in output
     assert "token=***" in output
-
-
-def test_cameras_start_one_at_a_time(tmp_path):
-    """Each start waits for the previous child's session line (first starts share device_id)."""
-    lau = launcher(tmp_path, {"cam1": "slow", "cam2": "slow", "cam3": "ok"})
-    assert run_then_ctrl_c(lau, all_ticking(tmp_path, ["cam1", "cam2", "cam3"])) == 0
-    t = lambda name: float((tmp_path / name).read_text())  # noqa: E731
-    assert t("start_cam2") >= t("session_cam1")
-    assert t("start_cam3") >= t("session_cam2")
 
 
 def test_every_output_line_is_prefixed_with_its_camera(tmp_path, capsys):
@@ -344,10 +338,10 @@ def test_a_child_that_ignores_stop_is_killed_and_the_table_says_so(tmp_path):
     code = run_then_ctrl_c(lau, all_ticking(tmp_path, ["cam1", "stuck"]))
     assert code == 1
     rows = {r[0]: r for r in (lau.summary(c) for c in lau.children)}
-    assert rows["stuck"][2] == "running (killed)"
+    assert rows["stuck"][2] == "running (killed)"  # one process: the group is killed together
     # the real interpreter, not just the venv's python.exe stub in front of it
     assert not alive(int((tmp_path / "pid_stuck").read_text()))
-    assert rows["cam1"][2] == "interrupted"
+    assert rows["cam1"][2] == "interrupted (killed)"
 
 
 def test_the_launcher_ends_by_itself_when_every_camera_has_stopped(tmp_path):
@@ -357,9 +351,9 @@ def test_the_launcher_ends_by_itself_when_every_camera_has_stopped(tmp_path):
 
     def spawn_then_stop(children, command):
         real(children, command)
-        [child] = children
-        child.proc.stdin.write("stop\n")  # the child ends on its own, as after q
-        child.proc.stdin.flush()
+        proc = children[0].proc
+        proc.stdin.write("stop\n")  # the child ends on its own, as after q
+        proc.stdin.flush()
 
     lau.spawn = spawn_then_stop
     assert lau.run() == 0
@@ -645,7 +639,7 @@ def test_credentials_in_a_source_are_not_printed_by_the_launcher(tmp_path, capsy
     lau = rc.Launcher(
         [rc.Camera("a", "http://u:secret@10.0.0.5:4747/video", "wifi")],
         rc.Options(str(tmp_path), GROUP),
-        command=fake_command({"a": "ok"}),
+        group_command=fake_command({"a": "ok"}),
     )
     run_then_ctrl_c(lau, all_ticking(tmp_path, ["a"]))
     assert "secret" not in capsys.readouterr().out
@@ -659,7 +653,7 @@ def test_print_event_survives_a_closed_pipe(monkeypatch):
         raise OSError(22, "pipe closed")
 
     monkeypatch.setattr("builtins.print", broken)
-    cli.print_event(HealthEvent("source_lost", "2026-10-13T12:00:00Z", 1.0, "x"), 0.0)
+    entry.print_event(HealthEvent("source_lost", "2026-10-13T12:00:00Z", 1.0, "x"), 0.0)
 
 
 def test_a_console_that_cannot_encode_a_line_does_not_stall_the_child(tmp_path, monkeypatch):
@@ -672,17 +666,6 @@ def test_a_console_that_cannot_encode_a_line_does_not_stall_the_child(tmp_path, 
     lau = launcher(tmp_path, {"cam1": "noisy"}, stop_timeout=15)
     run_then_ctrl_c(lau, all_ticking(tmp_path, ["cam1"]))
     assert not lau.children[0].killed
-    assert status_of(tmp_path, "cam1") == "interrupted"
-
-
-def test_cameras_not_started_yet_are_in_the_table(tmp_path, capsys):
-    """Ctrl+C during the staggered start: the cameras that never started still get a row."""
-    lau = launcher(tmp_path, {"cam1": "ok", "cam2": "slow", "cam3": "ok"})
-    code = run_then_ctrl_c(lau, all_ticking(tmp_path, ["cam1"]))
-    out = capsys.readouterr().out
-    assert code == 1
-    table = out[out.index("result:") :]
-    assert "cam3" in table and "not started" in table
     assert status_of(tmp_path, "cam1") == "interrupted"
 
 
@@ -879,30 +862,20 @@ def test_b2_a_single_cameras_error_before_its_session_line_is_a_start_failure(tm
     assert child.failure == "cannot open source"
 
 
-def test_a_camera_without_a_group_runs_in_its_own_process(tmp_path):
-    """One camera runs services.edge.main as before; two cameras run one group process."""
+def test_a_camera_alone_is_a_group_of_one_in_the_group_process(tmp_path):
     calls = []
 
-    def command(cam, opts):
-        calls.append(("camera", cam.camera_id))
-        return fake_command({cam.camera_id: "ok"})(cam, opts)
-
     def group(cams, opts):
-        calls.append(("group", tuple(c.camera_id for c in cams)))
+        calls.append(tuple(c.camera_id for c in cams))
         return [sys.executable, "-c", "pass"]
 
-    def lau(*ids):
+    for ids in (("cam1",), ("cam1", "cam2")):
         cams = [rc.Camera(cid, f"src-{cid}", "wifi") for cid in ids]
-        opts = rc.Options(str(tmp_path), GROUP)
-        return rc.Launcher(cams, opts, command=command, group_command=group)
-
-    run_then_ctrl_c(lau("cam1"), all_ticking(tmp_path, ["cam1"]))
-    two = lau("cam1", "cam2")
-    two.run()  # the stand-in exits at once, with no session
-    assert len({c.proc for c in two.children}) == 1
-    assert [c.failure for c in two.children] == ["failed to start (exit 0)"] * 2
-    assert [c.failure_kind for c in two.children] == ["exited"] * 2
-    assert calls == [("camera", "cam1"), ("group", ("cam1", "cam2"))]
+        lau = rc.Launcher(cams, rc.Options(str(tmp_path), GROUP), group_command=group)
+        lau.run()  # the stand-in exits at once, with no session
+        assert len({c.proc for c in lau.children}) == 1
+        assert [c.failure_kind for c in lau.children] == ["exited"] * len(ids)
+    assert calls == [("cam1",), ("cam1", "cam2")]
 
 
 def test_the_group_process_gets_each_cameras_own_arguments():
@@ -914,7 +887,6 @@ def test_the_group_process_gets_each_cameras_own_arguments():
     cmd = rc.group_command(cams, opts)
     assert cmd[:4] == [sys.executable, "-u", "-m", "services.edge.group_main"]
     assert [json.loads(a) for a in cmd[4:]] == [rc.camera_args(c, opts) for c in cams]
-    assert rc.child_command(cams[0], opts)[4:] == rc.camera_args(cams[0], opts)
 
 
 @pytest.mark.parametrize(
@@ -958,7 +930,7 @@ def test_t6_spawn_failure_is_typed_without_a_child_process(tmp_path):
     lau = rc.Launcher(
         [cam],
         rc.Options(str(tmp_path), GROUP),
-        command=lambda cam, opts: [str(tmp_path / "missing-executable")],
+        group_command=lambda cams, opts: [str(tmp_path / "missing-executable")],
     )
     assert lau.run() == 1
     assert lau.children[0].failure_kind == "spawn_failed"

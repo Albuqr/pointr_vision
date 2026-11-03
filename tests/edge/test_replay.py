@@ -15,6 +15,7 @@ import cv2
 import pytest
 
 from services.edge import contract
+from services.edge.run import entry
 from services.edge.run.stop import EXIT_OPEN_FAILED
 from tests.edge.fakes import sample_run_meta
 
@@ -342,8 +343,8 @@ def test_replay_with_a_slow_detector_still_processes_every_frame(clips, tmp_path
     from services.edge import main as cli
 
     folder = record(clips, tmp_path)
-    monkeypatch.setattr(cli, "load_perception", lambda a, d: (SlowDetector(), NoTracks()))
-    monkeypatch.setattr(cli, "create_tracker", lambda a: NoTracks())
+    monkeypatch.setattr(entry, "load_perception", lambda a, d: (SlowDetector(), NoTracks()))
+    monkeypatch.setattr(entry, "create_tracker", lambda a: NoTracks())
     code = cli.main(["--replay", str(folder), "--out", str(tmp_path)])
     assert code == 0
     runs = [json.loads((r / "run.json").read_text()) for r in (folder / "runs").iterdir()]
@@ -358,8 +359,8 @@ def test_live_run_with_the_same_slow_detector_does_drop(clips, tmp_path, monkeyp
     than that. If it did not drop, the test above would prove nothing."""
     from services.edge import main as cli
 
-    monkeypatch.setattr(cli, "load_perception", lambda a, d: (SlowDetector(0.15), NoTracks()))
-    monkeypatch.setattr(cli, "create_tracker", lambda a: NoTracks())
+    monkeypatch.setattr(entry, "load_perception", lambda a, d: (SlowDetector(0.15), NoTracks()))
+    monkeypatch.setattr(entry, "create_tracker", lambda a: NoTracks())
     cli.main(["--source", str(clips["moving"]), "--link", "file", "--out", str(tmp_path)])
     (folder,) = [p for p in tmp_path.iterdir() if p.is_dir()]
     (run_dir,) = (folder / "runs").iterdir()

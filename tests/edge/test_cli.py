@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from services.edge import main as cli
-from services.edge.run import plan, report
+from services.edge.run import entry, plan, report
 from services.edge.run.stop import EXIT_CAPTURE_ERROR, EXIT_OPEN_FAILED
 from services.edge.ui.preview import BANNERS, HUD_STRIP, TRACK_COLOUR, HudInfo, draw_hud
 
@@ -155,7 +155,7 @@ def test_model_load_failure_is_an_error_event(monkeypatch):
 
     printed = []
     monkeypatch.setattr(plan, "open_source", lambda ref, size: NeverOpened())
-    monkeypatch.setattr(cli, "load_perception", no_network)
+    monkeypatch.setattr(entry, "load_perception", no_network)
     monkeypatch.setattr(report, "print_event", lambda ev, t0, prefix="": printed.append(ev))
     assert cli.main(["--source", "0"]) == EXIT_CAPTURE_ERROR
     [ev] = printed
@@ -175,8 +175,8 @@ def run_failing_model_load(monkeypatch, capsys) -> tuple[int, str, str]:
         raise RuntimeError("weights download failed")
 
     monkeypatch.setattr(plan, "open_source", lambda ref, size: NeverOpened())
-    monkeypatch.setattr(cli, "load_perception", no_network)
-    monkeypatch.setattr(cli, "resolve_device", lambda requested: ("cpu", None))
+    monkeypatch.setattr(entry, "load_perception", no_network)
+    monkeypatch.setattr(entry, "resolve_device", lambda requested: ("cpu", None))
     code = cli.main(["--source", "0"])
     captured = capsys.readouterr()
     return code, captured.out, captured.err
@@ -228,18 +228,18 @@ def fake_gpu(monkeypatch, available: bool) -> None:
 )
 def test_resolve_device(monkeypatch, requested, available, expected):
     fake_gpu(monkeypatch, available)
-    assert cli.resolve_device(requested) == expected
+    assert entry.resolve_device(requested) == expected
 
 
 def test_forced_cuda_without_a_gpu_exits_with_a_clear_error(monkeypatch, capsys):
     fake_gpu(monkeypatch, False)
     with pytest.raises(RuntimeError, match="--device cuda but torch .* cannot use a CUDA GPU"):
-        cli.resolve_device("cuda")
+        entry.resolve_device("cuda")
 
     def never(*args):
         raise AssertionError("must stop before the model load")
 
-    monkeypatch.setattr(cli, "load_perception", never)
+    monkeypatch.setattr(entry, "load_perception", never)
     assert cli.main(["--source", "0", "--device", "cuda"]) == EXIT_CAPTURE_ERROR != 0
     err = capsys.readouterr().err
     assert "error: config_conflict: --device cuda" in err and "Traceback" not in err
@@ -249,7 +249,7 @@ def test_broken_torch_install_exits_cleanly(monkeypatch, capsys):
     def broken(requested):
         raise OSError("[WinError 126] DLL load failed")
 
-    monkeypatch.setattr(cli, "resolve_device", broken)
+    monkeypatch.setattr(entry, "resolve_device", broken)
     assert cli.main(["--source", "0"]) == EXIT_CAPTURE_ERROR
     err = capsys.readouterr().err
     assert "error: model_load_failed: device check failed: " in err and "Traceback" not in err

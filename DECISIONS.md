@@ -1638,3 +1638,23 @@ and is the biggest change.
 D-060 Limits paragraph no longer holds for runs from 0.27.0 on. Replays of older recordings keep
 the old, approximate behaviour and say so.
 **Status.** Accepted.
+
+## D-073 · 2026-11-03 · The launcher always starts a group process; one shared run function (#111)
+
+**Context.** After D-071 `services.edge.main` and `services.edge.group_main` both called
+`execute`, and a group of one already worked. The launcher still kept a second path: one
+`services.edge.main` process per camera (`child_command`, `Launcher.start_one`, the `command`
+parameter, `group_command=None`) with a staggered start and a "not started" table row. The two
+entry points also repeated the same planning and `execute(...)` setup, and `group_main` printed a
+warning and opened no window even for one camera.
+**Decision.** The launcher always runs `group_command`; one camera is a group of one. Both entry
+points parse their arguments and call `services/edge/run/entry.py:run_cameras`, which plans,
+executes and handles a stop before the sessions exist. It opens the preview window when the plan
+is solo and warns that there is none for a group of several. `child_command`, `start_one`, the
+staggered start and the "not started" rows are removed; `Launcher(group_command=...)` is the one
+seam the launcher tests replace.
+**Consequences.** No contract change. A group start waits for every camera's session line under
+one timeout, and a camera that never gets one is marked failed while the process is stopped. A
+process that has to be killed is killed for all its cameras. The runbook's memory figures were
+measured with one process per camera and are marked as not re-measured.
+**Status.** Accepted. Supersedes the single-camera process path of D-022.

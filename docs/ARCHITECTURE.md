@@ -212,10 +212,10 @@ capture thread ──▶ proc_queue (maxsize=1, drop oldest, count drops) ──
 - **Shutdown.** q, Ctrl+C, source end or exception all go through one shutdown path: stop
   capture, drain queues with a timeout, close writer, write final `session.json` in a
   `finally` block.
-- **Several cameras (D-022, ADR 0007, D-056).** Two or more cameras run in one OS process
-  (`services.edge.group_main`, the group runner): one detector, and per camera its own capture,
-  writer, session and clock. A camera alone runs in its own process (`services.edge.main`), as
-  before. `scripts/run_cameras.py` (and Studio, through it) is a supervisor, not a layer: it
+- **Several cameras (D-022, ADR 0007, D-056).** The launcher always starts one OS process
+  for the group (`services.edge.group_main`, the group runner), a group of one included: one
+  detector, and per camera its own capture, writer, session and clock. `services.edge.main` is
+  the same run for a camera started by hand (D-071, D-073). `scripts/run_cameras.py` (and Studio, through it) is a supervisor, not a layer: it
   starts the process, routes each `[camera_id] ` output line of a group to that camera, and stops
   it through a stop channel, the child's stdin (a `stop` line, or the pipe closing when the
   launcher dies, becomes the Ctrl+C path of that process: the same shutdown as above). A
@@ -226,7 +226,7 @@ capture thread ──▶ proc_queue (maxsize=1, drop oldest, count drops) ──
   back re-links through the matcher; a failure in shared code (detector, matcher) ends every
   camera through the shutdown path above, each session with status `error` and the failure as
   an `error` event. A failure of one camera's own code (its tracker, its writer) ends only that
-  camera, as with one process per camera.
+  camera.
 - **Group replay (D-060).** `--replay <group_id>` runs the group's recorded videos through the
   group runner, one replay run per session. Each camera keeps its processing thread, but its
   frames reach the tracker and the matcher one at a time in the live run's group time

@@ -1,6 +1,6 @@
 # Runbook: recording tonight (v0)
 
-Goal: record sessions with several phones at once (one launcher, one process per camera) and
+Goal: record sessions with several phones at once (one launcher, one process for the whole group) and
 several people, then check that the data is there. Everything runs in **Git Bash**. Details of
 the install are in `README.md` ("Install on a new PC").
 
@@ -156,8 +156,10 @@ longer be read by URL while the client runs.
 
 ## 4. Recording: the launcher
 
-One process per camera, no fusion across cameras: every camera is its own session (own folder,
-clock, files) and all cameras of one start share a `group_id`.
+One process runs all the cameras of one start, with one detector; cameras are not fused: every
+camera is its own session (own folder, clock, files) and all share a `group_id`. One camera is a
+group of one: its lines carry no `[camera]` tag from the process, its files are a single camera's,
+and `--preview` opens its window.
 
 **4.1 The config.** Copy the example (the real file is not committed):
 
@@ -191,12 +193,12 @@ python scripts/run_cameras.py --config cams.json --out C:/pointr_sessions --prev
 Always `--out C:/pointr_sessions`: outside OneDrive (it locks files) and outside the repo. Drop
 `--preview` for the lowest load (no windows). `--device cpu` forces the CPU.
 
-- Cameras start **one at a time**: the launcher waits for the `session:` line of one camera
-  before it starts the next (each loads its own model; the first run downloads about 370 MB).
-  Allow some seconds per camera. A camera that does not get a session within 180 s is marked
-  failed and the others go on.
+- The launcher starts **one process** for all the cameras and waits for each camera's `session:`
+  line (the model loads once; the first run downloads about 370 MB). A group that does not get
+  all its sessions within 180 s is stopped and the cameras without a session are marked failed.
 - Every output line is prefixed with its camera: `[cam1] ...`, and `[launcher] ...` for the
-  launcher itself. With `--preview` each camera has its own window, `Pointr cam1 (q to quit)`.
+  launcher itself. `--preview` opens the window `Pointr cam1 (q to quit)` for **one** camera; a
+  group of several has no window (the process prints a warning), Studio shows each preview.
 - A camera that cannot open its source (`[cam2] error: cannot open source ...`) does **not**
   stop the others. Fix it (section 7), then stop everything and start again: one launcher
   start is one group.
@@ -209,8 +211,8 @@ Always `--out C:/pointr_sessions`: outside OneDrive (it locks files) and outside
   every camera and both sessions ended `interrupted`.) The launcher asks every camera to stop
   the way Ctrl+C stops a single one, waits for each to save, then prints the result table. Wait
   for it (a few seconds). A second Ctrl+C only prints a reminder.
-- **`q` in a camera's preview window stops only that camera** (its session ends `ended`); the
-  others keep recording. When every camera has stopped the launcher prints the table and exits.
+- **`q` in the preview window of a single camera stops it** (its session ends `ended`) and the
+  launcher prints the table and exits.
 - **Never** PyCharm's Stop button, the console's X, or killing processes: sessions can stay at
   status `running` and the final counts are missing. The rows already written stay readable.
   (If the launcher itself is killed, the cameras notice the closed pipe and stop on their own
@@ -223,24 +225,25 @@ Always `--out C:/pointr_sessions`: outside OneDrive (it locks files) and outside
 camera_id  session folder                              final status              processed fps  failed reads  errors
 cam1       cam1_3f1c2a8e-5b7d-4e9a-8c21-6d4f0b9e7a13   interrupted               2.10           0             0
 cam2       -                                           failed to start (exit 2)  -              -             -
-cam3       -                                           not started               -              -             -
 ```
 
 `final status` comes from each `session.json`: `ended` (q, or the source ended), `interrupted`
 (Ctrl+C), `error` (read `events` in its `session.json`), or `running (killed)`. `failed reads` is
 the capture's failed read count; the phone should show 0. `errors` counts the `error` events in
 `session.json` (for example a thread that did not stop in time: the counts may be short).
-`not started`: Ctrl+C came before that camera's turn. `processed fps` is processed frames over
+`processed fps` is processed frames over
 the time from the first processing start to the last end, from `frames.csv`. The launcher exits
 0 only if every camera ended or was interrupted with no error event.
 
-**4.5 Memory and CPU: measure on the PC you record with.** Every camera is a process with its
-own copy of the model. Measured on the dev notebook (CPU build, two processes, a 640x360 file
+**4.5 Memory and CPU: measure on the PC you record with.** The figures below were measured
+when the launcher still ran one process per camera, each with its own copy of the model; the
+launcher now runs one process and one detector for the group, and this was not measured again.
+Measured on the dev notebook (CPU build, two processes, a 640x360 file
 source, 12 s into detection): about **610 MB resident per process (peak 862 MB), about 1.2 GB
 committed**, and the launcher itself about 4 MB. The two cameras shared one CPU: 2.10 and 1.56
 processed fps, against 2.84 for one camera alone on the same clip (one short run each, not a
-benchmark). A GPU PC was not measured; CUDA adds its own host memory. With N cameras expect
-about N GB of RAM and watch Task Manager during the first run.
+benchmark). A GPU PC was not measured; CUDA adds its own host memory. With that launcher, N cameras
+took about N GB of RAM and watch Task Manager during the first run.
 
 **CPU contention, measured on real hardware (laptop webcam + phone URL, i7-10510U, CPU
 build):** the laptop camera processed 1.5-1.7 fps and the phone URL camera 0.35-0.57 fps, against
