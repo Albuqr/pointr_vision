@@ -165,7 +165,7 @@ def _is_number(value: object) -> bool:
 def _collect(data: object) -> tuple[list[Camera], list[dict]]:
     """Every problem in the config as {index, field, message}, plus the cameras that parsed."""
     if not isinstance(data, list):
-        return [], [{"index": None, "field": "cameras", "message": NOT_A_LIST}]
+        return [], [{"index": None, "field": "cameras", "message": "must be a list"}]
     cameras: list[Camera] = []
     errors: list[dict] = []
     ids: set[str] = set()
@@ -302,6 +302,8 @@ def check_config(data: object) -> list[Camera]:
 def parse_config(data: object) -> list[Camera]:
     """The camera list to run: check_config, and it must not be empty."""
     if data == []:
+        raise ConfigError(NOT_A_LIST)
+    if not isinstance(data, list):
         raise ConfigError(NOT_A_LIST)
     return check_config(data)
 
