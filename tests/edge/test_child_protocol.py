@@ -159,6 +159,7 @@ def test_t6_default_stream_selection_and_flush(capsys):
 @pytest.mark.parametrize(
     "action",
     [
+        lambda: Stop("app"),
         lambda: PreviewListening(True),
         lambda: PreviewListening(-1),
         lambda: emit(Stop()),

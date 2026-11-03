@@ -66,6 +66,10 @@ class Summary:
 class Stop:
     source: Literal["ui"] | None = None
 
+    def __post_init__(self):
+        if self.source not in (None, "ui"):
+            raise ValueError(f"unknown stop source {self.source!r}")
+
 
 Message: TypeAlias = SessionOpened | DeviceChosen | PreviewListening | StartFailed | Summary | Stop
 _CAMERA = re.compile(r"^\[([^\]\s]+)\] (.*)$")
