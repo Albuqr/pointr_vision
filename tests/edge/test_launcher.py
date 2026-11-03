@@ -324,7 +324,7 @@ def test_a_child_that_fails_to_start_does_not_stop_the_others(tmp_path, capsys):
 
 def test_a_start_that_never_gets_a_session_is_stopped_and_marked_failed(tmp_path):
     lau = launcher(tmp_path, {"slow": "silent", "cam2": "ok"}, start_timeout=0.6)
-    code = run_then_ctrl_c(lau, lambda: (tmp_path / "session_cam2").exists())
+    code = lau.run()  # the start timeout stops the whole group by itself; no Ctrl+C races it
     assert code == 1
     assert (tmp_path / "stopped_slow").exists()  # asked to stop, not left behind
     rows = {r[0]: r for r in (lau.summary(c) for c in lau.children)}
