@@ -703,7 +703,7 @@ def processed_fps(session_dir: Path) -> str:
             rows = list(csv.DictReader(f))
         span = float(rows[-1]["t_proc_end"]) - float(rows[0]["t_proc_start"])
         return f"{len(rows) / span:.2f}" if span > 0 else "-"
-    except (OSError, ValueError, KeyError, IndexError):
+    except (OSError, ValueError, KeyError, IndexError, TypeError):  # TypeError: cut-off row
         return "-"
 
 
