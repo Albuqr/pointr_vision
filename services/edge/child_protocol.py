@@ -107,13 +107,17 @@ def emit(message: Message, camera_id: str | None = None, *, stream: TextIO | Non
     if isinstance(message, Stop):
         if camera_id is not None or stream is None:
             raise ValueError("stop requires an untagged explicit stdin stream")
-        text = "stop ui" if message.source else "stop"
+        header, payload = "", "stop ui" if message.source else "stop"
     elif isinstance(message, PreviewListening):
-        text = f"preview_port: {message.port}"
+        header, payload = "", f"preview_port: {message.port}"
     elif isinstance(message, Summary):
-        text = message.detail
-    elif isinstance(message, (SessionOpened, DeviceChosen, StartFailed)):
-        text = None
+        header, payload = "", message.detail
+    elif isinstance(message, SessionOpened):
+        header, payload = "session: ", message.path
+    elif isinstance(message, DeviceChosen):
+        header, payload = "device: ", message.device
+    elif isinstance(message, StartFailed):
+        header, payload = f"error: {message.kind}: ", message.detail
     else:
         raise TypeError(f"unknown protocol message {message!r}")
     output = (
@@ -121,19 +125,14 @@ def emit(message: Message, camera_id: str | None = None, *, stream: TextIO | Non
         if stream is not None
         else (sys.stderr if isinstance(message, StartFailed) else sys.stdout)
     )
-    if text is None:
+    if header:
         # Repeat the message header on each payload line so no line can inject another message.
-        header, payload = {
-            SessionOpened: lambda m: ("session: ", m.path),
-            DeviceChosen: lambda m: ("device: ", m.device),
-            StartFailed: lambda m: (f"error: {m.kind}: ", m.detail),
-        }[type(message)](message)
         payload = payload.replace("\r\n", "\n").replace("\r", "\n")
         lines = [header + part for part in payload.split("\n")]
     else:
-        if "\n" in text or "\r" in text:
+        if "\n" in payload or "\r" in payload:
             raise ValueError("summary must be one physical line")
-        lines = [text]
+        lines = [payload]
     for line in lines:
         output.write(mask_credentials(prefix + line) + "\n")
     output.flush()

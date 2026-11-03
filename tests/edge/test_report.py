@@ -22,14 +22,8 @@ from services.edge.reports.movement import Params
 ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = ROOT / "tests" / "fixtures" / "contracts"
 GROUP = "g-2026-10-13"
-LEGACY_RUN = (
-    ROOT
-    / "tests"
-    / "fixtures"
-    / "sessions"
-    / "legacy_0_9"
-    / "runs"
-    / ("c2b9e6f4-1d3a-4c8e-9f7b-5a0d2e4c6b81")
+LEGACY_RUN = ROOT / "tests" / "fixtures" / "sessions" / "legacy_0_9" / "runs" / (
+    "c2b9e6f4-1d3a-4c8e-9f7b-5a0d2e4c6b81"
 )
 
 
