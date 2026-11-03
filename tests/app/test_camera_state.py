@@ -264,8 +264,7 @@ def test_the_launcher_marks_a_child_loading_its_model_from_its_device_line():
     import io
     from types import SimpleNamespace
 
-    from services.edge.launcher import Camera
-    from services.edge.launcher_impl import Child, Launcher
+    from services.edge.launcher import Camera, Child, Launcher
 
     child = Child(Camera("cam1", "0", "builtin"))
     child.proc = SimpleNamespace(

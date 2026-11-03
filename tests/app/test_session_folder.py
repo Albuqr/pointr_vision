@@ -153,7 +153,7 @@ def test_T2_latest_run_agrees_across_callers_and_does_not_fall_back(tmp_path):
     import shutil
 
     from services.app.server import session_row
-    from services.edge.launcher_impl import processed_fps
+    from services.edge.launcher import processed_fps
     from services.edge.reports.cli import report_session
     from services.edge.reports.movement import Params
     from services.edge.score import run_dir

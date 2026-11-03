@@ -2,8 +2,7 @@
 start is recorded as a failed calibration check (FR-003, D-057)."""
 
 from services.edge import group_main
-from services.edge.launcher import Options, camera_args
-from services.edge.launcher_impl import Camera
+from services.edge.launcher import Camera, Options, camera_args
 from tests.edge.fakes import EvenFrameDetector
 from tests.edge.test_group_main import camera
 from tests.edge.test_group_runner import camera_files

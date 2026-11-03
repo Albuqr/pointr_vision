@@ -13,7 +13,7 @@ from starlette.testclient import TestClient
 from services.app.config import CameraConfig
 from services.app.server import create_app
 from services.edge import contract
-from services.edge.launcher_impl import Launcher
+from services.edge.launcher import Launcher
 
 ROOT = Path(__file__).resolve().parents[2]
 SESSION_SCHEMA = contract.schema("session")

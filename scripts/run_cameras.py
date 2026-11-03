@@ -1,21 +1,11 @@
-"""Compatibility CLI for the importable multi-camera launcher."""
+"""CLI entry for the multi-camera launcher: python scripts/run_cameras.py --help."""
 
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from services.edge import launcher_impl as _impl  # noqa: E402
-
-
-def __getattr__(name):
-    return getattr(_impl, name)
-
-
-def main(argv=None):
-    return _impl.main(argv)
-
+from services.edge.launcher import main  # noqa: E402
 
 if __name__ == "__main__":
     sys.exit(main())
