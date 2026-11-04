@@ -19,7 +19,8 @@ from typing import Literal
 import cv2
 import numpy as np
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from services.app.audit import AuditTrail
@@ -32,23 +33,14 @@ from services.edge.calibration.homography import fit_calibration
 from services.edge.calibration.render import projected_court_lines
 from services.edge.capture.sources import DEFAULT_CAPTURE_SIZE, SourceOpenError, open_source
 from services.edge.capture.types import SourceEnded
-from services.edge.launcher import Camera, ConfigError, Launcher, Options, parse_config
+from services.edge.launcher import ConfigError, Launcher, Options, parse_config
 from services.edge.reports.build import build_report
 from services.edge.session.folder import find_sessions, mark_interrupted, read_session
-from services.edge.session.writer import mask_credentials
+from services.edge.session.writer import FRAMES_COLUMNS, mask_credentials
 
 ROOT = Path(__file__).resolve().parents[2]
 UI_DIST = Path(__file__).parent / "ui" / "dist"
-FRAME_COLUMNS = (
-    "seq",
-    "t_recv",
-    "t_proc_start",
-    "t_proc_end",
-    "app_delay_ms",
-    "n_detections",
-    "n_tracks",
-    "dropped_total",
-)
+FRAMES_MIN_COLUMNS = FRAMES_COLUMNS.index("t_video")  # sessions before t_video had 8 columns
 
 
 class Studio:
@@ -239,21 +231,13 @@ class Studio:
             configured = []
             for camera in cameras:
                 configured.append(
-                    Camera(
-                        camera.camera_id,
-                        camera.source,
-                        camera.link,
-                        camera.det_size,
-                        camera.preview,
-                        camera.track_lost_secs,
-                        camera.track_activation,
-                        camera.track_min_frames,
-                        self.preview_ports[camera.camera_id],
-                        calibration_paths[camera.camera_id],
-                        None if camera.camera_id in failed else warnings.get(camera.camera_id),
-                        camera.name,
-                        camera.fps_cap,
-                        camera.enabled,
+                    dataclasses.replace(
+                        camera,
+                        http_preview_port=self.preview_ports[camera.camera_id],
+                        calibration_path=calibration_paths[camera.camera_id],
+                        calibration_problem=(
+                            None if camera.camera_id in failed else warnings.get(camera.camera_id)
+                        ),
                         calibration_failed=failed.get(camera.camera_id),
                     )
                 )
@@ -378,11 +362,9 @@ class Studio:
                 continue
             try:
                 values = next(csv.reader([line.decode("utf-8")]))
-                if len(values) < len(
-                    FRAME_COLUMNS
-                ):  # a half-written row; later columns are ignored
+                if len(values) < FRAMES_MIN_COLUMNS:  # a half-written row
                     continue
-                state["rows"].append(dict(zip(FRAME_COLUMNS, values, strict=False)))
+                state["rows"].append(dict(zip(FRAMES_COLUMNS, values, strict=False)))
             except (UnicodeDecodeError, ValueError):
                 continue
         return list(state["rows"])
@@ -400,17 +382,7 @@ class Studio:
             source.fps_cap = entry.get("fps_cap")
             info = source.open()
             started = time.monotonic()
-            deadline = started + duration
-            frame = None
-            reads = 0
-            while time.monotonic() < deadline:
-                try:
-                    current = source.read()
-                except SourceEnded:
-                    break
-                if current is not None:
-                    frame = current
-                    reads += 1
+            frame, reads = read_frames(source, duration)
             elapsed = max(time.monotonic() - started, 0.001)
             if frame is None:
                 self.record_test_failure(camera_id, "no frame received", entry["source"])
@@ -477,17 +449,10 @@ class Studio:
                 source.fps_cap = entry.get("fps_cap")
                 try:
                     source.open()
-                    deadline = time.monotonic() + 3
-                    image = None
-                    while time.monotonic() < deadline and image is None:
-                        try:
-                            frame = source.read()
-                        except SourceEnded:
-                            break
-                        if frame is not None:
-                            image = frame.image.copy()
-                    if image is None:
+                    frame, _ = read_frames(source, 3, stop_at_first=True)
+                    if frame is None:
                         raise ValueError("no frame received")
+                    image = frame.image.copy()
                 finally:
                     source.close()
                 ok, encoded = cv2.imencode(".jpg", image)
@@ -551,15 +516,14 @@ class Studio:
         from services.edge.calibration.intake import court_document
 
         result["court"] = court_document(court)
-        result["point_errors_m"] = []
-        calibration_index = check_index = 0
-        for point in points:
-            if point["role"] == "calibration":
-                result["point_errors_m"].append(result["calibration_errors_m"][calibration_index])
-                calibration_index += 1
-            else:
-                result["point_errors_m"].append(result["check_errors_m"][check_index])
-                check_index += 1
+        errors = {
+            "calibration": iter(result["calibration_errors_m"]),
+            "check": iter(result["check_errors_m"]),
+        }
+        result["point_errors_m"] = [
+            next(errors["calibration" if point["role"] == "calibration" else "check"])
+            for point in points
+        ]
         if save:
             from services.edge.calibration.intake import build_document
 
@@ -640,15 +604,7 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
 
     @app.get("/api/cameras")
     def list_cameras():
-        return [
-            {
-                **entry,
-                "name": entry.get("name", entry["camera_id"]),
-                "enabled": entry.get("enabled", True),
-                "source": mask_credentials(str(entry["source"])),
-            }
-            for entry in studio.entries()
-        ]
+        return [public_entry(entry) for entry in studio.entries()]
 
     @app.post("/api/cameras")
     async def add_camera(request: Request):
@@ -658,12 +614,7 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
             entries.append(entry)
             studio.save(entries)
             note["detail"] = entry
-        return {
-            **entry,
-            "source": mask_credentials(str(entry["source"])),
-            "name": entry.get("name", entry["camera_id"]),
-            "enabled": entry.get("enabled", True),
-        }
+        return public_entry(entry)
 
     @app.put("/api/cameras/{camera_id}")
     async def edit_camera(camera_id: str, request: Request):
@@ -680,12 +631,7 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
             entries[index] = entry
             studio.save(entries)
             note["detail"] = entry
-        return {
-            **entry,
-            "source": mask_credentials(str(entry["source"])),
-            "name": entry.get("name", entry["camera_id"]),
-            "enabled": entry.get("enabled", True),
-        }
+        return public_entry(entry)
 
     @app.delete("/api/cameras/{camera_id}")
     def remove_camera(camera_id: str):
@@ -871,21 +817,38 @@ def create_app(out="C:/pointr_sessions", config=None, launcher_factory=Launcher)
 
         return StreamingResponse(stream(), media_type="multipart/x-mixed-replace; boundary=frame")
 
-    @app.get("/{path:path}")
-    def frontend(path: str):
-        if path.startswith("api/"):
-            raise HTTPException(404)
-        candidate = (UI_DIST / path).resolve()
-        if UI_DIST.resolve() not in candidate.parents and candidate != UI_DIST.resolve():
-            raise HTTPException(404)
-        if candidate.is_file():
-            return FileResponse(candidate)
-        index = UI_DIST / "index.html"
-        if index.is_file():
-            return FileResponse(index)
-        return {"message": "Build the UI with npm run build in services/app/ui"}
+    @app.get("/api/{path:path}")
+    def unknown_api(path: str):
+        raise HTTPException(404)
+
+    app.mount("/", StaticFiles(directory=UI_DIST, html=True, check_dir=False), name="ui")
 
     return app
+
+
+def read_frames(source, duration, stop_at_first=False):
+    """Read `source` for `duration` seconds (or until its first frame): the last frame and how
+    many frames arrived. The frame is None when none did or the source ended first."""
+    deadline = time.monotonic() + duration
+    frame, reads = None, 0
+    while time.monotonic() < deadline and not (stop_at_first and frame is not None):
+        try:
+            current = source.read()
+        except SourceEnded:
+            break
+        if current is not None:
+            frame, reads = current, reads + 1
+    return frame, reads
+
+
+def public_entry(entry):
+    """A camera entry as the API shows it: credentials masked, name and enabled filled in."""
+    return {
+        **entry,
+        "name": entry.get("name", entry["camera_id"]),
+        "enabled": entry.get("enabled", True),
+        "source": mask_credentials(str(entry["source"])),
+    }
 
 
 def preview_get(port: int, path: str, timeout: float) -> http.client.HTTPResponse:
