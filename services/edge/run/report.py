@@ -86,8 +86,9 @@ class Reporter:
             pass
 
     def failure(self, camera_id: str | None, kind: FailureKind, detail: str) -> None:
-        """The one outlet of a camera's failure: tagged for that camera in a group, so the launcher
-        puts it on that camera only. The files already carry it; a gone pipe adds no failure."""
+        """The one outlet of a camera's failure: tagged for that camera in a group, so the
+        launcher puts it on that camera only. A gone pipe is ignored, as in `line`: a writer
+        failure is also in the session's files, a failed final write is not."""
         self.tell(camera_id, StartFailed(kind, detail))
 
     def unverified(self, camera_id: str | None) -> None:
