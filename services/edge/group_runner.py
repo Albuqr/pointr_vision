@@ -32,7 +32,6 @@ from services.edge.camera_pipeline import (
 )
 from services.edge.capture.health import HealthConfig
 from services.edge.capture.types import Frame, FrameSource, HealthEvent, SourceInfo, utc_now
-from services.edge.child_protocol import StartFailed, emit
 from services.edge.matcher import CourtMatcher, CrossCameraMatcher, LocalTrack
 from services.edge.perception.types import Detections, Detector, Tracker, TrackObs
 from services.edge.recording.recorder import FileRecorder
@@ -40,7 +39,7 @@ from services.edge.replay.order import MatcherOrder
 from services.edge.replay.resolve import ReplayTarget
 from services.edge.run.stop import hold_ctrl_c, ignore_ctrl_c, release_ctrl_c, stop_end
 from services.edge.run.wait import Waiter, plain
-from services.edge.session.types import RunMeta, SessionMeta
+from services.edge.session.types import OnFailure, RunMeta, SessionMeta
 from services.edge.session.writer import FileSessionWriter, device_id
 
 # the appearance_only event's detail (DATA_CONTRACTS section 2, D-061); a calibration that could
@@ -56,6 +55,7 @@ APPROXIMATE = (
 )
 
 OnGroupEvent = Callable[[str, HealthEvent, float | None], None]  # camera_id, event, run's t0
+OnGroupFailure = Callable[[str, str, str], None]  # camera_id, kind, detail
 
 
 class SharedCodeError(RuntimeError):
@@ -210,6 +210,7 @@ def run_group(
     stop: threading.Event | None = None,
     on_event: OnGroupEvent | None = None,
     on_session: Callable[[str, CameraPipeline], None] | None = None,
+    on_failure: OnGroupFailure | None = None,
     ui_stop: Callable[[], bool] = lambda: False,
     wait: Waiter = plain,
 ) -> dict[str, str]:
@@ -247,6 +248,11 @@ def run_group(
     if detector is not None and make_tracker is None:
         raise ValueError("a detector needs make_tracker")
     report = on_event or (lambda camera_id, ev, t0: None)
+
+    def failed(camera_id: str) -> OnFailure:
+        """The failure outlet of one camera: its failures go to `on_failure` with its id."""
+        return lambda kind, detail: (on_failure or (lambda *a: None))(camera_id, kind, detail)
+
     infos: list[SourceInfo] = []
     opened: list[CameraPipeline] = []  # sessions started
     held = None
@@ -318,7 +324,7 @@ def run_group(
         pipelines = [
             CameraPipeline(
                 input,
-                FileSessionWriter(out),
+                FileSessionWriter(out, on_failure=failed(cam.camera_id)),
                 config,
                 detector=shared_detector,
                 tracker=None
@@ -337,6 +343,7 @@ def run_group(
                 calibration=calibration,
                 positions=positions,
                 on_event=functools.partial(report, cam.camera_id),
+                on_failure=failed(cam.camera_id),
             )
             for cam, input, (calibration, positions) in zip(
                 cameras, inputs, calibrations, strict=True
@@ -426,7 +433,7 @@ def run_group(
                     statuses[camera_id] = p.stop(status)
                 except BaseException as e:  # a failure: the others still stop
                     statuses[camera_id] = "error"
-                    emit(StartFailed("exited", f"{camera_id} did not stop cleanly: {e!r}"))
+                    failed(camera_id)("exited", f"did not stop cleanly: {e!r}")
         finally:
             release_ctrl_c(previous)
     return statuses

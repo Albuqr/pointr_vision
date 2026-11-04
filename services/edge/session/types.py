@@ -6,6 +6,7 @@ needs (D-008, completed by D-020).
 
 import re
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -102,6 +103,11 @@ class PositionMap(Protocol):
     def __call__(self, x: float, y: float) -> tuple[float, float] | None: ...
 
     def in_court(self, x: float, y: float) -> bool: ...
+
+
+# One camera's failure outlet: (kind, detail). Whoever builds a writer or pipeline for a camera
+# decides where its failures go; neither knows about stdout, tags or the wire protocol.
+OnFailure = Callable[[str, str], None]
 
 
 @runtime_checkable

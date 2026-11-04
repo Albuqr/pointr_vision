@@ -365,3 +365,20 @@ def test_a_source_that_fails_to_open_in_a_group_of_one_is_a_source_open_failure(
     assert "- source_open_failed: backend exploded" in captured.out
     assert "error: source_open_failed: cannot open source" in captured.err
     assert not list(tmp_path.iterdir())
+
+
+def test_failure_is_tagged_for_its_camera_in_a_group_and_plain_for_one(capsys):
+    Reporter(tagged=True).failure("cam2", "exited", "boom")
+    Reporter(tagged=False).failure("cam2", "exited", "boom")
+    assert capsys.readouterr().err.splitlines() == [
+        "[cam2] error: exited: boom",
+        "error: exited: boom",
+    ]
+
+
+def test_failure_with_the_launcher_pipe_gone_does_not_raise(monkeypatch):
+    def gone(*a, **kw):
+        raise OSError(22, "pipe closed")
+
+    monkeypatch.setattr("services.edge.run.report.emit", gone)
+    Reporter(tagged=True).failure("cam1", "exited", "boom")  # the session files still have it

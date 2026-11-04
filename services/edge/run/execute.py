@@ -139,6 +139,7 @@ def _run(plan, stop, perception, make_tracker, reporter, waiter, pipelines) -> R
             matcher=plan.matcher,
             on_event=on_event,
             on_session=on_session,
+            on_failure=reporter.failure,
             ui_stop=lambda: stop.ui,  # Studio's stop is a normal end (D-049)
             wait=waiter,
         )

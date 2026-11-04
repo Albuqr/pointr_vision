@@ -18,13 +18,13 @@ from services.edge.calibration.intake import Calibration
 from services.edge.capture.capture import Capture
 from services.edge.capture.health import HealthConfig, HealthMonitor
 from services.edge.capture.types import FrameSource, HealthEvent, SourceInfo, utc_now
-from services.edge.child_protocol import StartFailed, emit
 from services.edge.contract import VIDEO_FILE
 from services.edge.perception.loop import Processor
 from services.edge.power import read_power
 from services.edge.recording.types import Recorder
 from services.edge.session.types import (
     FrameRecord,
+    OnFailure,
     RunCounts,
     RunMeta,
     SessionEvent,
@@ -85,6 +85,7 @@ class CameraPipeline:
         calibration: Calibration | None = None,
         positions=None,
         on_event: OnEvent | None = None,
+        on_failure: OnFailure | None = None,
     ):
         self._input = input
         self._source = input.source
@@ -99,6 +100,7 @@ class CameraPipeline:
         self._replay = isinstance(input, ReplayInput)
         self._started = False
         self._on_event = on_event or (lambda ev, t0: None)
+        self._on_failure = on_failure or (lambda kind, detail: None)
         self._size_first = True
         self._size_problem: str | None = None
         self._monitor = HealthMonitor(config)
@@ -182,7 +184,7 @@ class CameraPipeline:
         self._size_first = False
         if first_frame and problem:
             detail = f"calibration cannot be used: the first {problem}"
-            emit(StartFailed("calibration_refused", detail))
+            self._on_failure("calibration_refused", detail)
         if problem != self._size_problem and problem:
             self.log_event(
                 HealthEvent("error", utc_now(), p.frame.t_recv, f"{problem}; no positions")
@@ -317,7 +319,7 @@ class CameraPipeline:
         try:
             writer.close(session_status, counts)
         except Exception as e:  # cannot write at all: say so, keep shutting down
-            emit(StartFailed("exited", f"final session files not written: {e!r}"))
+            self._on_failure("exited", f"final session files not written: {e!r}")
         return session_status
 
     @property
