@@ -347,6 +347,11 @@ def test_built_frontend_is_served_without_node_and_path_traversal_is_blocked(cli
     assert client.get("/%2e%2e/%2e%2e/README.md").status_code == 404
 
 
+def test_unknown_api_paths_are_404_not_the_frontend(client):
+    assert client.get("/api/nope").status_code == 404
+    assert client.get("/api/nope/deeper").status_code == 404
+
+
 def test_app_cli_binds_loopback_and_passes_output_and_port(monkeypatch, tmp_path):
     captured = {}
 
