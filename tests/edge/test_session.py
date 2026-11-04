@@ -483,10 +483,11 @@ def test_files_are_readable_while_running(tmp_path):
     assert load(w.dir / "session.json")["status"] == "ended"
 
 
-def test_writer_failure_ends_as_error(tmp_path, monkeypatch, capsys):
+def test_writer_failure_ends_as_error(tmp_path, monkeypatch):
     """Disk full or similar on the writer thread: producers do not raise, the session closes
     with status error and the failure as an event."""
-    w, run_dir = started(tmp_path)
+    told = []
+    w, run_dir = started(tmp_path, on_failure=lambda kind, detail: told.append((kind, detail)))
 
     def broken(item):
         raise OSError(28, "No space left on device")
@@ -502,7 +503,8 @@ def test_writer_failure_ends_as_error(tmp_path, monkeypatch, capsys):
     assert session["status"] == "error"
     assert "No space left" in session["events"][-1]["detail"]
     assert "items not written" in session["events"][-1]["detail"]
-    assert "error: exited: session writer stopped" in capsys.readouterr().err
+    [(kind, detail)] = told
+    assert kind == "exited" and "session writer stopped" in detail
     assert rows(run_dir / "frames.csv") == []  # header still readable
 
 

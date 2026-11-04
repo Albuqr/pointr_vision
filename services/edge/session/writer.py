@@ -29,6 +29,7 @@ from services.edge.session.types import (
     CAMERA_ID_RE,
     GROUP_ID_RE,
     FrameRecord,
+    OnFailure,
     PositionMap,
     RunCounts,
     RunMeta,
@@ -149,7 +150,14 @@ class FileSessionWriter:
     """Implements SessionWriter. Producer methods never raise: if the writer thread has died,
     items are counted in `lost` and the failure is recorded when the session closes."""
 
-    def __init__(self, out_dir: Path | str, maxsize: int = 4096, join_timeout: float = 15.0):
+    def __init__(
+        self,
+        out_dir: Path | str,
+        maxsize: int = 4096,
+        join_timeout: float = 15.0,
+        on_failure: OnFailure | None = None,
+    ):
+        self._on_failure = on_failure or (lambda kind, detail: None)
         self.out_dir = Path(out_dir)
         self.join_timeout = join_timeout
         self.dir: Path | None = None  # <out>/<session_id>, set by start()
@@ -412,9 +420,7 @@ class FileSessionWriter:
                     last = time.perf_counter()
         except BaseException as e:  # disk full, permissions: recorded by close()
             self.error = e
-            from services.edge.child_protocol import StartFailed, emit  # it imports this module
-
-            emit(StartFailed("exited", f"session writer stopped, data is no longer saved: {e!r}"))
+            self._on_failure("exited", f"session writer stopped, data is no longer saved: {e!r}")
         finally:
             for f in (self._frames_f, self._tracks_f):
                 try:

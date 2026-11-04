@@ -262,3 +262,71 @@ def test_a_failure_in_one_cameras_own_tracker_ends_only_that_camera(clips, tmp_p
     assert files["cam1"][1]["counts"]["captured"] == 30  # cam1 recorded its whole clip
     assert "error" not in kinds(files["cam1"][0])
     assert any("tracker exploded" in e["detail"] for e in files["cam2"][0]["events"])
+
+
+def _group_output_through_the_launcher(capsys):
+    """Everything a group printed, read by the real Launcher.read as two cameras' process."""
+    from types import SimpleNamespace
+
+    from services.edge import launcher as rc
+
+    out = capsys.readouterr()
+    lines = [*out.out.splitlines(), *out.err.splitlines()]
+    cams = [rc.Camera("cam1", "0", "usb"), rc.Camera("cam2", "1", "usb")]
+    lau = rc.Launcher(cams, rc.Options("unused", "g1"))
+    one, two = (rc.Child(c) for c in cams)
+    one.proc = two.proc = SimpleNamespace(stdout=[x + "\n" for x in lines], poll=lambda: None)
+    lau.read(one, two)
+    return one, two
+
+
+def test_a_writer_failure_of_one_camera_reaches_only_that_cameras_launcher_state(
+    clips, tmp_path, monkeypatch, capsys
+):
+    """#120: a group's failure line is tagged for its camera, so Launcher.read puts it on that
+    camera and leaves the other clean. Driven through the real run, then the real reader."""
+    from tests.edge.test_run_execute import argv, run
+
+    handle = writer_mod.FileSessionWriter._handle
+
+    def broken_for_cam2(self, item):
+        if self.dir is not None and self.dir.name.startswith("cam2") and item[0] == "frame":
+            raise OSError(28, "No space left on device")
+        return handle(self, item)
+
+    monkeypatch.setattr(writer_mod.FileSessionWriter, "_handle", broken_for_cam2)
+    cams = [argv(clips["moving"], tmp_path, "cam1"), argv(clips["frozen"], tmp_path, "cam2")]
+    run(cams, detector=EvenFrameDetector(), tagged=True)
+    one, two = _group_output_through_the_launcher(capsys)
+    assert one.run_errors == [] and one.failure is None
+    assert any("session writer stopped" in e for e in two.run_errors)
+
+
+def test_a_camera_that_does_not_stop_cleanly_is_told_for_that_camera_with_its_id(
+    clips, tmp_path, monkeypatch
+):
+    """#120: the shutdown failure goes through the camera's outlet; the text keeps the camera id,
+    so a single camera's untagged line reads as it did."""
+    from services.edge.camera_pipeline import CameraPipeline
+
+    stop = CameraPipeline.stop
+
+    def stop_or_fail(self, status):
+        if self.session_dir.name.startswith("cam2"):
+            raise RuntimeError("stuck")
+        return stop(self, status)
+
+    monkeypatch.setattr(CameraPipeline, "stop", stop_or_fail)
+    told = []
+    run_cameras(
+        {
+            "cam1": FileSource(str(clips["moving"]), realtime=False),
+            "cam2": FileSource(str(clips["frozen"]), realtime=False),
+        },
+        tmp_path,
+        EvenFrameDetector(),
+        on_failure=lambda cid, kind, detail: told.append((cid, kind, detail)),
+    )
+    [(cid, kind, detail)] = told
+    assert (cid, kind) == ("cam2", "exited")
+    assert detail.startswith("cam2 did not stop cleanly:") and "stuck" in detail

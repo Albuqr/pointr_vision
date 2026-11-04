@@ -258,3 +258,31 @@ def test_t7_benchmark_uses_a_handmade_stats_snapshot():
     assert "failed reads 2, unprocessed 1" in text
     assert "p50 15.0, p95 19.5, max 20.0" in text
     assert "over 2 frames" in text
+
+
+def test_a_failed_final_write_goes_to_the_pipelines_failure_outlet(clips, tmp_path, monkeypatch):
+    """#120: nothing else records a close() that cannot write, so the outlet must get it."""
+    told = []
+    source = FileSource(str(clips["moving"]), realtime=False)
+    info = source.open()
+    meta = SessionMeta(
+        str(uuid.uuid4()), device_id(tmp_path), utc_now(), info, False, "cam1", None, None
+    )
+    writer = FileSessionWriter(tmp_path)
+    pipeline = CameraPipeline(
+        LiveInput(source, info, meta, None),
+        writer,
+        HealthConfig(),
+        on_failure=lambda kind, detail: told.append((kind, detail)),
+    )
+    pipeline.open_session(sample_run_meta("clip"))
+    pipeline.start()
+    pipeline.done.wait(30)
+
+    def broken(*a, **kw):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(writer, "close", broken)
+    pipeline.stop("ended")
+    [(kind, detail)] = told
+    assert kind == "exited" and "final session files not written" in detail

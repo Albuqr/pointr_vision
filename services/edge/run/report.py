@@ -9,7 +9,7 @@ import time
 
 from services.edge.camera_pipeline import CameraStats
 from services.edge.capture.types import HealthEvent, utc_now
-from services.edge.child_protocol import Message, StartFailed, emit
+from services.edge.child_protocol import FailureKind, Message, StartFailed, emit
 from services.edge.perception.loop import delay_stats, rates
 from services.edge.reports.build import format_summary, write_report
 
@@ -84,6 +84,12 @@ class Reporter:
             emit(message, camera_id if self.tagged else None)
         except OSError:
             pass
+
+    def failure(self, camera_id: str | None, kind: FailureKind, detail: str) -> None:
+        """The one outlet of a camera's failure: tagged for that camera in a group, so the
+        launcher puts it on that camera only. A gone pipe is ignored, as in `line`: a writer
+        failure is also in the session's files, a failed final write is not."""
+        self.tell(camera_id, StartFailed(kind, detail))
 
     def unverified(self, camera_id: str | None) -> None:
         """A replay of a session whose video has no hash."""
