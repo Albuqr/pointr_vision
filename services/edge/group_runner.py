@@ -433,7 +433,7 @@ def run_group(
                     statuses[camera_id] = p.stop(status)
                 except BaseException as e:  # a failure: the others still stop
                     statuses[camera_id] = "error"
-                    failed(camera_id)("exited", f"did not stop cleanly: {e!r}")
+                    failed(camera_id)("exited", f"{camera_id} did not stop cleanly: {e!r}")
         finally:
             release_ctrl_c(previous)
     return statuses

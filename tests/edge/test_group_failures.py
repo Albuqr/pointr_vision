@@ -300,3 +300,33 @@ def test_a_writer_failure_of_one_camera_reaches_only_that_cameras_launcher_state
     one, two = _group_output_through_the_launcher(capsys)
     assert one.run_errors == [] and one.failure is None
     assert any("session writer stopped" in e for e in two.run_errors)
+
+
+def test_a_camera_that_does_not_stop_cleanly_is_told_for_that_camera_with_its_id(
+    clips, tmp_path, monkeypatch
+):
+    """#120: the shutdown failure goes through the camera's outlet; the text keeps the camera id,
+    so a single camera's untagged line reads as it did."""
+    from services.edge.camera_pipeline import CameraPipeline
+
+    stop = CameraPipeline.stop
+
+    def stop_or_fail(self, status):
+        if self.session_dir.name.startswith("cam2"):
+            raise RuntimeError("stuck")
+        return stop(self, status)
+
+    monkeypatch.setattr(CameraPipeline, "stop", stop_or_fail)
+    told = []
+    run_cameras(
+        {
+            "cam1": FileSource(str(clips["moving"]), realtime=False),
+            "cam2": FileSource(str(clips["frozen"]), realtime=False),
+        },
+        tmp_path,
+        EvenFrameDetector(),
+        on_failure=lambda cid, kind, detail: told.append((cid, kind, detail)),
+    )
+    [(cid, kind, detail)] = told
+    assert (cid, kind) == ("cam2", "exited")
+    assert detail.startswith("cam2 did not stop cleanly:") and "stuck" in detail
