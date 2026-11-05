@@ -6,11 +6,15 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from services.edge.session.folder import (
+    FrameTail,
     SessionDamaged,
     find_sessions,
     mark_interrupted,
+    read_frames,
     read_run,
     read_session,
+    read_tracks,
+    video_frames,
 )
 
 
@@ -244,3 +248,79 @@ def test_T2_strict_replay_refuses_malformed_recording_path(tmp_path):
     assert read_session(tmp_path).problems
     with pytest.raises(ReplayError, match="session damaged"):
         resolve_replay(str(tmp_path), tmp_path.parent)
+
+
+# -- run rows (#119): one reader, one truncated-row policy ------------------------------------
+
+HEADER = "seq,t_recv,t_video,match_seq\n"
+
+
+def _run_dir(tmp_path, frames=None, tracks=None):
+    if frames is not None:
+        (tmp_path / "frames.csv").write_text(frames, encoding="utf-8")
+    if tracks is not None:
+        (tmp_path / "tracks.csv").write_text(tracks, encoding="utf-8")
+    return tmp_path
+
+
+def test_a_cut_off_last_row_is_skipped_counted_and_said(tmp_path):
+    run = _run_dir(tmp_path, HEADER + "0,0.1,0.0,1\n1,0.2,0.03,2\n2,0.3")
+    frames = read_frames(run)
+    assert [r["seq"] for r in frames.rows] == ["0", "1"]
+    assert frames.skipped == 1
+    assert frames.problems == ("frames.csv: skipped 1 truncated row(s)",)
+
+
+def test_an_intact_file_reports_no_problem_and_empty_cells_are_data(tmp_path):
+    frames = read_frames(_run_dir(tmp_path, HEADER + "0,0.1,,\n"))
+    assert frames.skipped == 0 and frames.problems == ()
+    assert frames.rows[0]["t_video"] == ""
+
+
+def test_the_same_policy_applies_to_tracks_and_a_missing_file_raises_oserror(tmp_path):
+    run = _run_dir(tmp_path, tracks="seq,track_id\n0,1\n1\n")
+    assert read_tracks(run).skipped == 1
+    with pytest.raises(FileNotFoundError):
+        read_frames(run)
+
+
+def test_video_frames_maps_video_time_to_frame_index_in_order(tmp_path):
+    frames = read_frames(_run_dir(tmp_path, HEADER + "1,0.2,0.1,\n0,0.1,0.0,\n2,0.3,,\n"))
+    assert [(k, r["seq"]) for k, r in video_frames(frames, 10.0)] == [(0, "0"), (1, "1")]
+
+
+def test_frame_tail_keeps_the_latest_rows_and_waits_for_a_finished_line(tmp_path):
+    path = tmp_path / "frames.csv"
+    path.write_text(HEADER + "0,0.1,0.0,1\n1,0.2,0.0", encoding="utf-8")
+    tail = FrameTail(tmp_path, keep=2)
+    assert [r["seq"] for r in tail.poll()] == ["0"]  # row 1 is still being written
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write(",3\n2,0.3,0.0,4\n3,0.4\n4,0.5,0.0,5\n")
+    assert [r["seq"] for r in tail.poll()] == ["2", "4"]
+    assert tail.skipped == 1  # the cut-off row "3"
+    path.write_text(HEADER + "9,0.9,0.0,1\n", encoding="utf-8")  # a shorter file: start over
+    assert [r["seq"] for r in tail.poll()] == ["9"]
+
+
+def test_live_run_and_run_lookup_hide_the_folder_layout(tmp_path):
+    for name, mode in (("a", "live"), ("b", "replay")):
+        (tmp_path / "runs" / name).mkdir(parents=True)
+        (tmp_path / "runs" / name / "run.json").write_text(json.dumps({"mode": mode}))
+    (tmp_path / "session.json").write_text(
+        json.dumps({"status": "ended", "events": [], "runs": ["a", "b"]})
+    )
+    session = read_session(tmp_path)
+    assert session.live_run.path.name == "a" and session.live_run.is_live
+    assert session.run("b").path == tmp_path / "runs" / "b" and not session.run("b").is_live
+    assert session.run("../x") is None
+
+
+def test_damage_verdicts_are_fields_not_wording(tmp_path):
+    (tmp_path / "runs" / "a").mkdir(parents=True)
+    (tmp_path / "runs" / "a" / "run.json").write_text(json.dumps({"calibration": "bad"}))
+    (tmp_path / "session.json").write_text(
+        json.dumps({"status": "running", "events": [{"kind": "x"}, 7, "y"], "runs": ["a"]})
+    )
+    session = read_session(tmp_path)
+    assert session.skipped_events == 2 and session.live_run.calibration_damaged
+    assert mark_interrupted(session) == session.problems  # refuses to erase the evidence

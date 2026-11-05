@@ -109,11 +109,11 @@ def report_session(session_dir: Path, run_id: str | None, params: Params) -> str
     runs = run_dirs(session_dir)
     if run_id and run_id not in [r.name for r in runs]:  # also keeps --run inside this session
         raise ValueError(f"run {run_id!r} is not in {session_dir.name}")
-    latest = read_session(session_dir).latest_run
-    if not run_id and latest is None:
+    snapshot = read_session(session_dir)
+    run = snapshot.run(run_id) if run_id else snapshot.latest_run
+    if run is None:
         raise SessionDamaged(f"session damaged: {session_dir}: no run recorded")
-    run_dir = session_dir / "runs" / run_id if run_id else latest.path
-    return format_summary(write_report(run_dir, params=params))
+    return format_summary(write_report(run.path, params=params))
 
 
 ERRORS = (OSError, ValueError, KeyError, IndexError)

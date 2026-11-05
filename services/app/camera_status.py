@@ -7,7 +7,6 @@ trail). Nothing here reads a file, asks a process or writes a log, so every case
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from services.edge.launcher import ChildProgress
@@ -131,12 +130,6 @@ def camera_view(
         run_errors=_run_errors(progress),
         problem=_problem(progress, state, written, events),
     )
-
-
-def latest_frames_path(session: SessionSnapshot | None) -> Path | None:
-    """Where the frame log of the session's last listed run is, for the caller to read."""
-    run = session.latest_run if session else None
-    return run.path / "frames.csv" if run else None
 
 
 def _state(progress: ChildProgress, status: str | None, ready: Mapping) -> str:

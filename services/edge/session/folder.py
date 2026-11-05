@@ -5,8 +5,10 @@ problems describe damage without making tolerant reads raise. Strict consumers
 require only the fields they need. JSON text always accepts a UTF-8 BOM.
 """
 
+import csv
 import json
 import os
+from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -98,17 +100,32 @@ class Snapshot:
 
 @dataclass(frozen=True)
 class RunSnapshot(Snapshot):
-    pass
+    calibration_damaged: bool = False  # run.json holds a calibration block that cannot be read
+
+    @property
+    def is_live(self) -> bool:
+        return self.get("mode") == "live"
 
 
 @dataclass(frozen=True)
 class SessionSnapshot(Snapshot):
     runs: tuple[RunSnapshot | None, ...] | None
+    skipped_events: int = 0  # events entries that were not objects, left out of `events`
 
     @property
     def latest_run(self) -> RunSnapshot | None:
         """The final listed run, even when earlier runs are healthier."""
         return self.runs[-1] if self.runs else None
+
+    @property
+    def live_run(self) -> RunSnapshot | None:
+        """The first listed run: the one recorded live, since replays are appended after it.
+        Check `is_live` when the caller needs it to have been a live run."""
+        return self.runs[0] if self.runs else None
+
+    def run(self, run_id: str) -> RunSnapshot | None:
+        """The listed run with this id; None when session.json does not list it."""
+        return next((r for r in self.runs or () if r is not None and r.path.name == run_id), None)
 
 
 def _read(path: Path, filename: str):
@@ -125,7 +142,11 @@ def _field(value, key, kind, problems, filename):
     item = value.get(key)
     if not isinstance(item, kind):
         value[key] = None
-        problems.append(f"{filename}: {key} not readable")
+        problems.append(_unreadable(filename, key))
+
+
+def _unreadable(filename, key):
+    return f"{filename}: {key} not readable"
 
 
 def read_session_for_update(path: Path | str) -> dict:
@@ -154,13 +175,15 @@ def read_run(path: Path | str) -> RunSnapshot:
         for key in ("ready", "counts", "calibration", "group", "capture", "detection", "recording"):
             if key in ("ready", "counts") or value.get(key) is not None:
                 _field(value, key, dict, problems, "run.json")
-    return RunSnapshot(path, _snapshot_data(value, problems, "run.json"), tuple(problems))
+    damaged = any(p == _unreadable("run.json", "calibration") for p in problems)
+    return RunSnapshot(path, _snapshot_data(value, problems, "run.json"), tuple(problems), damaged)
 
 
 def read_session(path: Path | str) -> SessionSnapshot:
     path = Path(path)
     value, problems = _read(path, "session.json")
     runs = None
+    skipped = 0
     if value is not None:
         for key in ("status", "session_id", "camera_id", "group_id", "started_at", "ended_at"):
             if key == "status" or value.get(key) is not None:
@@ -195,7 +218,116 @@ def read_session(path: Path | str) -> SessionSnapshot:
                     problems.append(f"session.json: run {name} has no folder")
             runs = tuple(loaded)
     data = _snapshot_data(value, problems, "session.json")
-    return SessionSnapshot(path, data, tuple(problems), runs if data is not None else None)
+    return SessionSnapshot(path, data, tuple(problems), runs if data is not None else None, skipped)
+
+
+FRAMES_FILE = "frames.csv"
+TRACKS_FILE = "tracks.csv"
+
+
+@dataclass(frozen=True)
+class Rows:
+    """The complete rows of one run CSV, read by its own header.
+
+    One policy for damage: a row cut off by a crash (fewer cells than the header, or more) is not
+    returned; it is counted in `skipped` and said in `problems` ("absence is data").
+    """
+
+    name: str
+    columns: tuple[str, ...]
+    rows: tuple[dict[str, str], ...]
+    skipped: int = 0
+
+    @property
+    def problems(self) -> tuple[str, ...]:
+        if not self.skipped:
+            return ()
+        return (f"{self.name}: skipped {self.skipped} truncated row(s)",)
+
+
+def _read_rows(path: Path) -> Rows:
+    """Raises OSError when the file is absent or unreadable."""
+    rows, skipped = [], 0
+    with open(path, newline="", encoding="utf-8-sig") as stream:
+        reader = csv.DictReader(stream)
+        columns = tuple(reader.fieldnames or ())
+        try:
+            for row in reader:
+                if None in row or None in row.values():  # DictReader's marks for a cut-off row
+                    skipped += 1
+                else:
+                    rows.append(row)
+        except csv.Error:
+            skipped += 1  # unreadable from here on
+    return Rows(path.name, columns, tuple(rows), skipped)
+
+
+def read_frames(run_dir: Path | str) -> Rows:
+    return _read_rows(Path(run_dir) / FRAMES_FILE)
+
+
+def read_tracks(run_dir: Path | str) -> Rows:
+    return _read_rows(Path(run_dir) / TRACKS_FILE)
+
+
+def video_frames(frames: Rows, fps: float) -> tuple[tuple[int, dict[str, str]], ...]:
+    """(video frame index, row) for the rows that have a video time, in index order. The index
+    is the frame's position in the recorded video: round(t_video * fps)."""
+    return tuple(
+        sorted(
+            ((round(float(r["t_video"]) * fps), r) for r in frames.rows if r.get("t_video")),
+            key=lambda pair: pair[0],
+        )
+    )
+
+
+class FrameTail:
+    """The last rows of a frames.csv that is still being written, read incrementally (the
+    Studio polls it). Same row policy as `read_frames`; reads only the bytes added since the last
+    poll, and starts over if the file got shorter."""
+
+    def __init__(self, run_dir: Path | str, keep: int = 30):
+        self.path = Path(run_dir) / FRAMES_FILE
+        self.keep = keep
+        self.skipped = 0
+        self._reset()
+
+    def _reset(self):
+        self._offset = 0
+        self._partial = b""
+        self._columns: tuple[str, ...] | None = None
+        self._rows: deque[dict[str, str]] = deque(maxlen=self.keep)
+
+    def poll(self) -> list[dict[str, str]]:
+        try:
+            if self.path.stat().st_size < self._offset:
+                self.skipped = 0
+                self._reset()
+            with self.path.open("rb") as stream:
+                stream.seek(self._offset)
+                payload = stream.read()
+                self._offset += len(payload)
+        except OSError:
+            return list(self._rows)
+        lines = (self._partial + payload).split(b"\n")
+        self._partial = lines.pop()  # the line the writer has not finished
+        for line in lines:
+            if line.strip():
+                self._take(line)
+        return list(self._rows)
+
+    def _take(self, line: bytes):
+        try:
+            values = next(csv.reader([line.decode("utf-8-sig").rstrip("\r")]))
+        except (UnicodeDecodeError, csv.Error, StopIteration):
+            self.skipped += 1
+            return
+        if self._columns is None:
+            self._columns = tuple(values)
+        elif len(values) == len(self._columns):
+            self._rows.append(dict(zip(self._columns, values, strict=True)))
+        else:
+            self.skipped += 1
 
 
 def find_sessions(
@@ -235,7 +367,7 @@ def mark_interrupted(session: SessionSnapshot) -> tuple[str, ...]:
     """
     if session.status != "running":
         return ()
-    if session.events is None or any("non-object events" in p for p in session.problems):
+    if session.events is None or session.skipped_events:
         return session.problems
     # Recovery changes only lifecycle fields; retain even malformed unrelated metadata.
     value, problems = _read(session.path, "session.json")

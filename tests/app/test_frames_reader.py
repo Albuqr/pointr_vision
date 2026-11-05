@@ -1,9 +1,8 @@
-"""The Studio's live stats read frames.csv by the first eight columns; later columns are ignored."""
+"""The Studio's live stats tail frames.csv by its own header, so added columns do not break it."""
 
 import time
-from types import SimpleNamespace
 
-from services.app.server import Studio
+from services.edge.session.folder import FrameTail
 from services.edge.session.types import FrameRecord
 from services.edge.session.writer import FileSessionWriter
 from tests.edge.fakes import meta, sample_run_meta
@@ -18,7 +17,6 @@ def test_recent_frames_survive_the_columns_added_in_0_11_0(tmp_path):
     for seq in range(3):
         w.frame(FrameRecord(seq, 0.1 * seq, 0.1 * seq, 0.1 * seq + 0.05, 1, 1, 0, t_video=seq / 30))
     w.close("ended", COUNTS)
-    path = w.dir / "runs" / run.run_id / "frames.csv"
-    rows = Studio.read_recent_frames(SimpleNamespace(frame_cache={}), path)
+    rows = FrameTail(w.dir / "runs" / run.run_id).poll()
     assert [r["seq"] for r in rows] == ["0", "1", "2"]
     assert rows[0]["n_tracks"] == "1"

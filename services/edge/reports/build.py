@@ -5,7 +5,6 @@ session.json. Nothing here touches live state, so a finished (or crashed) run ca
 again at any time.
 """
 
-import csv
 import math
 import statistics
 from collections import defaultdict
@@ -25,7 +24,13 @@ from services.edge.reports.movement import (
     TrackMetrics,
     track_metrics,
 )
-from services.edge.session.folder import read_run, read_session, run_paths
+from services.edge.session.folder import (
+    read_frames,
+    read_run,
+    read_session,
+    read_tracks,
+    run_paths,
+)
 from services.edge.session.writer import CONTRACT_VERSION, write_json
 
 LOW_FPS = 5.0  # processed fps below this: say that samples are sparse
@@ -161,11 +166,6 @@ class Report:
         }
 
 
-def read_csv(path: Path) -> list[dict]:
-    with open(path, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
-
-
 def seconds_between(start: str | None, end: str | None) -> float | None:
     if not start or not end:
         return None
@@ -206,9 +206,10 @@ def build_report(
         raise ValueError("walking threshold must be greater than stationary threshold")
     session_snapshot = read_session(run_dir.parent.parent)
     session = session_snapshot.require("status", "events")
-    bad = 0  # rows that do not parse (a truncated last line): skipped and said
+    bad = 0  # rows that do not parse: skipped and said
+    frame_rows = read_frames(run_dir)
     frames = []
-    for r in read_csv(run_dir / "frames.csv"):
+    for r in frame_rows.rows:
         try:
             int(r["seq"])
             [float(r[k]) for k in FRAME_NUMBERS]
@@ -222,7 +223,8 @@ def build_report(
     by_track: dict[int, dict[int, Sample]] = defaultdict(dict)  # per seq: one sample each
     no_time = 0
     no_position = 0
-    for r in read_csv(run_dir / "tracks.csv"):
+    track_rows = read_tracks(run_dir)
+    for r in track_rows.rows:
         try:
             seq, tid = int(r["seq"]), int(r["track_id"])
             if calibration and positions.calibrated and "x_m" in r:
@@ -252,7 +254,12 @@ def build_report(
     ]
 
     stats = session_stats(run, session, frames, tracks, params)
-    notes = list(session_snapshot.problems + run_snapshot.problems)
+    notes = list(
+        session_snapshot.problems
+        + run_snapshot.problems
+        + frame_rows.problems
+        + track_rows.problems
+    )
     if bad:
         notes.append(f"{bad} malformed CSV row(s) were skipped")
     if no_position:

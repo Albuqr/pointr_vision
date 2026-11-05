@@ -987,21 +987,22 @@ def test_t6_nested_tag_is_free_text_not_another_status_envelope(tmp_path):
     assert list(one.tail) == ["[other] session: wrong"]
 
 
-def test_processed_fps_is_a_dash_for_a_last_row_cut_off_before_t_proc_end(tmp_path):
+def test_processed_fps_skips_a_last_row_cut_off_before_t_proc_end(tmp_path):
     """A crash mid-write cuts the last frames.csv row; DictReader fills the gap with None."""
     from tests.edge.test_report import dense, make_run
 
     run = make_run(tmp_path, dense(5), [])
     folder = run.parent.parent
-    assert rc.processed_fps(folder) != "-"  # intact file: a figure
+    intact = rc.processed_fps(folder)
+    assert intact != "-"  # intact file: a figure
     frames = run / "frames.csv"
     lines = frames.read_text(encoding="utf-8").splitlines()
     header = lines[0].split(",")
     cut = lines[-1].split(",")[: header.index("t_proc_end")]
     frames.write_text("\n".join([*lines[:-1], ",".join(cut)]) + "\n", encoding="utf-8")
-    assert rc.processed_fps(folder) == "-"
+    assert rc.processed_fps(folder) not in ("-", intact)  # figure from the complete rows
     child = SimpleNamespace(
         cam=SimpleNamespace(camera_id="cam1"), session_dir=folder, killed=False, failed_reads=0
     )
     row = rc.Launcher.summary(SimpleNamespace(), child)  # the result table row survives
-    assert row[0] == "cam1" and row[3] == "-"
+    assert row[0] == "cam1" and row[3] != "-"
