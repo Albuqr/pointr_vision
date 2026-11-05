@@ -1662,7 +1662,7 @@ measured with one process per camera and are marked as not re-measured.
 ## D-074 · 2026-11-05 · One home for track position: a Placer decides, the writer formats (#123)
 
 **Context.** The bottom-centre formula was written in three places, the frame-size guard in two
-(with different texts' plumbing through `tracks(no_positions=...)`), a calibrated run's pairing of
+(its reason passed to the writer through `tracks(no_positions=...)`), a calibrated run's pairing of
 `calibration` and `positions` was checked twice in the writer, and in a group each box was projected
 once for the matcher and again in the writer thread. Two Protocols were named `PositionMap`.
 **Decision.** `services/edge/placement.py` holds `bottom_centre`, `Placement` (position, in_court,

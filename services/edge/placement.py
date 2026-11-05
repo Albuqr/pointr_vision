@@ -50,13 +50,6 @@ class Placer:
         self._positions = positions
         self.image_size = (int(image_size[0]), int(image_size[1]))
 
-    @property
-    def calibration_id(self) -> str:
-        try:
-            return getattr(self._positions, "calibration_id", "") or ""
-        except Exception:
-            return ""
-
     def size_problem(self, frame_size: tuple[int, int]) -> str | None:
         """Why the calibration does not apply to a frame of `frame_size` (width, height)."""
         if tuple(frame_size) == self.image_size:

@@ -66,8 +66,3 @@ def test_a_point_the_map_cannot_project_gets_a_reason_not_an_error(project, why)
 def test_a_box_that_cannot_be_read_gets_a_reason_not_an_error(box):
     placement = Placer(Map(), SIZE).place(box, SIZE)
     assert placement.xy is None and placement.why
-
-
-def test_the_calibration_id_is_the_maps_and_never_raises():
-    assert Placer(Map(), SIZE).calibration_id == "cal-1"
-    assert Placer(object(), SIZE).calibration_id == ""
