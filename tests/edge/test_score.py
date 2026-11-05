@@ -396,3 +396,11 @@ def test_h3b_passes_at_exactly_80_percent(tmp_path):
     h3b = score.score_h3b(make_session(tmp_path, labels, tracks=tracks, n_frames=6000), RUN)
     assert (h3b.assessed, h3b.kept) == (5, 4)
     assert h3b.rate == pytest.approx(0.8) and h3b.passed
+
+
+def test_the_report_says_how_many_damaged_rows_the_reader_left_out(tmp_path):
+    folder = make_session(tmp_path, H1_LABELS, shots=H1_SHOTS)
+    with (folder / "runs" / RUN / "frames.csv").open("a", encoding="utf-8") as stream:
+        stream.write("99,1.0\n")  # a row cut off by a crash
+    report = score.format_report(folder, RUN)
+    assert "note: frames.csv: skipped 1 row(s) with the wrong cell count" in report

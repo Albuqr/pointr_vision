@@ -1675,3 +1675,26 @@ is the projection map in `placement.py` only.
 and their reasons. `SessionWriter.start`, `start_run` and `tracks` lose a parameter
 (ARCHITECTURE section 4).
 **Status.** Accepted.
+
+## D-075 · 2026-11-05 · One reader for run rows, live-run selection and damage (#119)
+
+**Context.** `frames.csv` was read at six sites and `tracks.csv` at two, each with its own handling
+of a row cut off by a crash. The launcher's fps figure crashed on one (#124), the report skipped
+it, the Studio dropped it, replay and score had no policy. "Live run" was worked out twice, the fps
+rule of the recorder was restated in replay, and callers detected damage by matching the wording
+of `problems`.
+**Decision.** `services/edge/session/folder.py` is the one place that knows the run's file names and columns:
+`read_frames(run_dir)` / `read_tracks(run_dir)` return `Rows` (columns, complete rows, `skipped`,
+`problems`). One policy: a row with fewer or more cells than the header is skipped, counted and
+said ("absence is data"); a missing file raises `OSError`. `video_frames` is the only
+frame-index to video-time mapping (`round(t_video * fps)`). `FrameTail` is the Studio's incremental
+tail: it reads only the bytes added since the last poll, takes the columns from the header, and
+applies the same row policy, so the Studio no longer depends on a fixed column list. Damage is a
+field: `RunSnapshot.calibration_damaged`, `SessionSnapshot.skipped_events`. `SessionSnapshot.live_run`
+(first listed run), `RunSnapshot.is_live` and `SessionSnapshot.run(run_id)` replace hand-joined
+`runs/<run_id>` paths. `recorder.recorded_fps` is the recorder's fps rule, shared with replay.
+**Consequences.** No file format change, no contract bump. A cut-off last row no longer blanks the
+launcher's fps (it is computed from the complete rows) and the report notes now say the reader's
+"skipped N truncated row(s)" per file; rows that are whole but do not parse are still counted by
+the report. `score` prints the same note and the Studio status carries `frame_rows_skipped`. Group replay does not yet report skipped rows of the live run (BACKLOG). `shots.csv` is not covered (score only).
+**Status.** Accepted.

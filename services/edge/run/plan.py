@@ -108,15 +108,15 @@ def single_replay(args: argparse.Namespace, offer: Offer) -> tuple[ReplayTarget,
 
         saved = read_session(replay.session_dir)
         try:
-            if not saved.runs or saved.runs[0] is None:
+            live = saved.live_run
+            if live is None:
                 raise ReplayError("the recorded session has no readable live run")
-            live = saved.runs[0]
             block = live.require().get("calibration")
         except SessionDamaged as exc:
             raise ReplayError(str(exc)) from exc
         # Tolerant snapshots replace malformed optional fields with None; damage is
         # a refused offer, while a genuinely absent calibration stays uncalibrated.
-        if any("calibration" in problem for problem in live.problems):
+        if live.calibration_damaged:
             block = {}
         offer = FromRun(block) if block is not None else None
     return replay, offer

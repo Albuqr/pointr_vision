@@ -6,7 +6,6 @@ the live run's shared IDs on the same frames.
 """
 
 import argparse
-import csv
 import dataclasses
 import json
 from collections.abc import Callable
@@ -18,9 +17,18 @@ import numpy as np
 from services.edge.capture.sources import FileSource
 from services.edge.group_runner import GroupCamera, RecordedCamera
 from services.edge.matcher import CourtMatcher, MatcherParams
-from services.edge.recording.recorder import DEFAULT_FPS
+from services.edge.recording.recorder import recorded_fps
 from services.edge.replay.resolve import ReplayError, resolve_replay
 from services.edge.run.plan import PlanError, RunPlan
+from services.edge.session.folder import (
+    Rows,
+    RunSnapshot,
+    SessionDamaged,
+    find_sessions,
+    read_frames,
+    run_paths,
+    video_frames,
+)
 
 
 @dataclass(frozen=True)
@@ -39,18 +47,13 @@ def live_matcher(params: dict, lost_s: float) -> CourtMatcher:
     return CourtMatcher(MatcherParams(**{n: params[n] for n in names}), params["latency_s"])
 
 
-def live_group_time(run_dir: Path, t0_mono: float, fps: float) -> Callable[[int], float]:
+def live_group_time(frames: Rows, t0_mono: float, fps: float) -> Callable[[int], float]:
     """Video frame k -> the live run's group time of that frame: t0_mono + t_recv of the frame the
     live run recorded at k / fps; linear between the frames it processed, 1 / fps steps before the
     first and after the last."""
-    with open(run_dir / "frames.csv", newline="", encoding="utf-8") as f:
-        known = sorted(
-            (round(float(r["t_video"]) * fps), t0_mono + float(r["t_recv"]))
-            for r in csv.DictReader(f)
-            if r["t_video"]
-        )
+    known = [(k, t0_mono + float(r["t_recv"])) for k, r in video_frames(frames, fps)]
     if not known:
-        raise ReplayError(f"{run_dir} has no frame with a video time to replay in group time")
+        raise ReplayError("the live run has no frame with a video time to replay in group time")
     index, times = (list(v) for v in zip(*known, strict=True))
 
     def at(k: int) -> float:
@@ -63,28 +66,19 @@ def live_group_time(run_dir: Path, t0_mono: float, fps: float) -> Callable[[int]
     return at
 
 
-def live_match_seq(run_dir: Path, fps: float) -> dict[int, int] | None:
+def live_match_seq(frames: Rows, fps: float) -> dict[int, int] | None:
     """Video frame k -> the number of the live run's matcher call for that frame (frames.csv
     `match_seq`, D-072), for the frames it gave to the matcher; None for a live run from before
     the column (0.27.0), whose order is then only known by receive time."""
-    with open(run_dir / "frames.csv", newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        if "match_seq" not in (reader.fieldnames or ()):
-            return None
-        return {
-            round(float(r["t_video"]) * fps): int(r["match_seq"])
-            for r in reader
-            if r["t_video"] and r["match_seq"]
-        }
+    if "match_seq" not in frames.columns:
+        return None
+    return {k: int(r["match_seq"]) for k, r in video_frames(frames, fps) if r["match_seq"]}
 
 
-def _load(path: Path) -> dict:
-    from services.edge.session.folder import SessionDamaged, read_run
-
+def _load(snapshot: RunSnapshot) -> dict:
     try:
-        snapshot = read_run(path.parent)
         document = snapshot.require()
-        if any("calibration" in problem for problem in snapshot.problems):
+        if snapshot.calibration_damaged:
             document["calibration"] = {}  # preserve refusal through the tolerant reader
         return document
     except (SessionDamaged, json.JSONDecodeError) as e:
@@ -94,8 +88,6 @@ def _load(path: Path) -> dict:
 def resolve_group(target: str, out_dir: Path | str) -> GroupReplay | None:
     """The sessions under out_dir whose group_id is `target`, ready to replay together; None when
     there are none. Raises ReplayError when they cannot be replayed as one group."""
-    from services.edge.session.folder import SessionDamaged, find_sessions, run_paths
-
     out = Path(out_dir)
     found = []
     for snapshot in find_sessions(out, group_id=target):
@@ -104,29 +96,33 @@ def resolve_group(target: str, out_dir: Path | str) -> GroupReplay | None:
             run_paths(snapshot.path)  # validate every listed folder name before joining paths
         except SessionDamaged as error:
             raise ReplayError(str(error)) from error
-        found.append((snapshot.path, session))
+        found.append((snapshot, session))
     if not found:
         return None
     cameras, group_runs, params = [], set(), {}
-    for folder, session in found:
+    for snapshot, session in found:
+        folder = snapshot.path
         try:
             if not session.get("camera_id") or not session.get("runs"):
                 raise ReplayError(f"{folder} has no camera_id or no run")
-            run_dir = folder / "runs" / session["runs"][0]  # the live run: replays come after it
-            live = _load(run_dir / "run.json")
-            if live.get("mode") != "live" or live.get("t0_mono") is None:
-                raise ReplayError(f"{run_dir} is not a live run that started")
+            live_run = snapshot.live_run  # replays come after it
+            if live_run is None:
+                raise ReplayError(f"{folder} has no readable live run")
+            live = _load(live_run)
+            if not live_run.is_live or live.get("t0_mono") is None:
+                raise ReplayError(f"{live_run.path} is not a live run that started")
             group = live.get("group") or {}
             group_runs.add(group.get("group_run_id"))
             params = group.get("params") or params
-            fps = session["source"].get("reported_fps") or DEFAULT_FPS  # the recorder's rate
+            fps = recorded_fps(session["source"].get("reported_fps"))
+            frames = read_frames(live_run.path)
             replay = resolve_replay(str(folder), out)
             recorded = RecordedCamera(
                 replay,
                 session["session_id"],
                 live.get("calibration"),
-                live_group_time(run_dir, live["t0_mono"], fps),
-                live_match_seq(run_dir, fps),
+                live_group_time(frames, live["t0_mono"], fps),
+                live_match_seq(frames, fps),
             )
             source = FileSource(replay.video, realtime=False)  # as fast as processing allows
             cameras.append(GroupCamera(session["camera_id"], source, "file", replay=recorded))

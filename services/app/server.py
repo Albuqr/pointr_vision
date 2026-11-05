@@ -1,5 +1,4 @@
 import base64
-import csv
 import dataclasses
 import datetime as dt
 import http.client
@@ -11,7 +10,7 @@ import threading
 import time
 import uuid
 import webbrowser
-from collections import Counter, deque
+from collections import Counter
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Literal
@@ -26,7 +25,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from services.app.audit import AuditTrail
 from services.app.calibrations import CalibrationStore
 from services.app.camera_log import CameraLog
-from services.app.camera_status import camera_view, latest_frames_path
+from services.app.camera_status import camera_view
 from services.app.config import CameraConfig, resolve_camera_source
 from services.edge.calibration.court import court_lines, court_model
 from services.edge.calibration.homography import fit_calibration
@@ -35,12 +34,16 @@ from services.edge.capture.sources import DEFAULT_CAPTURE_SIZE, SourceOpenError,
 from services.edge.capture.types import SourceEnded
 from services.edge.launcher import ConfigError, Launcher, Options, parse_config
 from services.edge.reports.build import build_report
-from services.edge.session.folder import find_sessions, mark_interrupted, read_session
-from services.edge.session.writer import FRAMES_COLUMNS, mask_credentials
+from services.edge.session.folder import (
+    FrameTail,
+    find_sessions,
+    mark_interrupted,
+    read_session,
+)
+from services.edge.session.writer import mask_credentials
 
 ROOT = Path(__file__).resolve().parents[2]
 UI_DIST = Path(__file__).parent / "ui" / "dist"
-FRAMES_MIN_COLUMNS = FRAMES_COLUMNS.index("t_video")  # sessions before t_video had 8 columns
 
 
 class Studio:
@@ -283,11 +286,7 @@ class Studio:
         for child in getattr(launcher, "children", []):
             progress = child.progress()
             snapshot = read_session(progress.session_dir) if progress.session_dir else None
-            frames_path = latest_frames_path(snapshot)
-            try:
-                frames = self.read_recent_frames(frames_path) if frames_path else []
-            except (OSError, ValueError):
-                frames = []
+            frames, frames_skipped = self.recent_frames(snapshot)
             live = self.read_live(progress.confirmed_preview_port)
             view = camera_view(progress, snapshot, frames, live)
             log = self.log(view.camera_id)
@@ -295,6 +294,7 @@ class Studio:
             cameras.append(
                 {
                     "camera_id": view.camera_id,
+                    "frame_rows_skipped": frames_skipped,  # damaged frames.csv rows, not shown
                     "name": view.name,
                     "state": view.state,
                     "processed_fps": view.processed_fps,
@@ -342,32 +342,16 @@ class Studio:
             return {}
         return live if isinstance(live, dict) else {}
 
-    def read_recent_frames(self, path):
-        state = self.frame_cache.setdefault(
-            str(path), {"offset": 0, "partial": b"", "rows": deque(maxlen=30)}
-        )
-        try:
-            if path.stat().st_size < state["offset"]:
-                state.update(offset=0, partial=b"", rows=deque(maxlen=30))
-            with path.open("rb") as stream:
-                stream.seek(state["offset"])
-                payload = stream.read()
-                state["offset"] += len(payload)
-        except OSError:
-            return list(state["rows"])
-        lines = (state["partial"] + payload).split(b"\n")
-        state["partial"] = lines.pop()
-        for line in lines:
-            if not line or line.startswith(b"seq,"):
-                continue
-            try:
-                values = next(csv.reader([line.decode("utf-8")]))
-                if len(values) < FRAMES_MIN_COLUMNS:  # a half-written row
-                    continue
-                state["rows"].append(dict(zip(FRAMES_COLUMNS, values, strict=False)))
-            except (UnicodeDecodeError, ValueError):
-                continue
-        return list(state["rows"])
+    def recent_frames(self, snapshot):
+        """The latest frame rows of the session's last listed run, read as far as the file has
+        grown since the previous poll."""
+        run = snapshot.latest_run if snapshot else None
+        if run is None:
+            return [], 0
+        tail = self.frame_cache.get(str(run.path))
+        if tail is None:
+            tail = self.frame_cache[str(run.path)] = FrameTail(run.path)
+        return tail.poll(), tail.skipped
 
     def test_camera(self, camera_id, duration=3.0):
         with self.lock:

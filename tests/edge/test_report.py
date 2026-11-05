@@ -579,8 +579,18 @@ def test_malformed_csv_rows_are_skipped_and_said(tmp_path):
         f.write("99,1.0\n")
     d = build_report(run_dir).to_dict()
     assert d["tracks"][0]["n_samples"] == 4 and d["session"]["n_processed"] == 6
-    assert any("2 malformed CSV row(s)" in c for c in d["caveats"])
+    for name in ("frames.csv", "tracks.csv"):  # the reader's one policy, said per file
+        assert any(f"{name}: skipped 1 row(s) with the wrong cell count" in c for c in d["caveats"])
     schema("report").validate(d)
+
+
+def test_rows_that_do_not_parse_are_counted_by_the_report(tmp_path):
+    run_dir = make_run(tmp_path, dense(6), [(i, 1, 100 * i, 500) for i in range(4)])
+    with open(run_dir / "frames.csv", "a", encoding="utf-8") as f:
+        header = (run_dir / "frames.csv").read_text(encoding="utf-8").splitlines()[0]
+        f.write(",".join("x" for _ in header.split(",")) + "\n")  # full width, not numbers
+    d = build_report(run_dir).to_dict()
+    assert any("1 malformed CSV row(s)" in c for c in d["caveats"])
 
 
 def test_the_same_track_twice_in_one_frame_is_one_sample(tmp_path):

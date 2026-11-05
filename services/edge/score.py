@@ -16,7 +16,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from services.edge.contract import LABEL_EVENTS, LABELS_COLUMNS, VIDEO_FILE
-from services.edge.session.folder import SessionDamaged, read_session, run_paths
+from services.edge.session.folder import (
+    SessionDamaged,
+    read_frames,
+    read_session,
+    read_tracks,
+    run_paths,
+)
 
 # Placeholders: no source gives a matching tolerance (spec FR-013 points to the research note, which
 # has none), so these are chosen, not measured. D-043.
@@ -161,9 +167,12 @@ def _rows(path: Path) -> list[dict] | None:
 
 def frame_times(run: Path) -> dict[int, float]:
     """frame seq -> time in the recorded video, the key labels.csv is joined on."""
-    rows = _rows(run / "frames.csv")
-    if rows is None:
-        raise ScoreError(f"{run} has no frames.csv")
+    try:
+        rows = read_frames(run).rows
+    except FileNotFoundError:
+        raise ScoreError(f"{run} has no frames.csv") from None
+    except OSError as error:
+        raise ScoreError(f"{run / 'frames.csv'} cannot be read: {error}") from error
     times = {int(r["seq"]): float(r["t_video"]) for r in rows if r.get("t_video")}
     if not times:
         raise ScoreError(
@@ -247,8 +256,11 @@ def score_h3b(folder: Path, run_id: str | None = None) -> H3b | None:
     run = run_dir(folder, run_id)
     labels = load_labels(folder / "labels.csv")
     returns = sorted((lab for lab in labels if lab.event == "return"), key=lambda x: x.time_s)
-    track_rows = _rows(run / "tracks.csv")
-    if not returns or track_rows is None:
+    try:
+        track_rows = read_tracks(run).rows
+    except OSError:  # absent (identity layer not run yet) or unreadable: not scorable
+        return None
+    if not returns:
         return None
     times = frame_times(run)
     seen = [  # (video time, track id, number)
@@ -288,12 +300,24 @@ def _pct(n: int, d: int) -> str:
     return f"{n}/{d} = {100 * n / d:.1f}%"
 
 
+def _skipped_rows(run: Path) -> tuple[str, ...]:
+    problems = ()
+    for read in (read_frames, read_tracks):
+        try:
+            problems += read(run).problems
+        except OSError:
+            pass  # a missing file is reported where it is needed
+    return problems
+
+
 def format_report(folder: Path, run_id: str | None = None, tolerance: float = TOLERANCE_S) -> str:
     run = run_dir(folder, run_id)
     h1 = score_h1(folder, run.name, tolerance)
     h3b = score_h3b(folder, run.name)
     out = [f"scoring {folder.name} run {run.name}; a shot matches a label within {tolerance:g} s "
            "(a chosen value, not a measured one)"]  # fmt: skip
+    for problem in _skipped_rows(run):  # absence is data: say what the reader left out
+        out.append(f"note: {problem}")
     ends, last_label = (
         max(frame_times(run).values()),
         max((lab.time_s for lab in load_labels(folder / "labels.csv")), default=0.0),

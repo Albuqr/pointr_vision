@@ -16,7 +16,6 @@ Killing the process is the last resort after --stop-timeout and is marked "kille
 """
 
 import argparse
-import csv
 import ipaddress
 import json
 import math
@@ -54,7 +53,7 @@ from services.edge.reports.build import (  # noqa: E402
     build_report,
     table_row,
 )
-from services.edge.session.folder import read_session  # noqa: E402
+from services.edge.session.folder import read_frames, read_session  # noqa: E402
 from services.edge.session.types import CAMERA_ID_RE  # noqa: E402
 from services.edge.session.writer import mask_credentials  # noqa: E402
 
@@ -726,12 +725,8 @@ def error_events(session_dir: Path) -> str:
     if snapshot.events is None:
         return "-"
     errors = str(sum(event.get("kind") == "error" for event in snapshot.events))
-    skipped = [
-        problem.split(": ", 1)[-1]
-        for problem in snapshot.problems
-        if "non-object events" in problem
-    ]
-    return f"{errors} ({'; '.join(skipped)})" if skipped else errors
+    skipped = snapshot.skipped_events
+    return f"{errors} (skipped {skipped} non-object events)" if skipped else errors
 
 
 def session_status(session_dir: Path) -> str:
@@ -745,12 +740,10 @@ def processed_fps(session_dir: Path) -> str:
         latest = read_session(session_dir).latest_run
         if latest is None:
             return "-"
-        run_dir = latest.path
-        with open(run_dir / "frames.csv", newline="", encoding="utf-8") as f:
-            rows = list(csv.DictReader(f))
+        rows = read_frames(latest.path).rows
         span = float(rows[-1]["t_proc_end"]) - float(rows[0]["t_proc_start"])
         return f"{len(rows) / span:.2f}" if span > 0 else "-"
-    except (OSError, ValueError, KeyError, IndexError, TypeError):  # TypeError: cut-off row
+    except (OSError, ValueError, KeyError, IndexError):
         return "-"
 
 

@@ -20,6 +20,14 @@ from services.edge.capture.types import Frame, SourceInfo
 from services.edge.recording.types import RecordingInfo
 
 DEFAULT_FPS = 30.0  # when the source does not report one
+
+
+def recorded_fps(reported_fps) -> float:
+    """The rate the video is written at: the source's reported one, else the default. A replay
+    reads the same rule to map video frames to times."""
+    return reported_fps or DEFAULT_FPS
+
+
 QUEUE_SIZE = 64  # about 2 s of 30 fps video of slack for a slow disk; a frame is up to 6 MB
 INDEX_MAX = 4096  # seq -> position entries kept for t_video(); frames capture drops never leave
 STOP_TIMEOUT = 10.0  # seconds stop() waits for the writer to drain
@@ -75,7 +83,7 @@ class FileRecorder:
 
     def start(self, path: Path, info: SourceInfo) -> None:
         self._path = Path(path)
-        self._fps = info.reported_fps or DEFAULT_FPS
+        self._fps = recorded_fps(info.reported_fps)
         self._thread = threading.Thread(target=self._run, name="recorder", daemon=True)
         self._thread.start()
 
