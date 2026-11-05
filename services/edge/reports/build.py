@@ -16,10 +16,11 @@ from pathlib import Path
 from services.edge.calibration.homography import CalibrationPositions
 from services.edge.capture.types import utc_now
 from services.edge.perception.loop import delay_stats, rates
+from services.edge.placement import bottom_centre
 from services.edge.reports.movement import (
+    MovementMap,
     Params,
     PixelPositions,
-    PositionMap,
     Sample,
     TrackMetrics,
     track_metrics,
@@ -177,7 +178,7 @@ def run_dirs(session_dir: Path) -> list[Path]:
 
 
 def build_report(
-    run_dir: Path, params: Params | None = None, positions: PositionMap | None = None
+    run_dir: Path, params: Params | None = None, positions: MovementMap | None = None
 ) -> Report:
     """The report of one run folder. Raises OSError/ValueError if its files are missing or
     unreadable; a run that never finished (no counts, no end time) still reports."""
@@ -234,7 +235,7 @@ def build_report(
                 x_m, y_m = float(r["x_m"]), float(r["y_m"])
                 xy = (x_m, y_m) if math.isfinite(x_m) and math.isfinite(y_m) else None
             else:
-                xy = positions((float(r["x1"]) + float(r["x2"])) / 2, float(r["y2"]))
+                xy = positions(*bottom_centre([float(r[k]) for k in ("x1", "y1", "x2", "y2")]))
         except (TypeError, ValueError, KeyError):
             bad += 1
             continue
@@ -364,7 +365,7 @@ def session_stats(
     )
 
 
-def caveats(positions: PositionMap, params: Params, s: SessionStats, notes: list[str]) -> list[str]:
+def caveats(positions: MovementMap, params: Params, s: SessionStats, notes: list[str]) -> list[str]:
     out = [
         f"Positions are the bottom-centre of the box in {positions.unit}"
         + (

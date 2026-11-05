@@ -1,6 +1,6 @@
 """Movement metrics of one track from sparse, uneven samples (D-023, DATA_CONTRACTS section 8).
 
-Pure functions: no files, no live state. Positions come in through a PositionMap, so the same
+Pure functions: no files, no live state. Positions come in through a MovementMap, so the same
 code reports pixels today and metres once calibration supplies a map.
 """
 
@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 
-class PositionMap(Protocol):
+class MovementMap(Protocol):
     """Pixel point -> output point. `unit` names the output; the thresholds are the default
     activity limits in `unit`/s (they depend on the map: metres need other numbers than pixels)."""
 
@@ -51,7 +51,7 @@ class Params:
     smooth_window: int = 3  # samples, odd
     min_valid_intervals: int = 2  # fewer: speed is null
     short_track: float = 1.0  # s: a track visible for less is a likely fragment
-    stationary_below: float | None = None  # unit/s; None: the PositionMap's default
+    stationary_below: float | None = None  # unit/s; None: the MovementMap's default
     walking_below: float | None = None
 
 
@@ -104,7 +104,7 @@ def smooth(run: list[Sample], window: int) -> list[Sample]:
 
 
 def track_metrics(
-    track_id: int, samples: list[Sample], params: Params, positions: PositionMap
+    track_id: int, samples: list[Sample], params: Params, positions: MovementMap
 ) -> TrackMetrics:
     """Metrics of one track. `samples` are in the output unit, any order, distinct times."""
     samples = sorted(samples, key=lambda s: s.t)

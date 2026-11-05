@@ -10,6 +10,7 @@ import numpy as np
 
 from services.edge.capture.types import Frame
 from services.edge.contract import UNSHARED
+from services.edge.placement import Placement
 
 
 @dataclass(frozen=True, eq=False)  # ndarray fields: no value equality or hash
@@ -28,6 +29,7 @@ class TrackObs:
     confidence: float | None  # None when the tracker does not expose it
     state: str | None  # "observed" | "predicted", None when the tracker does not expose it
     link: str = UNSHARED  # tracks.csv `link` (0.14.0): set by the group runner's matcher (R2a 05)
+    placement: Placement | None = None  # court position verdict; None: not placed (uncalibrated)
 
 
 @runtime_checkable

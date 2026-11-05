@@ -30,7 +30,6 @@ from services.edge.session.types import (
     GROUP_ID_RE,
     FrameRecord,
     OnFailure,
-    PositionMap,
     RunCounts,
     RunMeta,
     SessionEvent,
@@ -166,7 +165,7 @@ class FileSessionWriter:
         self.unprojected = 0  # track rows written without a metre position
         self._reported_unprojected = 0
         self._last_unprojected_event: float | None = None
-        self._positions: PositionMap | None = None
+        self._calibration: str | None = None  # the calibrated run's calibration_id
         self.status: str | None = None  # final status written by close()
         self._replay = False  # a replay adds a run and leaves the rest of session.json alone
         self._replay_events: list[dict] = []  # the only events a replay adds to session.json
@@ -182,14 +181,12 @@ class FileSessionWriter:
 
     # -- producers (any thread) --------------------------------------------------------------
 
-    def start(self, meta: SessionMeta, run: RunMeta, positions: PositionMap | None = None) -> None:
+    def start(self, meta: SessionMeta, run: RunMeta) -> None:
         """Create the folders, write session.json and run.json (status running), start the
         thread. Raises OSError when the folder cannot be created; FileExistsError if it
-        exists: a run never writes into another run's folder (A5). `positions` projects the
-        rows of a calibrated run and is required exactly when run.calibration is set."""
-        if (positions is None) != (run.calibration is None):
-            raise ValueError("a calibrated run needs positions, and positions need a calibration")
-        self._positions = positions
+        exists: a run never writes into another run's folder (A5). The rows of a calibrated run
+        (run.calibration is set) take their position from each obs.placement; nothing is
+        projected here."""
         # ids reach a folder name: refuse anything that is not a plain token (D-022)
         if meta.camera_id is not None and not CAMERA_ID_RE.fullmatch(meta.camera_id):
             raise ValueError(f"invalid camera_id {meta.camera_id!r}")
@@ -228,16 +225,11 @@ class FileSessionWriter:
         }
         self._begin_run(run)
 
-    def start_run(
-        self, session_dir: Path | str, run: RunMeta, positions: PositionMap | None = None
-    ) -> None:
+    def start_run(self, session_dir: Path | str, run: RunMeta) -> None:
         """A replay: add `run` to the session already in session_dir. In session.json only `runs`
         grows; the session's status and recording stay as the live run left them. The replay adds
         no events except those in REPLAY_EVENTS, tagged with its run id,
         so a replay that did not end cleanly is visible (D-042)."""
-        if (positions is None) != (run.calibration is None):
-            raise ValueError("a calibrated run needs positions, and positions need a calibration")
-        self._positions = positions
         self.dir = Path(session_dir)
         self._session = read_session_for_update(self.dir)
         self._session["runs"].append(run.run_id)
@@ -248,6 +240,8 @@ class FileSessionWriter:
         """Create the run folder and its files, write session.json and run.json, start the
         thread. FileExistsError if the run folder exists (A5)."""
         self._run_dir = self.dir / "runs" / run.run_id
+        if run.calibration is not None:
+            self._calibration = str(run.calibration.get("calibration_id") or "")
         self._run_dir.mkdir(parents=True)
         self._run_doc = {
             "contract_version": CONTRACT_VERSION,
@@ -322,10 +316,10 @@ class FileSessionWriter:
     def frame(self, rec: FrameRecord) -> None:
         self._put(("frame", rec))
 
-    def tracks(self, seq: int, obs: list[TrackObs], no_positions: str | None = None) -> None:
-        """no_positions: why these rows get no metre position (the caller knows the frame, e.g.
-        its size no longer matches the calibration); the rows are written all the same."""
-        self._put(("tracks", seq, obs, no_positions))
+    def tracks(self, seq: int, obs: list[TrackObs]) -> None:
+        """One row per obs. A calibrated run takes each row's position from obs.placement; an obs
+        without one, or with a reason instead of a position, gets empty cells and is counted."""
+        self._put(("tracks", seq, obs))
 
     def event(self, ev: SessionEvent) -> None:
         self._put(("event", ev))
@@ -449,7 +443,7 @@ class FileSessionWriter:
                 ]
             )
         elif kind == "tracks":
-            _, seq, obs, no_positions = item
+            _, seq, obs = item
             changed = False
             for o in obs:
                 try:
@@ -458,7 +452,7 @@ class FileSessionWriter:
                         raise ValueError("track box must have four coordinates")
                     x1, y1, x2, y2 = box
                     x_m, y_m, calibration_id, position_method, in_court, why = self._position(
-                        (x1 + x2) / 2, y2, no_positions
+                        o.placement
                     )
                     if why:
                         changed |= self._note_unprojected(why)
@@ -476,7 +470,7 @@ class FileSessionWriter:
                         track_id = ""
                     row = [
                         seq, track_id, "", "", "", "", "", "", "", "", "", UNSHARED, "", "",
-                        self._calibration_id(), METHOD if self._positions else "", "",
+                        self._calibration or "", self._method(), "",
                     ]  # fmt: skip
                 self._tracks.writerow(row)
             return changed
@@ -493,28 +487,20 @@ class FileSessionWriter:
             self._snapshot(self._run_dir / "run.json", self._run_doc)  # also in the final write
         return False
 
-    def _position(self, x: float, y: float, no_positions: str | None = None) -> tuple:
-        """The five position cells of one row and why the position is empty (or None). Nothing
-        a projection does can stop the writer: an error leaves the position empty."""
-        positions = self._positions
-        if positions is None:
-            return "", "", "", "", "", None
-        if no_positions:
-            return "", "", self._calibration_id(), METHOD, "", no_positions
-        try:
-            xy = positions(x, y)
-            if xy is None:
-                return "", "", self._calibration_id(), METHOD, "", "outside the camera's view"
-            in_court = str(bool(positions.in_court(*xy))).lower()
-            return xy[0], xy[1], self._calibration_id(), METHOD, in_court, None
-        except Exception as e:  # a projection failure is a missing position, not a dead run
-            return "", "", self._calibration_id(), METHOD, "", repr(e)
+    def _method(self) -> str:
+        return METHOD if self._calibration is not None else ""
 
-    def _calibration_id(self) -> str:
-        try:
-            return getattr(self._positions, "calibration_id", "") or ""
-        except Exception:
-            return ""
+    def _position(self, placement) -> tuple:
+        """The five position cells of one row and why the position is empty (or None)."""
+        if self._calibration is None:
+            return "", "", "", "", "", None
+        base = (self._calibration, METHOD)
+        if placement is None:
+            return "", "", *base, "", "track was not placed"
+        if placement.xy is None:
+            return "", "", *base, "", placement.why or "no position"
+        in_court = str(bool(placement.in_court)).lower()
+        return placement.xy[0], placement.xy[1], *base, in_court, None
 
     def _note_unprojected(self, why: str) -> bool:
         """Count a row without a position; one event on the first, then at most one per

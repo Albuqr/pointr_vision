@@ -92,19 +92,6 @@ class SessionEvent:
     detail: str | None = None
 
 
-@runtime_checkable
-class PositionMap(Protocol):
-    """Image point -> court metres for the rows of a calibrated run. Injected into the writer,
-    which does not import the calibration package. A map may return None for a point that
-    cannot be projected, and may raise: the writer leaves the position empty either way."""
-
-    calibration_id: str
-
-    def __call__(self, x: float, y: float) -> tuple[float, float] | None: ...
-
-    def in_court(self, x: float, y: float) -> bool: ...
-
-
 # One camera's failure outlet: (kind, detail). Whoever builds a writer or pipeline for a camera
 # decides where its failures go; neither knows about stdout, tags or the wire protocol.
 OnFailure = Callable[[str, str], None]
@@ -119,13 +106,11 @@ class SessionWriter(Protocol):
     @property
     def run_dir(self) -> Path: ...
 
-    def start(self, meta: SessionMeta, run: RunMeta, positions: PositionMap | None = None) -> None:
-        """positions is required exactly when run.calibration is set."""
+    def start(self, meta: SessionMeta, run: RunMeta) -> None:
+        """The rows of a run with run.calibration carry the position of each obs.placement."""
         ...
 
-    def start_run(
-        self, session_dir: Path | str, run: RunMeta, positions: PositionMap | None = None
-    ) -> None:
+    def start_run(self, session_dir: Path | str, run: RunMeta) -> None:
         """A replay: add `run` to the session in session_dir instead of starting a session."""
         ...
 
@@ -147,7 +132,7 @@ class SessionWriter(Protocol):
 
     def frame(self, rec: FrameRecord) -> None: ...
 
-    def tracks(self, seq: int, obs: list[TrackObs], no_positions: str | None = None) -> None: ...
+    def tracks(self, seq: int, obs: list[TrackObs]) -> None: ...
 
     def event(self, ev: SessionEvent) -> None: ...
 

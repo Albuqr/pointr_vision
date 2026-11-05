@@ -52,7 +52,7 @@ pointr/
     edge/
       calibration/           court model, homography fit and projection, calibration file
                              validation (pure: no camera, no file state beyond one JSON load);
-                             the session writer receives its projector as an injected PositionMap
+                             a `Placer` (services/edge/placement.py) turns a box into a court position once per frame
       capture/               FrameSource implementations + health monitor
       perception/            Detector, Tracker implementations
       session/               session lifecycle, writers
@@ -135,11 +135,16 @@ class CrossCameraMatcher(Protocol):  # seam B of the group runner (R2a 05, D-058
     def record_params(self) -> dict: ...  # run.json group.params
 
 
-class PositionMap(Protocol):  # injected into the writer for a calibrated run (D-027)
+class PositionMap(Protocol):  # image point -> court metres; wrapped by a Placer (D-027, D-074)
     calibration_id: str
 
     def __call__(self, x: float, y: float) -> tuple[float, float] | None: ...
     def in_court(self, x: float, y: float) -> bool: ...
+
+
+class Placer:  # placement.py (D-074): the one box-to-position rule, size guard and reasons
+    def size_problem(self, frame_size: tuple[int, int]) -> str | None: ...
+    def place(self, box, frame_size: tuple[int, int]) -> Placement: ...  # never raises
 
 
 class SessionWriter(Protocol):  # run metadata, t0 and counts added by D-020
@@ -148,18 +153,14 @@ class SessionWriter(Protocol):  # run metadata, t0 and counts added by D-020
     done: threading.Event
     @property
     def run_dir(self) -> Path: ...
-    def start(
-        self, meta: SessionMeta, run: RunMeta, positions: PositionMap | None = None
-    ) -> None: ...
-    def start_run(
-        self, session_dir: Path | str, run: RunMeta, positions: PositionMap | None = None
-    ) -> None: ...  # a replay adds a run to a session (D-042)
+    def start(self, meta: SessionMeta, run: RunMeta) -> None: ...
+    def start_run(self, session_dir: Path | str, run: RunMeta) -> None: ...  # a replay adds a run to a session (D-042)
     def set_t0(self, t0: float, t0_wall: str) -> None: ...
     def set_final(self, **blocks) -> None: ...  # gaps, outages, clock, power_end; before close (D-041, D-053)
     def set_ready(self, step: str, t_wall: str, t_pc: float) -> None: ...  # run.json ready (D-052)
     def set_recording_sha256(self, sha256: str) -> None: ...  # video.mkv hash; before close (D-042)
     def frame(self, rec: FrameRecord) -> None: ...
-    def tracks(self, seq: int, obs: list[TrackObs], no_positions: str | None = None) -> None: ...
+    def tracks(self, seq: int, obs: list[TrackObs]) -> None: ...  # positions from obs.placement
     def event(self, ev: SessionEvent) -> None: ...
     def close(self, status: str, counts: RunCounts) -> None: ...
 
