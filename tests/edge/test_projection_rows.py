@@ -11,6 +11,7 @@ import pytest
 
 from services.edge.calibration.homography import CalibrationPositions
 from services.edge.perception.types import TrackObs
+from services.edge.placement import Placer
 from services.edge.reports.build import build_report
 from services.edge.session.types import RunCounts
 from services.edge.session.writer import FileSessionWriter
@@ -31,14 +32,24 @@ def calibration(matrix=HORIZON):
     }
 
 
+SIZE = (640, 360)
+
+
+def placed(box, positions, size=SIZE, confidence=0.9):
+    """A track as the pipeline hands it to the writer: with its placement."""
+    placement = Placer(positions, SIZE).place(box, size)
+    return TrackObs(1, box, confidence, None, placement=placement)
+
+
 def tracks_csv(tmp_path, boxes, matrix=HORIZON):
     writer = FileSessionWriter(tmp_path)
     document = calibration(matrix)
     run = replace(sample_run_meta(), calibration=document)
-    writer.start(meta(), run, CalibrationPositions(document))
+    positions = CalibrationPositions(document)
+    writer.start(meta(), run)
     writer.set_t0(time.perf_counter(), "2026-10-13T12:00:01Z")
     for seq, box in enumerate(boxes):
-        writer.tracks(seq, [TrackObs(1, box, 0.9, None)])
+        writer.tracks(seq, [placed(box, positions)])
     writer.close("ended", RunCounts(len(boxes), len(boxes), 0, 0))
     with open(writer.dir / "runs" / run.run_id / "tracks.csv", newline="", encoding="utf-8") as f:
         return list(csv.DictReader(f))
@@ -76,11 +87,11 @@ def run_calibrated(tmp_path, boxes, positions, matrix=HORIZON):
     """Frames and tracks through a real writer; returns (writer, session.json, frames, tracks)."""
     writer = FileSessionWriter(tmp_path)
     run = replace(sample_run_meta(), calibration=calibration(matrix))
-    writer.start(meta(), run, positions)
+    writer.start(meta(), run)
     writer.set_t0(time.perf_counter(), "2026-10-13T12:00:01Z")
     for seq, box in enumerate(boxes):
         writer.frame(rec(seq))
-        writer.tracks(seq, [TrackObs(1, box, 0.9, None)])
+        writer.tracks(seq, [placed(box, positions)])
     writer.close("ended", RunCounts(len(boxes), len(boxes), 0, 0))
     folder = writer.dir / "runs" / run.run_id
     read = lambda name: list(csv.DictReader(open(folder / name, newline="", encoding="utf-8")))  # noqa: E731
@@ -141,12 +152,13 @@ def test_a_raising_projector_gives_empty_positions_and_one_rate_limited_event(tm
 def test_a_bad_track_row_does_not_stop_the_writer_or_lose_its_frame(tmp_path):
     writer = FileSessionWriter(tmp_path)
     run = replace(sample_run_meta(), calibration=calibration())
-    writer.start(meta(), run, CalibrationPositions(calibration()))
+    positions = CalibrationPositions(calibration())
+    writer.start(meta(), run)
     writer.set_t0(time.perf_counter(), "2026-10-13T12:00:01Z")
     for seq in range(3):
         writer.frame(rec(seq))
         confidence = "not a number" if seq == 1 else 0.9
-        writer.tracks(seq, [TrackObs(1, (0, 0, 40, 50), confidence, None)])
+        writer.tracks(seq, [placed((0, 0, 40, 50), positions, confidence=confidence)])
     writer.close("ended", RunCounts(3, 3, 0, 0))
 
     folder = writer.dir / "runs" / run.run_id
@@ -167,7 +179,14 @@ def test_the_writer_does_not_import_the_calibration_package():
     assert not hasattr(writer_module, "CalibrationPositions")
 
 
-def test_a_calibrated_run_without_positions_is_refused(tmp_path):
+def test_a_calibrated_row_that_was_never_placed_is_empty_and_counted(tmp_path):
     run = replace(sample_run_meta(), calibration=calibration())
-    with pytest.raises(ValueError, match="needs positions"):
-        FileSessionWriter(tmp_path).start(meta(), run)
+    writer = FileSessionWriter(tmp_path)
+    writer.start(meta(), run)
+    writer.set_t0(time.perf_counter(), "2026-10-13T12:00:01Z")
+    writer.tracks(0, [TrackObs(1, (0, 0, 40, 50), 0.9, None)])
+    writer.close("ended", RunCounts(1, 1, 0, 0))
+    with (writer.dir / "runs" / run.run_id / "tracks.csv").open(newline="") as stream:
+        [row] = list(csv.DictReader(stream))
+    assert row["x_m"] == row["y_m"] == row["in_court"] == "" and row["calibration_id"]
+    assert writer.unprojected == 1

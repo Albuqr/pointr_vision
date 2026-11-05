@@ -20,6 +20,8 @@ from services.edge.capture.health import HealthConfig, HealthMonitor
 from services.edge.capture.types import FrameSource, HealthEvent, SourceInfo, utc_now
 from services.edge.contract import VIDEO_FILE
 from services.edge.perception.loop import Processor
+from services.edge.perception.types import TrackObs
+from services.edge.placement import Placer
 from services.edge.power import read_power
 from services.edge.recording.types import Recorder
 from services.edge.session.types import (
@@ -83,7 +85,7 @@ class CameraPipeline:
         detector=None,
         tracker=None,
         calibration: Calibration | None = None,
-        positions=None,
+        placer: Placer | None = None,
         on_event: OnEvent | None = None,
         on_failure: OnFailure | None = None,
     ):
@@ -96,7 +98,7 @@ class CameraPipeline:
         recorder = input.recorder if isinstance(input, LiveInput) else None
         self._recorder = recorder
         self.calibration = calibration
-        self._positions = positions
+        self._placer = placer  # a calibrated camera's box-to-position rule
         self._replay = isinstance(input, ReplayInput)
         self._started = False
         self._on_event = on_event or (lambda ev, t0: None)
@@ -137,13 +139,10 @@ class CameraPipeline:
         the recorder. Raises OSError when the session cannot be written."""
         if self.calibration is not None:
             run = dataclasses.replace(run, calibration=self.calibration.run_block())
-        # positions only for a calibrated run: an uncalibrated run keeps the two-argument call
         session_dir = self._input.session_dir if isinstance(self._input, ReplayInput) else None
         meta = self._input.meta
         if session_dir is not None:
-            self._writer.start_run(session_dir, run, self._positions)
-        elif self._positions:
-            self._writer.start(meta, run, self._positions)
+            self._writer.start_run(session_dir, run)
         else:
             self._writer.start(meta, run)
         if self._recorder:
@@ -171,15 +170,7 @@ class CameraPipeline:
         in the wrong place, so the camera fails loudly. A later change (a reconnect at another
         resolution) stops the positions and is an event; the rows stay. Return whether this is the
         first-frame failure so its frame and track rows can be queued before stopping the run."""
-        size = self.calibration.run_block()["image_size"]
-        height, width = p.frame.image.shape[:2]
-        if (width, height) == (size["width"], size["height"]):
-            problem = None
-        else:
-            problem = (
-                f"frame size {width}x{height} differs from the calibration image size "
-                f"{size['width']}x{size['height']}"
-            )
+        problem = self._placer.size_problem(p.frame.image.shape[1::-1])
         first_frame = self._size_first
         self._size_first = False
         if first_frame and problem:
@@ -214,17 +205,25 @@ class CameraPipeline:
             else None,
             getattr(self._tracker, "match_seq", None),  # a group's CameraTracker; else None
         )
-        no_positions, first_size_mismatch = (
-            self._frame_size_problem(p) if self.calibration is not None else (None, False)
+        problem, first_size_mismatch = (
+            self._frame_size_problem(p) if self._placer is not None else (None, False)
         )
         writer.frame(rec)
         if p.tracks:
-            if no_positions:
-                writer.tracks(p.frame.seq, p.tracks, no_positions)
-            else:
-                writer.tracks(p.frame.seq, p.tracks)
+            writer.tracks(p.frame.seq, self._placed(p))
         if first_size_mismatch:
-            raise RuntimeError(f"calibration cannot be used: the first {no_positions}")
+            raise RuntimeError(f"calibration cannot be used: the first {problem}")
+
+    def _placed(self, p) -> list[TrackObs]:
+        """The frame's tracks with their placement. A group's tracker has placed them already
+        (the matcher needs the positions first); they are not projected a second time."""
+        if self._placer is None:
+            return p.tracks
+        size = p.frame.image.shape[1::-1]
+        return [
+            t if t.placement else dataclasses.replace(t, placement=self._placer.place(t.xyxy, size))
+            for t in p.tracks
+        ]
 
     def hud(self) -> HudInfo:
         latest = self._processor.latest

@@ -1658,3 +1658,20 @@ one timeout, and a camera that never gets one is marked failed while the process
 process that has to be killed is killed for all its cameras. The runbook's memory figures were
 measured with one process per camera and are marked as not re-measured.
 **Status.** Accepted. Supersedes the single-camera process path of D-022.
+
+## D-074 · 2026-11-05 · One home for track position: a Placer decides, the writer formats (#123)
+
+**Context.** The bottom-centre formula was written in three places, the frame-size guard in two
+(its reason passed to the writer through `tracks(no_positions=...)`), a calibrated run's pairing of
+`calibration` and `positions` was checked twice in the writer, and in a group each box was projected
+once for the matcher and again in the writer thread. Two Protocols were named `PositionMap`.
+**Decision.** `services/edge/placement.py` holds `bottom_centre`, `Placement` (position, in_court,
+or the reason there is none) and `Placer` (the size rule and the projection, never raising). The
+tracker (group) or the pipeline (solo) puts a `Placement` on each `TrackObs` once per frame; the
+matcher reads `placement.xy`; the writer only formats it and no longer takes `positions` or
+`no_positions`. The report's Protocol is renamed `MovementMap` (units and thresholds); `PositionMap`
+is the projection map in `placement.py` only.
+**Consequences.** No contract change: `tracks.csv` rows are identical, including empty positions
+and their reasons. `SessionWriter.start`, `start_run` and `tracks` lose a parameter
+(ARCHITECTURE section 4).
+**Status.** Accepted.

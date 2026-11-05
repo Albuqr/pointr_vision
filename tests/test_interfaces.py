@@ -34,14 +34,14 @@ EXPECTED = {
     Detector: {"detect": ["frame"]},
     Tracker: {"update": ["dets", "frame"]},
     SessionWriter: {
-        "start": ["meta", "run", "positions"],
-        "start_run": ["session_dir", "run", "positions"],
+        "start": ["meta", "run"],
+        "start_run": ["session_dir", "run"],
         "set_t0": ["t0", "t0_wall"],
         "set_final": ["blocks"],
         "set_ready": ["step", "t_wall", "t_pc"],
         "set_recording_sha256": ["sha256"],
         "frame": ["rec"],
-        "tracks": ["seq", "obs", "no_positions"],
+        "tracks": ["seq", "obs"],
         "event": ["ev"],
         "close": ["status", "counts"],
     },
@@ -173,9 +173,11 @@ def test_frame_record_matches_frames_csv_columns():
 
 def test_track_obs_matches_tracks_csv_columns():
     """seq comes from SessionWriter.tracks(); athlete_id, player_number and id_source are filled
-    in later phases; link is a TrackObs field (the matcher's, R2a 05) that sits after id_source."""
+    in later phases; link is a TrackObs field (the matcher's, R2a 05) that sits after id_source;
+    placement is the verdict behind the x_m .. in_court cells (D-074), not a column itself."""
     fields = field_names(TrackObs)
     fields.remove("link")
+    fields.remove("placement")
     i = fields.index("xyxy")
     fields[i : i + 1] = ["x1", "y1", "x2", "y2"]
     assert [

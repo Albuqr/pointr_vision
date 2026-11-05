@@ -15,6 +15,7 @@ from services.edge import contract
 from services.edge.calibration.court import Court, court_model
 from services.edge.calibration.homography import check_homography
 from services.edge.capture.types import HealthEvent, utc_now
+from services.edge.placement import Placer
 
 
 @dataclass(frozen=True)
@@ -193,10 +194,10 @@ class Calibration:
             "court": {**self._court_block(), "kind": self.court_type, "landmarks": self.landmarks},
         }
 
-    def positions(self):
+    def placer(self):
         from services.edge.calibration.homography import CalibrationPositions
 
-        return CalibrationPositions(self.run_block())
+        return Placer(CalibrationPositions(self.run_block()), self.image_size)
 
 
 @dataclass(frozen=True)

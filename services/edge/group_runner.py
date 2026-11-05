@@ -34,6 +34,7 @@ from services.edge.capture.health import HealthConfig
 from services.edge.capture.types import Frame, FrameSource, HealthEvent, SourceInfo, utc_now
 from services.edge.matcher import CourtMatcher, CrossCameraMatcher, LocalTrack
 from services.edge.perception.types import Detections, Detector, Tracker, TrackObs
+from services.edge.placement import Placer
 from services.edge.recording.recorder import FileRecorder
 from services.edge.replay.order import MatcherOrder
 from services.edge.replay.resolve import ReplayTarget
@@ -128,9 +129,9 @@ class MatchNumbers:
 
 class CameraTracker:
     """A camera's own tracker, writing the matcher's group track IDs and links instead of its
-    local ones. `positions` (a calibrated camera's PositionMap) gives each track's court position
-    for the matcher; `image_size` is the size the calibration was made at, and a frame of another
-    size has no positions (the writer leaves them empty too). Each track also reports its
+    local ones. `placer` (a calibrated camera's Placer) gives each track its court position for
+    the matcher and leaves the placement on the track, so the pipeline does not project it again;
+    a frame of another size than the calibration's has no positions. Each track also reports its
     appearance, from its box in the frame. `match_seq` is the number of the matcher call of the
     frame last updated, None if it made none (frames.csv `match_seq`)."""
 
@@ -139,24 +140,15 @@ class CameraTracker:
         tracker,
         camera_id: str,
         matcher: CrossCameraMatcher,
-        positions=None,
-        image_size: tuple[int, int] | None = None,
+        placer: Placer | None = None,
         order: MatcherOrder | None = None,
         numbers: MatchNumbers | None = None,
     ):
         self._tracker, self._camera_id, self._matcher = tracker, camera_id, matcher
-        self._positions, self._image_size = positions, image_size
+        self._placer = placer
         self._order = order  # a group replay: the live run's group time, in its order
         self._numbers = numbers or MatchNumbers()  # shared by the cameras of a group run
         self.match_seq: int | None = None
-
-    def _court_xy(self, box, frame: Frame):
-        if self._positions is None or frame.image.shape[1::-1] != self._image_size:
-            return None
-        try:
-            return self._positions((box[0] + box[2]) / 2, box[3])
-        except Exception:  # a point that cannot be projected is a track without a position
-            return None
 
     def update(self, dets: Detections, frame: Frame) -> list[TrackObs]:
         self.match_seq = None
@@ -169,8 +161,15 @@ class CameraTracker:
 
     def _update(self, dets: Detections, frame: Frame) -> list[TrackObs]:
         tracks = self._tracker.update(dets, frame)
+        if self._placer is not None:
+            size = frame.image.shape[1::-1]
+            tracks = [
+                dataclasses.replace(t, placement=self._placer.place(t.xyxy, size)) for t in tracks
+            ]
         local = [
-            LocalTrack(t.track_id, self._court_xy(t.xyxy, frame), describe(frame.image, t.xyxy))
+            LocalTrack(
+                t.track_id, t.placement.xy if t.placement else None, describe(frame.image, t.xyxy)
+            )
             for t in tracks
         ]
         try:  # also with no tracks: the camera reported
@@ -276,7 +275,7 @@ def run_group(
             for cam, info in zip(cameras, infos, strict=True)
         ]
         calibrations = [
-            (i.calibration, i.calibration.positions() if i.calibration else None) for i in intakes
+            (i.calibration, i.calibration.placer() if i.calibration else None) for i in intakes
         ]
         shared_detector = detector if solo or detector is None else SharedDetector(detector)
         if detector is not None and matcher is None and not solo:
@@ -335,19 +334,16 @@ def run_group(
                     make_tracker(cam.camera_id),
                     cam.camera_id,
                     matcher,
-                    positions,
-                    calibration and calibration.image_size,
+                    placer,
                     order,
                     numbers,
                 ),
                 calibration=calibration,
-                positions=positions,
+                placer=placer,
                 on_event=functools.partial(report, cam.camera_id),
                 on_failure=failed(cam.camera_id),
             )
-            for cam, input, (calibration, positions) in zip(
-                cameras, inputs, calibrations, strict=True
-            )
+            for cam, input, (calibration, placer) in zip(cameras, inputs, calibrations, strict=True)
         ]
         runs = [make_run(c, info) for c, info in zip(camera_ids, infos, strict=True)]
         group = (

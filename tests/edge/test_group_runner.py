@@ -19,6 +19,7 @@ from services.edge.group_runner import CameraTracker, GroupCamera, run_group
 from services.edge.matcher import CourtMatcher, GroupTrack, MatcherParams
 from services.edge.perception.loop import NO_DETECTIONS
 from services.edge.perception.types import Detections
+from services.edge.placement import Placer
 from services.edge.run.meta import run_meta
 from services.edge.session import writer as writer_mod
 from services.edge.session.writer import FileSessionWriter
@@ -370,9 +371,25 @@ class RecordingMatcher:
         return {}
 
 
+class LambdaMap:
+    """A PositionMap made from a function."""
+
+    calibration_id = "test"
+
+    def __init__(self, project):
+        self.project = project
+
+    def __call__(self, x, y):
+        return self.project(x, y)
+
+    def in_court(self, x, y):
+        return True
+
+
 def camera_tracker(positions, size=(640, 360)):
     matcher = RecordingMatcher()
-    tracker = CameraTracker(OneTrackPerDetection(), "cam1", matcher, positions, size)
+    placer = Placer(LambdaMap(positions), size) if positions else None
+    tracker = CameraTracker(OneTrackPerDetection(), "cam1", matcher, placer)
     return tracker, matcher
 
 
