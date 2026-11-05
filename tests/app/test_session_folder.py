@@ -268,7 +268,7 @@ def test_a_cut_off_last_row_is_skipped_counted_and_said(tmp_path):
     frames = read_frames(run)
     assert [r["seq"] for r in frames.rows] == ["0", "1"]
     assert frames.skipped == 1
-    assert frames.problems == ("frames.csv: skipped 1 truncated row(s)",)
+    assert frames.problems == ("frames.csv: skipped 1 row(s) with the wrong cell count",)
 
 
 def test_an_intact_file_reports_no_problem_and_empty_cells_are_data(tmp_path):
@@ -324,3 +324,11 @@ def test_damage_verdicts_are_fields_not_wording(tmp_path):
     session = read_session(tmp_path)
     assert session.skipped_events == 2 and session.live_run.calibration_damaged
     assert mark_interrupted(session) == session.problems  # refuses to erase the evidence
+
+
+def test_a_file_that_stops_being_csv_says_how_much_was_lost(tmp_path):
+    huge = "x" * 200_000  # beyond the csv module's field limit
+    run = _run_dir(tmp_path, HEADER + "0,0.1,0.0,1\n" + huge + "\n1,0.2,0.0,2\n")
+    frames = read_frames(run)
+    assert [r["seq"] for r in frames.rows] == ["0"]
+    assert frames.problems == ("frames.csv: unreadable after 1 row(s); the rest is lost",)

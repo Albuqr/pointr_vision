@@ -171,6 +171,8 @@ def frame_times(run: Path) -> dict[int, float]:
         rows = read_frames(run).rows
     except FileNotFoundError:
         raise ScoreError(f"{run} has no frames.csv") from None
+    except OSError as error:
+        raise ScoreError(f"{run / 'frames.csv'} cannot be read: {error}") from error
     times = {int(r["seq"]): float(r["t_video"]) for r in rows if r.get("t_video")}
     if not times:
         raise ScoreError(
@@ -256,7 +258,7 @@ def score_h3b(folder: Path, run_id: str | None = None) -> H3b | None:
     returns = sorted((lab for lab in labels if lab.event == "return"), key=lambda x: x.time_s)
     try:
         track_rows = read_tracks(run).rows
-    except FileNotFoundError:
+    except OSError:  # absent (identity layer not run yet) or unreadable: not scorable
         return None
     if not returns:
         return None

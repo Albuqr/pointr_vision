@@ -138,11 +138,14 @@ def _read(path: Path, filename: str):
         return None, [f"{filename}: {error}"]
 
 
-def _field(value, key, kind, problems, filename):
+def _field(value, key, kind, problems, filename) -> bool:
+    """Normalize a field; True when it was not readable."""
     item = value.get(key)
-    if not isinstance(item, kind):
-        value[key] = None
-        problems.append(_unreadable(filename, key))
+    if isinstance(item, kind):
+        return False
+    value[key] = None
+    problems.append(_unreadable(filename, key))
+    return True
 
 
 def _unreadable(filename, key):
@@ -171,11 +174,12 @@ def read_session_for_update(path: Path | str) -> dict:
 def read_run(path: Path | str) -> RunSnapshot:
     path = Path(path)
     value, problems = _read(path, "run.json")
+    damaged = False
     if value is not None:
         for key in ("ready", "counts", "calibration", "group", "capture", "detection", "recording"):
             if key in ("ready", "counts") or value.get(key) is not None:
-                _field(value, key, dict, problems, "run.json")
-    damaged = any(p == _unreadable("run.json", "calibration") for p in problems)
+                if _field(value, key, dict, problems, "run.json") and key == "calibration":
+                    damaged = True
     return RunSnapshot(path, _snapshot_data(value, problems, "run.json"), tuple(problems), damaged)
 
 
@@ -229,37 +233,52 @@ TRACKS_FILE = "tracks.csv"
 class Rows:
     """The complete rows of one run CSV, read by its own header.
 
-    One policy for damage: a row cut off by a crash (fewer cells than the header, or more) is not
-    returned; it is counted in `skipped` and said in `problems` ("absence is data").
+    One policy for damage: a row whose cell count differs from the header (a crash cuts the last
+    one) is not returned; it is counted in `skipped` and said in `problems`. A file that stops
+    being readable as CSV keeps the rows before that point and says so in `unreadable_after`
+    ("absence is data").
     """
 
     name: str
     columns: tuple[str, ...]
     rows: tuple[dict[str, str], ...]
     skipped: int = 0
+    unreadable_after: int | None = None  # rows read before the CSV became unreadable
 
     @property
     def problems(self) -> tuple[str, ...]:
-        if not self.skipped:
-            return ()
-        return (f"{self.name}: skipped {self.skipped} truncated row(s)",)
+        found = []
+        if self.skipped:
+            found.append(f"{self.name}: skipped {self.skipped} row(s) with the wrong cell count")
+        if self.unreadable_after is not None:
+            found.append(
+                f"{self.name}: unreadable after {self.unreadable_after} row(s); the rest is lost"
+            )
+        return tuple(found)
+
+
+def _whole(values, columns) -> bool:
+    """The one test of a complete row: as many cells as the header."""
+    return len(values) == len(columns)
 
 
 def _read_rows(path: Path) -> Rows:
     """Raises OSError when the file is absent or unreadable."""
-    rows, skipped = [], 0
+    rows, skipped, unreadable_after = [], 0, None
     with open(path, newline="", encoding="utf-8-sig") as stream:
-        reader = csv.DictReader(stream)
-        columns = tuple(reader.fieldnames or ())
+        reader = csv.reader(stream)
+        columns = tuple(next(reader, ()))
         try:
-            for row in reader:
-                if None in row or None in row.values():  # DictReader's marks for a cut-off row
-                    skipped += 1
+            for values in reader:
+                if not values:  # a blank line
+                    continue
+                if _whole(values, columns):
+                    rows.append(dict(zip(columns, values, strict=True)))
                 else:
-                    rows.append(row)
+                    skipped += 1
         except csv.Error:
-            skipped += 1  # unreadable from here on
-    return Rows(path.name, columns, tuple(rows), skipped)
+            unreadable_after = len(rows) + skipped
+    return Rows(path.name, columns, tuple(rows), skipped, unreadable_after)
 
 
 def read_frames(run_dir: Path | str) -> Rows:
@@ -324,7 +343,7 @@ class FrameTail:
             return
         if self._columns is None:
             self._columns = tuple(values)
-        elif len(values) == len(self._columns):
+        elif _whole(values, self._columns):
             self._rows.append(dict(zip(self._columns, values, strict=True)))
         else:
             self.skipped += 1

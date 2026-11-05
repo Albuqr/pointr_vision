@@ -580,7 +580,7 @@ def test_malformed_csv_rows_are_skipped_and_said(tmp_path):
     d = build_report(run_dir).to_dict()
     assert d["tracks"][0]["n_samples"] == 4 and d["session"]["n_processed"] == 6
     for name in ("frames.csv", "tracks.csv"):  # the reader's one policy, said per file
-        assert any(f"{name}: skipped 1 truncated row(s)" in c for c in d["caveats"])
+        assert any(f"{name}: skipped 1 row(s) with the wrong cell count" in c for c in d["caveats"])
     schema("report").validate(d)
 
 

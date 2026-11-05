@@ -1696,5 +1696,5 @@ field: `RunSnapshot.calibration_damaged`, `SessionSnapshot.skipped_events`. `Ses
 **Consequences.** No file format change, no contract bump. A cut-off last row no longer blanks the
 launcher's fps (it is computed from the complete rows) and the report notes now say the reader's
 "skipped N truncated row(s)" per file; rows that are whole but do not parse are still counted by
-the report. `scoring` prints the same note. `shots.csv` is not covered (score only).
+the report. `score` prints the same note and the Studio status carries `frame_rows_skipped`. Group replay does not yet report skipped rows of the live run (BACKLOG). `shots.csv` is not covered (score only).
 **Status.** Accepted.

@@ -286,7 +286,7 @@ class Studio:
         for child in getattr(launcher, "children", []):
             progress = child.progress()
             snapshot = read_session(progress.session_dir) if progress.session_dir else None
-            frames = self.recent_frames(snapshot)
+            frames, frames_skipped = self.recent_frames(snapshot)
             live = self.read_live(progress.confirmed_preview_port)
             view = camera_view(progress, snapshot, frames, live)
             log = self.log(view.camera_id)
@@ -294,6 +294,7 @@ class Studio:
             cameras.append(
                 {
                     "camera_id": view.camera_id,
+                    "frame_rows_skipped": frames_skipped,  # damaged frames.csv rows, not shown
                     "name": view.name,
                     "state": view.state,
                     "processed_fps": view.processed_fps,
@@ -346,11 +347,11 @@ class Studio:
         grown since the previous poll."""
         run = snapshot.latest_run if snapshot else None
         if run is None:
-            return []
+            return [], 0
         tail = self.frame_cache.get(str(run.path))
         if tail is None:
             tail = self.frame_cache[str(run.path)] = FrameTail(run.path)
-        return tail.poll()
+        return tail.poll(), tail.skipped
 
     def test_camera(self, camera_id, duration=3.0):
         with self.lock:

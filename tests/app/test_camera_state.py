@@ -101,6 +101,7 @@ def test_a_camera_that_died_without_ending_its_session_is_an_error(client, tmp_p
     first.running = False  # the process is gone and session.json still says running
     camera = client.get("/api/status").json()["cameras"][0]
     assert camera["state"] == "error" and camera["error"]
+    assert camera["frame_rows_skipped"] == 0
 
 
 @pytest.mark.parametrize("has_session, exit_code", [(True, 7), (False, None)])
